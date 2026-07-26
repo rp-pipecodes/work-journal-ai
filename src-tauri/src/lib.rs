@@ -1,8 +1,12 @@
+mod hotkey;
+
+use hotkey::HotkeyStatus;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 const NEW_NOTE_MENU_ITEM: &str = "new-note";
@@ -25,9 +29,14 @@ pub fn run() {
     tauri::Builder::default()
         // Registered first, deliberately: a second launch must exit here,
         // before it can build a second tray icon or fail to register the
-        // Hotkey. Showing a capture window in the surviving instance is a
-        // later ticket's job.
-        .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
+        // Hotkey. It is an Entry Point rather than a no-op, so launching the
+        // app while it is running starts a Capture in the surviving instance
+        // instead of appearing to fail silently.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Err(error) = show_capture_window(app) {
+                log::error!("could not show the capture window on relaunch: {error}");
+            }
+        }))
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -36,7 +45,7 @@ pub fn run() {
                 .add_migrations(DATABASE_URL, migrations())
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![dismiss_capture])
+        .invoke_handler(tauri::generate_handler![dismiss_capture, hotkey_status])
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -54,6 +63,7 @@ pub fn run() {
             // webview costs a few hundred milliseconds a Capture cannot afford.
             build_capture_window(app.handle())?;
             build_tray(app.handle())?;
+            register_hotkey(app.handle());
 
             Ok(())
         })
@@ -96,11 +106,53 @@ fn show_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
         return Ok(());
     };
 
+    // Dismissing a Capture hides the whole app to hand focus back, so the app
+    // itself has to be brought out of hiding before its window can be seen.
+    #[cfg(target_os = "macos")]
+    app.show()?;
+
     window.show()?;
     window.set_focus()?;
     window.emit(CAPTURE_SHOWN_EVENT, ())?;
 
     Ok(())
+}
+
+/// Registers the Hotkey and records the outcome where the rest of the app can
+/// read it. A registration macOS withholds must not take the app down with it:
+/// the Tray Menu still starts a Capture, and Settings reports the failure later.
+fn register_hotkey(app: &tauri::AppHandle) {
+    let handle = app.clone();
+    let status = hotkey::register(hotkey::DEFAULT_HOTKEY, |accelerator| {
+        app.global_shortcut()
+            .on_shortcut(accelerator, move |_app, _shortcut, event| {
+                // Press and release both arrive; one Capture per press.
+                if event.state() != ShortcutState::Pressed {
+                    return;
+                }
+
+                if let Err(error) = show_capture_window(&handle) {
+                    log::error!("could not show the capture window: {error}");
+                }
+            })
+    });
+
+    if let HotkeyStatus::Unavailable {
+        accelerator,
+        reason,
+    } = &status
+    {
+        log::error!("the Hotkey {accelerator} is unavailable: {reason}");
+    }
+
+    app.manage(status);
+}
+
+/// The Hotkey's availability, for whichever window asks — Settings, once it
+/// exists, reports a failed registration to the user.
+#[tauri::command]
+fn hotkey_status(status: tauri::State<'_, HotkeyStatus>) -> HotkeyStatus {
+    status.inner().clone()
 }
 
 /// Ends a Capture, whether it committed a Note or discarded one. The window is

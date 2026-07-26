@@ -21,3 +21,13 @@ OS integrations that an automated test could only assert mocks against. Run thes
 - [ ] Pasting multi-line text into the field leaves a single line.
 - [ ] Re-opening **New Note** after abandoning a Capture shows an empty field.
 - [ ] Notes committed before quitting are still there after relaunching the app, and after a restart of the machine.
+
+## The Hotkey and relaunch
+
+- [ ] `Ctrl+Opt+Cmd+J` starts a Capture from a browser, from an editor, and from the Finder — the field is focused and empty each time.
+- [ ] The keystroke does not reach the application that was in front (it is intercepted, not passed through).
+- [ ] Holding the Hotkey down starts exactly one Capture.
+- [ ] Pressing the Hotkey while a Capture is already open leaves one capture window.
+- [ ] Launching the app from Spotlight while it is running opens a capture window instead of a second instance.
+- [ ] With the Hotkey registration denied — revoke Accessibility for the app in System Settings → Privacy & Security — the app still launches, the tray icon appears, and **New Note** still starts a Capture.
+- [ ] In that state the log records the failed registration with a reason, and nothing hangs at startup.
