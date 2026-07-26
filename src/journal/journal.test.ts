@@ -3,6 +3,7 @@ import {
   createJournal,
   decideArrival,
   decideKeystroke,
+  describeCopiedDigest,
   filterForJournalDay,
   filterForRange,
   formatJournalDay,
@@ -521,6 +522,162 @@ describe('notesForFilter', () => {
     })
 
     expect(notes.map((note) => note.body)).toEqual(['wednesday'])
+  })
+})
+
+describe('digest', () => {
+  it('renders one bullet per Note, oldest first and without timestamps', async () => {
+    const { journal, clock } = await journalAt('2026-03-13T09:00:00')
+
+    await journal.capture('first')
+    clock.set(local('2026-03-13T11:00:00'))
+    await journal.capture('second')
+
+    const digest = await journal.digest({
+      from: '2026-03-13',
+      to: '2026-03-13',
+    })
+
+    expect(digest.markdown).toBe('- first\n- second')
+  })
+
+  it('reads in the reverse order of the list on screen', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+
+    await journal.capture('wednesday')
+    clock.set(local('2026-03-13T09:00:00'))
+    await journal.capture('friday')
+
+    const filter = { from: '2026-03-11', to: '2026-03-13' }
+    const onScreen = await journal.notesForFilter(filter)
+    const digest = await journal.digest(filter)
+
+    expect(onScreen.map((note) => note.body)).toEqual(['friday', 'wednesday'])
+    expect(digest.markdown.indexOf('wednesday')).toBeLessThan(
+      digest.markdown.indexOf('friday'),
+    )
+  })
+
+  it('gives a single-day Filter no heading at all', async () => {
+    const { journal } = await journalAt('2026-03-13T09:00:00')
+
+    await journal.capture('took the on-call handover')
+
+    const digest = await journal.digest({
+      from: '2026-03-13',
+      to: '2026-03-13',
+    })
+
+    expect(digest.markdown).toBe('- took the on-call handover')
+  })
+
+  it('heads each Occupied Day of a multi-day Filter, and no empty day', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+
+    await journal.capture('the migration landed')
+    clock.set(local('2026-03-11T15:00:00'))
+    await journal.capture('pairing with Ana')
+    // Nothing on the 12th: an empty day produces no heading.
+    clock.set(local('2026-03-13T09:00:00'))
+    await journal.capture('took the on-call handover')
+
+    const digest = await journal.digest({
+      from: '2026-03-11',
+      to: '2026-03-13',
+    })
+
+    expect(digest.markdown).toBe(
+      [
+        '## Wed 11 Mar',
+        '- the migration landed',
+        '- pairing with Ana',
+        '',
+        '## Fri 13 Mar',
+        '- took the on-call handover',
+      ].join('\n'),
+    )
+  })
+
+  it('heads the one Occupied Day of a multi-day Filter', async () => {
+    const { journal } = await journalAt('2026-03-13T09:00:00')
+
+    await journal.capture('the only day with anything on it')
+
+    const digest = await journal.digest({
+      from: '2026-03-09',
+      to: '2026-03-13',
+    })
+
+    expect(digest.markdown).toBe(
+      '## Fri 13 Mar\n- the only day with anything on it',
+    )
+  })
+
+  it('counts exactly as many Notes as it renders bullets', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+
+    for (const day of ['11', '12', '13']) {
+      clock.set(local(`2026-03-${day}T09:00:00`))
+      await journal.capture(`the ${day}th`)
+      await journal.capture(`the ${day}th again`)
+    }
+
+    const digest = await journal.digest({
+      from: '2026-03-11',
+      to: '2026-03-13',
+    })
+
+    const bullets = digest.markdown
+      .split('\n')
+      .filter((line) => line.startsWith('- '))
+
+    expect(digest.noteCount).toBe(6)
+    expect(bullets).toHaveLength(digest.noteCount)
+  })
+
+  it('renders nothing at all for a Filter no Note falls under', async () => {
+    const { journal } = await journalAt('2026-03-13T09:00:00')
+
+    await journal.capture('friday')
+
+    const digest = await journal.digest({
+      from: '2026-03-14',
+      to: '2026-03-15',
+    })
+
+    expect(digest).toEqual({ markdown: '', noteCount: 0 })
+  })
+})
+
+describe('describeCopiedDigest', () => {
+  it('reports as many Notes as the Digest has bullets', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+
+    await journal.capture('the migration landed')
+    clock.set(local('2026-03-13T09:00:00'))
+    await journal.capture('took the on-call handover')
+
+    const digest = await journal.digest({
+      from: '2026-03-11',
+      to: '2026-03-13',
+    })
+    const bullets = digest.markdown
+      .split('\n')
+      .filter((line) => line.startsWith('- '))
+
+    expect(describeCopiedDigest(digest)).toBe(`Copied ${bullets.length} Notes.`)
+  })
+
+  it('says Note rather than Notes for a single one', () => {
+    expect(describeCopiedDigest({ markdown: '- alone', noteCount: 1 })).toBe(
+      'Copied 1 Note.',
+    )
+  })
+
+  it('claims no copy at all when the Filter held nothing', () => {
+    expect(describeCopiedDigest({ markdown: '', noteCount: 0 })).toBe(
+      'No Notes to copy.',
+    )
   })
 })
 

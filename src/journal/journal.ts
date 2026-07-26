@@ -41,6 +41,18 @@ export interface Filter {
   to: string
 }
 
+/**
+ * A Filter rendered as Markdown, with the number of Notes that went into it —
+ * the journal's only output, and the count the reader is told after copying so
+ * they know it worked before they paste.
+ */
+export interface Digest {
+  /** Plain Markdown: no app-specific formatting, nothing to clean up. */
+  markdown: string
+  /** Exactly the number of bullets in `markdown`. */
+  noteCount: number
+}
+
 /** What a keystroke during a Capture means. */
 export type KeystrokeDecision = 'commit' | 'discard' | 'ignore'
 
@@ -102,6 +114,12 @@ export interface Journal {
    * standup wants, and the reverse of a Digest's.
    */
   notesForFilter(filter: Filter): Promise<Note[]>
+  /**
+   * The Filter as Markdown to paste elsewhere. Oldest first — the reverse of
+   * what the list shows, because scanning wants recency and narrative wants
+   * chronology.
+   */
+  digest(filter: Filter): Promise<Digest>
 }
 
 interface NoteRow {
@@ -161,6 +179,13 @@ const SELECT_NOTES_FOR_FILTER = `
   ${SELECT_NOTES}
   WHERE journal_day BETWEEN ? AND ?
   ORDER BY journal_day DESC, captured_at DESC, id DESC
+`
+
+/** The same rows as a Filter's, in the order a Digest reads in. */
+const SELECT_NOTES_FOR_DIGEST = `
+  ${SELECT_NOTES}
+  WHERE journal_day BETWEEN ? AND ?
+  ORDER BY journal_day ASC, captured_at ASC, id ASC
 `
 
 export function createJournal({
@@ -268,7 +293,67 @@ export function createJournal({
       ])
       return rows.map(toNote)
     },
+
+    async digest(filter) {
+      const rows = await driver.select<NoteRow>(SELECT_NOTES_FOR_DIGEST, [
+        filter.from,
+        filter.to,
+      ])
+      return renderDigest(filter, rows.map(toNote))
+    },
   }
+}
+
+/**
+ * Notes as Markdown, oldest first, one bullet each and no timestamps — a
+ * Digest is meant to paste into a standup thread or an LLM prompt with no
+ * cleanup, so it carries nothing the app knows and the reader does not need.
+ *
+ * Headings are decided by the Filter rather than by the Notes: a single day is
+ * the common case and pastes without ceremony, while any wider Filter says
+ * which day each bullet belongs to. Days with no Notes are simply absent.
+ *
+ * `notes` must already be in Digest order, which is what the core's read does.
+ */
+function renderDigest(filter: Filter, notes: Note[]): Digest {
+  const spansDays = filter.from !== filter.to
+  const days = groupByJournalDay(notes)
+
+  const markdown = days
+    .map((day) => {
+      const bullets = day.notes.map((note) => `- ${note.body}`).join('\n')
+      return spansDays
+        ? `## ${formatDigestDay(day.journalDay)}\n${bullets}`
+        : bullets
+    })
+    .join('\n\n')
+
+  return { markdown, noteCount: notes.length }
+}
+
+/**
+ * What a copied Digest is worth saying back: how many Notes went to the
+ * clipboard, so the reader knows it worked before they paste. An empty Filter
+ * says so rather than claiming a copy that carried nothing.
+ */
+export function describeCopiedDigest(digest: Digest): string {
+  if (digest.noteCount === 0) {
+    return 'No Notes to copy.'
+  }
+  return `Copied ${digest.noteCount} Note${digest.noteCount === 1 ? '' : 's'}.`
+}
+
+/**
+ * A Journal Day as a Digest heading: short enough to read as a date in a
+ * standup thread. In UTC for the same reason as `formatJournalDay`.
+ */
+function formatDigestDay(journalDay: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: 'UTC',
+  }).format(new Date(journalDay))
 }
 
 /**

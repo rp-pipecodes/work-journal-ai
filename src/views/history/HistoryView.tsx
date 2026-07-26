@@ -14,17 +14,20 @@ import {
 import {
   decideArrival,
   decideKeystroke,
+  describeCopiedDigest,
   filterForJournalDay,
   filterForRange,
   formatJournalDay,
   formatTimeOfDay,
   groupByJournalDay,
+  type Digest,
   type Filter,
   type Journal,
   type JournalDayGroup,
   type Note,
 } from '@/journal/journal'
 import { journal, onNoteCaptured } from '@/journal/tauri-journal'
+import { copyToClipboard } from '@/lib/clipboard'
 
 /** What History has to show, once the core has been asked. */
 type History =
@@ -50,6 +53,13 @@ export default function HistoryView() {
   // Both are single: a list only ever has one correction in progress.
   const [editing, setEditing] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<Note | null>(null)
+  // The Filter as Markdown, kept ready rather than fetched on the click: the
+  // webview only allows a clipboard write while the click is still granting
+  // user activation, which no await survives.
+  const [digest, setDigest] = useState<Digest | null>(null)
+  // What the last copy did, said back to the reader so they know it worked
+  // before they paste. Nothing until they copy, and until they move the Filter.
+  const [confirmation, setConfirmation] = useState<string | null>(null)
   const page = useRef<HTMLDivElement>(null)
   // Reads can overlap — a Nudge acted on while a range change is still in
   // flight — and only the newest one may reach the screen.
@@ -70,8 +80,16 @@ export default function HistoryView() {
       const ticket = ++latestRead.current
       try {
         const core = await journal()
-        const days = groupByJournalDay(await core.notesForFilter(next))
-        if (latestRead.current === ticket) setHistory({ state: 'notes', days })
+        // The list and the Digest are the same Notes in opposite orders, and
+        // both are asked of the core: the list on screen is never the source
+        // of what gets copied.
+        const [notes, rendered] = await Promise.all([
+          core.notesForFilter(next),
+          core.digest(next),
+        ])
+        if (latestRead.current !== ticket) return
+        setHistory({ state: 'notes', days: groupByJournalDay(notes) })
+        setDigest(rendered)
       } catch (error) {
         giveUp(error, ticket)
       }
@@ -104,6 +122,8 @@ export default function HistoryView() {
       filterInView.current = next
       setFilter(next)
       setNudgedDay(null)
+      // A confirmation is about the Filter that was copied, not this one.
+      setConfirmation(null)
       void read(next)
     },
     [read],
@@ -191,6 +211,28 @@ export default function HistoryView() {
     void correct((core) => core.delete(note.id))
   }
 
+  /**
+   * The whole Filter on the clipboard, and a word back about what went there.
+   * The Digest is already in hand — see where it is read — so the write is the
+   * first thing the click does.
+   */
+  function copyDigest() {
+    if (digest === null) return
+
+    if (digest.noteCount === 0) {
+      setConfirmation(describeCopiedDigest(digest))
+      return
+    }
+
+    copyToClipboard(digest.markdown).then(
+      () => setConfirmation(describeCopiedDigest(digest)),
+      (error: unknown) => {
+        console.error('could not copy the Digest', error)
+        setConfirmation('Could not copy.')
+      },
+    )
+  }
+
   /** A cleared date input is a half-picked range, not a Filter over nothing. */
   function pick(from: string, to: string) {
     if (from === '' || to === '') return
@@ -204,7 +246,12 @@ export default function HistoryView() {
       onKeyDown={onKeyDown}
       className="flex h-screen flex-col bg-background outline-none"
     >
-      {filter !== null && <Range filter={filter} onPick={pick} />}
+      {filter !== null && (
+        <header className="flex shrink-0 items-center gap-3 px-6 py-4 text-xs text-muted-foreground">
+          <Range filter={filter} onPick={pick} />
+          <CopyDigest confirmation={confirmation} onCopy={copyDigest} />
+        </header>
+      )}
 
       <main className="flex-1 overflow-y-auto px-6 pb-5">
         {history.state === 'empty' && <EmptyState />}
@@ -430,7 +477,7 @@ function Range({
   onPick: (from: string, to: string) => void
 }) {
   return (
-    <header className="flex shrink-0 items-center gap-3 px-6 py-4 text-xs text-muted-foreground">
+    <>
       <End
         label="From"
         value={filter.from}
@@ -441,7 +488,32 @@ function Range({
         value={filter.to}
         onChange={(to) => onPick(filter.from, to)}
       />
-    </header>
+    </>
+  )
+}
+
+/**
+ * The journal's one output, and what it says it did. The confirmation is not a
+ * decoration: a clipboard write is invisible, so a count is how the reader
+ * knows it worked before they paste.
+ */
+function CopyDigest({
+  confirmation,
+  onCopy,
+}: {
+  confirmation: string | null
+  onCopy: () => void
+}) {
+  return (
+    <div className="ml-auto flex items-center gap-3">
+      {/* Empty until something has been copied, and announced when it is. */}
+      <span role="status" aria-live="polite">
+        {confirmation}
+      </span>
+      <Button variant="outline" size="sm" onClick={onCopy}>
+        Copy All
+      </Button>
+    </div>
   )
 }
 
