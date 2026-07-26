@@ -6,7 +6,9 @@
     "linux"
   ],
   "windows": [
-    "*"
+    "capture",
+    "history",
+    "settings"
   ],
   "permissions": [
     "global-shortcut:default",
