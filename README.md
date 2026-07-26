@@ -214,4 +214,4 @@ The eventual AI features are the reason Digest exists as a named concept: whatev
 
 ## License
 
-MIT. (Add the `LICENSE` file before making the repository public — without one, a public repo is still "all rights reserved.")
+MIT — see [LICENSE](./LICENSE).
