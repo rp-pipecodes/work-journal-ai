@@ -7,7 +7,8 @@ use serde::Serialize;
 
 /// Three modifiers, because a global registration intercepts the keystroke
 /// before the focused application sees it and this combination is unclaimed
-/// territory. `Alt` is macOS's Option. Remapping arrives with Settings.
+/// territory. `Alt` is how the OS spells Option. Remapping arrives with
+/// Settings.
 pub const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Cmd+J";
 
 /// Whether the Hotkey is available, and if not, why. Recorded at startup and
@@ -16,13 +17,14 @@ pub const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Cmd+J";
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum HotkeyStatus {
     Registered {
-        accelerator: String,
+        hotkey: String,
     },
-    /// macOS may withhold the permission registration needs, or the machine may
-    /// be managed. Every feature stays reachable through the Tray Menu, so this
-    /// is recorded rather than fatal.
+    /// macOS may withhold the permission registration needs, the combination
+    /// may already belong to another application, or the machine may be
+    /// managed. Every feature stays reachable through the Tray Menu, so this is
+    /// recorded rather than fatal.
     Unavailable {
-        accelerator: String,
+        hotkey: String,
         reason: String,
     },
 }
@@ -30,15 +32,15 @@ pub enum HotkeyStatus {
 /// Registers the Hotkey and reports the outcome. Never fails: a Hotkey that
 /// could not be registered leaves the app running with one Entry Point fewer.
 pub fn register<E: std::fmt::Display>(
-    accelerator: &str,
-    register: impl FnOnce(&str) -> Result<(), E>,
+    hotkey: &str,
+    registrar: impl FnOnce(&str) -> Result<(), E>,
 ) -> HotkeyStatus {
-    match register(accelerator) {
+    match registrar(hotkey) {
         Ok(()) => HotkeyStatus::Registered {
-            accelerator: accelerator.to_string(),
+            hotkey: hotkey.to_string(),
         },
         Err(error) => HotkeyStatus::Unavailable {
-            accelerator: accelerator.to_string(),
+            hotkey: hotkey.to_string(),
             reason: error.to_string(),
         },
     }
@@ -49,13 +51,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_successful_registration_records_the_accelerator() {
+    fn a_successful_registration_records_the_hotkey() {
         let status = register(DEFAULT_HOTKEY, |_| Ok::<(), String>(()));
 
         assert_eq!(
             status,
             HotkeyStatus::Registered {
-                accelerator: DEFAULT_HOTKEY.to_string(),
+                hotkey: DEFAULT_HOTKEY.to_string(),
             }
         );
     }
@@ -63,24 +65,24 @@ mod tests {
     #[test]
     fn a_failed_registration_records_the_reason_rather_than_panicking() {
         let status = register(DEFAULT_HOTKEY, |_| {
-            Err::<(), _>("accessibility permission withheld")
+            Err::<(), _>("the combination belongs to another application")
         });
 
         assert_eq!(
             status,
             HotkeyStatus::Unavailable {
-                accelerator: DEFAULT_HOTKEY.to_string(),
-                reason: "accessibility permission withheld".to_string(),
+                hotkey: DEFAULT_HOTKEY.to_string(),
+                reason: "the combination belongs to another application".to_string(),
             }
         );
     }
 
     #[test]
-    fn the_accelerator_asked_for_is_the_one_registered() {
+    fn the_hotkey_asked_for_is_the_one_registered() {
         let mut asked_for = None;
 
-        register("Ctrl+K", |accelerator| {
-            asked_for = Some(accelerator.to_string());
+        register("Ctrl+K", |hotkey| {
+            asked_for = Some(hotkey.to_string());
             Ok::<(), String>(())
         });
 

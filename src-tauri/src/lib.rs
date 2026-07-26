@@ -33,9 +33,7 @@ pub fn run() {
         // app while it is running starts a Capture in the surviving instance
         // instead of appearing to fail silently.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Err(error) = show_capture_window(app) {
-                log::error!("could not show the capture window on relaunch: {error}");
-            }
+            start_capture(app);
         }))
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -59,11 +57,14 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            // Before the capture window, so that the window's webview cannot
+            // ask for the Hotkey's status before there is one to hand it.
+            register_hotkey(app.handle());
+
             // Built once, here, and thereafter only shown and hidden. Booting a
             // webview costs a few hundred milliseconds a Capture cannot afford.
             build_capture_window(app.handle())?;
             build_tray(app.handle())?;
-            register_hotkey(app.handle());
 
             Ok(())
         })
@@ -97,14 +98,30 @@ fn build_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Begins a Capture. The window is already alive, so showing it is all that is
-/// left. Focus is requested explicitly because a Dock-less app does not
-/// reliably receive it when a window becomes visible.
+/// What every Entry Point does. Each of the three reaches the same single
+/// place, and none of them can fail loudly enough to be worth more than a log:
+/// the user asked for a Capture, not for an error.
+fn start_capture(app: &tauri::AppHandle) {
+    if let Err(error) = show_capture_window(app) {
+        log::error!("could not start a Capture: {error}");
+    }
+}
+
+/// The window is already alive, so showing it is all that is left. Focus is
+/// requested explicitly because a Dock-less app does not reliably receive it
+/// when a window becomes visible.
 fn show_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     let Some(window) = app.get_webview_window(CAPTURE_WINDOW) else {
         log::error!("the capture window is missing");
         return Ok(());
     };
+
+    // An Entry Point reached during a Capture already in progress is a no-op,
+    // not a fresh start: showing again would clear a line the user is halfway
+    // through typing.
+    if window.is_visible()? {
+        return window.set_focus();
+    }
 
     // Dismissing a Capture hides the whole app to hand focus back, so the app
     // itself has to be brought out of hiding before its window can be seen.
@@ -123,26 +140,18 @@ fn show_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
 /// the Tray Menu still starts a Capture, and Settings reports the failure later.
 fn register_hotkey(app: &tauri::AppHandle) {
     let handle = app.clone();
-    let status = hotkey::register(hotkey::DEFAULT_HOTKEY, |accelerator| {
+    let status = hotkey::register(hotkey::DEFAULT_HOTKEY, |hotkey| {
         app.global_shortcut()
-            .on_shortcut(accelerator, move |_app, _shortcut, event| {
+            .on_shortcut(hotkey, move |_app, _shortcut, event| {
                 // Press and release both arrive; one Capture per press.
-                if event.state() != ShortcutState::Pressed {
-                    return;
-                }
-
-                if let Err(error) = show_capture_window(&handle) {
-                    log::error!("could not show the capture window: {error}");
+                if event.state() == ShortcutState::Pressed {
+                    start_capture(&handle);
                 }
             })
     });
 
-    if let HotkeyStatus::Unavailable {
-        accelerator,
-        reason,
-    } = &status
-    {
-        log::error!("the Hotkey {accelerator} is unavailable: {reason}");
+    if let HotkeyStatus::Unavailable { hotkey, reason } = &status {
+        log::error!("the Hotkey {hotkey} is unavailable: {reason}");
     }
 
     app.manage(status);
@@ -189,11 +198,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            NEW_NOTE_MENU_ITEM => {
-                if let Err(error) = show_capture_window(app) {
-                    log::error!("could not show the capture window: {error}");
-                }
-            }
+            NEW_NOTE_MENU_ITEM => start_capture(app),
             QUIT_MENU_ITEM => app.exit(0),
             _ => {}
         });

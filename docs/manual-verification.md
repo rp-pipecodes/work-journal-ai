@@ -27,7 +27,7 @@ OS integrations that an automated test could only assert mocks against. Run thes
 - [ ] `Ctrl+Opt+Cmd+J` starts a Capture from a browser, from an editor, and from the Finder — the field is focused and empty each time.
 - [ ] The keystroke does not reach the application that was in front (it is intercepted, not passed through).
 - [ ] Holding the Hotkey down starts exactly one Capture.
-- [ ] Pressing the Hotkey while a Capture is already open leaves one capture window.
+- [ ] Pressing the Hotkey during a Capture already in progress leaves one capture window and does not clear what has been typed.
 - [ ] Launching the app from Spotlight while it is running opens a capture window instead of a second instance.
-- [ ] With the Hotkey registration denied — revoke Accessibility for the app in System Settings → Privacy & Security — the app still launches, the tray icon appears, and **New Note** still starts a Capture.
+- [ ] With the Hotkey unavailable — claim `Ctrl+Opt+Cmd+J` in another app first, e.g. as a System Settings keyboard shortcut — the app still launches, the tray icon appears, and **New Note** still starts a Capture.
 - [ ] In that state the log records the failed registration with a reason, and nothing hangs at startup.
