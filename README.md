@@ -86,6 +86,79 @@ The note creation interface is a unified, central view (a fast floating window, 
 
 ---
 
-## 4. Future Expansion (AI Phase)
+## 4. Project Structure & Architecture
+
+```text
+work-journal-ai/
+├── public/
+│   ├── fonts/                     # Pixel fonts (e.g., PressStart2P.ttf)
+│   └── icons/                     # Retro app icons & tray icons
+├── src-tauri/                     # Tauri v2 (Rust Backend Configuration)
+│   ├── capabilities/              # Tauri v2 permissions & capabilities
+│   │   └── default.json           # Plugin permissions (SQL, Store, Shortcuts)
+│   ├── icons/                     # OS build icons
+│   ├── src/
+│   │   └── main.rs                # Minimal Rust entry point
+│   ├── tauri.conf.json            # App config (window definitions, tray, plugins)
+│   └── Cargo.toml
+├── src/                           # React + TypeScript Frontend
+│   ├── assets/                    # Static assets & graphics
+│   ├── components/                # Reusable UI Components
+│   │   ├── common/                # Shared NES.css UI elements
+│   │   │   ├── NesButton.tsx
+│   │   │   ├── NesContainer.tsx
+│   │   │   ├── NesInput.tsx
+│   │   │   └── NesDialog.tsx
+│   │   ├── notes/                 # Note-related UI
+│   │   │   ├── NoteCard.tsx
+│   │   │   ├── NoteFilter.tsx
+│   │   │   ├── QuickNoteModal.tsx
+│   │   │   └── VoiceRecorder.tsx
+│   │   └── settings/              # Settings UI
+│   │       ├── ApiKeyInput.tsx
+│   │       └── HotkeyConfig.tsx
+│   ├── hooks/                     # Custom React Hooks
+│   │   ├── useAudioRecorder.ts    # Native MediaRecorder logic
+│   │   ├── useHotkeys.ts          # Global shortcut listener bindings
+│   │   ├── useNotes.ts            # CRUD interface for SQLite notes
+│   │   ├── useSettings.ts         # Tauri Store state management (API key)
+│   │   └── useWhisper.ts          # Speech-to-text API execution hook
+│   ├── services/                  # Low-Level Business Logic & API Wrappers
+│   │   ├── db.ts                  # SQLite initialization, schema, queries (@tauri-apps/plugin-sql)
+│   │   ├── store.ts               # Persisted user settings (@tauri-apps/plugin-store)
+│   │   ├── whisper.ts             # OpenAI Whisper API fetcher
+│   │   └── window.ts              # Tauri window creation/visibility helpers
+│   ├── styles/                    # Styling & Fonts
+│   │   ├── fonts.css              # Pixel font face declarations
+│   │   ├── nes-overrides.css      # Custom tweaks over NES.css
+│   │   └── global.css             # Main styling entry point
+│   ├── types/                     # TypeScript Interfaces
+│   │   ├── note.ts                # Note datatypes & DB models
+│   │   ├── settings.ts            # App config & hotkey types
+│   │   └── whisper.ts             # OpenAI API request/response types
+│   ├── views/                     # Main Views for Different Tauri Windows
+│   │   ├── QuickNoteView.tsx      # Spotlight-style floating input (Text/Voice)
+│   │   ├── HistoryView.tsx        # View Notes list with date filter & Copy All
+│   │   └── SettingsView.tsx       # BYOK API Key & Hotkeys management
+│   ├── App.tsx                    # Window router (detects active Tauri window)
+│   ├── main.tsx                   # React root mount point
+│   └── vite-env.d.ts
+├── .gitignore
+├── index.html
+├── package.json
+├── tsconfig.json
+└── vite.config.ts
+
+```
+
+### Architectural Highlights
+
+* **Window Routing (`App.tsx`):** A single Vite build serves all windows. `App.tsx` detects the active Tauri window context (e.g., via window labels or query params) and dynamically mounts `QuickNoteView`, `HistoryView`, or `SettingsView`.
+* **Isolated Services (`src/services/`):** Tauri plugin integrations (`plugin-sql`, `plugin-store`) are abstracted behind modular service functions to keep the React frontend decoupled from backend implementation details.
+* **Granular Permissions (`src-tauri/capabilities/`):** Utilizes Tauri v2's capability configuration to strictly scope plugin permissions for maximum system security.
+
+---
+
+## 5. Future Expansion (AI Phase)
 
 * Integration of Artificial Intelligence features using the same user API key (e.g., automated daily summaries, categorization, work report generation, or smart syncing).
