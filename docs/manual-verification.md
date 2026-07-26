@@ -43,3 +43,18 @@ OS integrations that an automated test could only assert mocks against. Run thes
 - [ ] Capturing a Note for a day inside the range makes it appear in the list without the range changing.
 - [ ] With no Notes at all, capturing the first one replaces the empty state with that Note.
 - [ ] `Escape` still closes the history window while a Nudge is on screen.
+
+## Correcting the record
+
+- [ ] Clicking a Note's Body turns it into a field holding that text, focused.
+- [ ] `Enter` saves the new wording; the list shows it and the Note is marked **edited**.
+- [ ] `Escape` abandons the edit, leaves the Body as it was, and does **not** close the window.
+- [ ] Clicking away from a field being edited abandons the edit too.
+- [ ] `Enter` on an emptied field changes nothing and leaves the field open.
+- [ ] The time shown against an edited Note is unchanged — Captured At never moves.
+- [ ] Changing a Note's day moves it out of the current range when the new day is outside it, and under the right heading when it is inside.
+- [ ] A refiled Note keeps its original time and is marked **edited**.
+- [ ] **Delete** opens a confirmation naming the Note; **Cancel** leaves the Note there.
+- [ ] Confirming removes the Note from the list, and it is still gone after quitting and relaunching the app.
+- [ ] Deleting the last Note of the most recent Occupied Day makes **View Notes** open on the previous Occupied Day next time.
+- [ ] `Escape` while the confirmation is open closes the confirmation only, not the window.

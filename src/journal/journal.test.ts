@@ -11,7 +11,7 @@ import {
   journalDayFor,
   DEFAULT_DAY_START_HOUR,
 } from './journal'
-import { fixedClock, openTestDatabase } from './testing/database'
+import { fixedClock, migrationSql, openTestDatabase } from './testing/database'
 
 // Every test drives the core through its public operations and asserts on what
 // comes back out. Nothing here asserts that a particular query ran.
@@ -152,6 +152,187 @@ describe('capture', () => {
     const second = await journal.capture('the same words')
 
     expect(first?.id).not.toBe(second?.id)
+  })
+})
+
+describe('editBody', () => {
+  it('reads the new Body back from the journal', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('shpped the tray menu')
+
+    await journal.editBody(captured!.id, 'shipped the tray menu')
+
+    const [stored] = await journal.notesForJournalDay('2026-03-12')
+    expect(stored.body).toBe('shipped the tray menu')
+  })
+
+  it('leaves Captured At untouched and records Edited At', async () => {
+    const { journal, clock } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('a typo goes here')
+    clock.set(local('2026-03-12T17:00:00'))
+
+    const edited = await journal.editBody(captured!.id, 'a typo went here')
+
+    expect(edited.capturedAt).toBe(captured!.capturedAt)
+    expect(edited.editedAt).toBe('2026-03-12T17:00:00.000Z')
+  })
+
+  it('leaves the Journal Day alone, whatever the clock says now', async () => {
+    const { journal, clock } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('filed under thursday')
+    clock.set(local('2026-03-16T09:00:00'))
+
+    const edited = await journal.editBody(captured!.id, 'still under thursday')
+
+    expect(edited.journalDay).toBe('2026-03-12')
+  })
+
+  it('trims surrounding whitespace from the new Body', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('untrimmed')
+
+    const edited = await journal.editBody(captured!.id, '  trimmed  ')
+
+    expect(edited.body).toBe('trimmed')
+  })
+
+  it('refuses to empty a Body', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('something worth keeping')
+
+    await expect(journal.editBody(captured!.id, '   ')).rejects.toThrow(
+      /empty/i,
+    )
+    const [stored] = await journal.notesForJournalDay('2026-03-12')
+    expect(stored.body).toBe('something worth keeping')
+  })
+
+  it('refuses a Body containing a line break', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('one line')
+
+    await expect(
+      journal.editBody(captured!.id, 'one line\nand another'),
+    ).rejects.toThrow(/line break/i)
+  })
+
+  it('does not mark a Note edited when the Body has not changed', async () => {
+    const { journal, clock } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('the very same words')
+    clock.set(local('2026-03-12T17:00:00'))
+
+    const edited = await journal.editBody(captured!.id, 'the very same words')
+
+    expect(edited.editedAt).toBeNull()
+  })
+
+  it('refuses to edit a Note that is not there', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    await expect(journal.editBody('nobody', 'anything')).rejects.toThrow(
+      /no such note/i,
+    )
+  })
+})
+
+describe('refile', () => {
+  it('moves the Note between Filters and keeps Captured At', async () => {
+    const { journal, clock } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('meant for wednesday')
+    clock.set(local('2026-03-12T17:00:00'))
+
+    const refiled = await journal.refile(captured!.id, '2026-03-11')
+
+    expect(refiled.journalDay).toBe('2026-03-11')
+    expect(refiled.capturedAt).toBe(captured!.capturedAt)
+    expect(refiled.editedAt).toBe('2026-03-12T17:00:00.000Z')
+    const thursday = { from: '2026-03-12', to: '2026-03-12' }
+    const wednesday = { from: '2026-03-11', to: '2026-03-11' }
+    expect(await journal.notesForFilter(thursday)).toEqual([])
+    expect(
+      (await journal.notesForFilter(wednesday)).map((note) => note.body),
+    ).toEqual(['meant for wednesday'])
+  })
+
+  it('leaves the Body alone', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('the same remark, another day')
+
+    const refiled = await journal.refile(captured!.id, '2026-03-11')
+
+    expect(refiled.body).toBe('the same remark, another day')
+  })
+
+  it('does not mark a Note edited when the Journal Day has not changed', async () => {
+    const { journal, clock } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('already where it belongs')
+    clock.set(local('2026-03-12T17:00:00'))
+
+    const refiled = await journal.refile(captured!.id, '2026-03-12')
+
+    expect(refiled.editedAt).toBeNull()
+  })
+
+  it('refuses a Journal Day that is not a day', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('somewhere')
+
+    await expect(journal.refile(captured!.id, '12/03/2026')).rejects.toThrow(
+      /journal day/i,
+    )
+  })
+
+  it('refuses to refile a Note that is not there', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    await expect(journal.refile('nobody', '2026-03-11')).rejects.toThrow(
+      /no such note/i,
+    )
+  })
+})
+
+describe('delete', () => {
+  it('leaves no trace in any Filter, nor in what a Digest reads', async () => {
+    const { journal, clock } = await journalAt('2026-03-12T09:30:00')
+    const doomed = await journal.capture('said in error')
+    clock.set(local('2026-03-12T11:00:00'))
+    await journal.capture('said in earnest')
+
+    await journal.delete(doomed!.id)
+
+    const everything = { from: '0000-01-01', to: '9999-12-31' }
+    expect(
+      (await journal.notesForFilter(everything)).map((note) => note.body),
+    ).toEqual(['said in earnest'])
+    expect(
+      (await journal.notesForJournalDay('2026-03-12')).map((note) => note.body),
+    ).toEqual(['said in earnest'])
+  })
+
+  it('has nowhere to leave a soft-deleted row: the schema has no such column', () => {
+    // The other half of "genuinely gone": a Note cannot be hidden rather than
+    // removed, because there is nothing in the schema to hide it with.
+    expect(migrationSql().join('\n')).not.toMatch(/deleted/i)
+  })
+
+  it('stops being the most recent Occupied Day once its day is empty', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+    await journal.capture('wednesday')
+    clock.set(local('2026-03-13T09:00:00'))
+    const friday = await journal.capture('friday')
+
+    await journal.delete(friday!.id)
+
+    expect(await journal.defaultFilter()).toEqual({
+      from: '2026-03-11',
+      to: '2026-03-11',
+    })
+  })
+
+  it('refuses to delete a Note that is not there', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    await expect(journal.delete('nobody')).rejects.toThrow(/no such note/i)
   })
 })
 

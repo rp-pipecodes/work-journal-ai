@@ -67,6 +67,25 @@ export interface Journal {
    */
   capture(body: string): Promise<Note | null>
   /**
+   * Rewords a Note, so the journal reads correctly later. Captured At is
+   * untouched — provenance survives every correction — and the Note is marked
+   * as edited, so a reader knows the wording may not be the original. Wording
+   * that has not actually changed is not an edit.
+   */
+  editBody(id: string, body: string): Promise<Note>
+  /**
+   * Files a Note under a different Journal Day, moving it between Filters.
+   * Captured At is untouched: refiling says where a thought belongs, never
+   * when it was had.
+   */
+  refile(id: string, journalDay: string): Promise<Note>
+  /**
+   * Removes a Note permanently. There is no trash, no archive and no
+   * `deleted_at` — the row is gone, and with it every Filter and Digest it
+   * appeared in.
+   */
+  delete(id: string): Promise<void>
+  /**
    * The Notes filed under one Journal Day, oldest first — the order a Digest
    * reads in. How the history window orders them is its own decision.
    */
@@ -110,6 +129,27 @@ const SELECT_NOTES_FOR_JOURNAL_DAY = `
   ORDER BY captured_at ASC, id ASC
 `
 
+const SELECT_NOTE = `
+  ${SELECT_NOTES}
+  WHERE id = ?
+`
+
+/**
+ * Body and Journal Day are the two changeable columns, and both mark the Note
+ * as edited; `captured_at` is never in an UPDATE anywhere in the app.
+ */
+const UPDATE_BODY = `
+  UPDATE notes SET body = ?, edited_at = ? WHERE id = ?
+`
+
+const UPDATE_JOURNAL_DAY = `
+  UPDATE notes SET journal_day = ?, edited_at = ? WHERE id = ?
+`
+
+const DELETE_NOTE = `
+  DELETE FROM notes WHERE id = ?
+`
+
 const SELECT_MOST_RECENT_OCCUPIED_DAY = `
   SELECT journal_day
   FROM notes
@@ -134,9 +174,7 @@ export function createJournal({
 }): Journal {
   return {
     async capture(body) {
-      if (containsLineBreak(body)) {
-        throw new Error('A Body is one line: it cannot contain a line break.')
-      }
+      assertOneLine(body)
 
       if (isBlank(body)) {
         return null
@@ -159,6 +197,48 @@ export function createJournal({
       ])
 
       return note
+    },
+
+    async editBody(id, body) {
+      assertOneLine(body)
+
+      if (isBlank(body)) {
+        throw new Error('A Body cannot be empty: delete the Note instead.')
+      }
+
+      const note = await read(driver, id)
+      const reworded = body.trim()
+
+      if (reworded === note.body) {
+        return note
+      }
+
+      const editedAt = clock.now().toISOString()
+      await driver.execute(UPDATE_BODY, [reworded, editedAt, id])
+
+      return { ...note, body: reworded, editedAt }
+    },
+
+    async refile(id, journalDay) {
+      if (!isJournalDay(journalDay)) {
+        throw new Error(`Not a Journal Day: ${journalDay}.`)
+      }
+
+      const note = await read(driver, id)
+
+      if (journalDay === note.journalDay) {
+        return note
+      }
+
+      const editedAt = clock.now().toISOString()
+      await driver.execute(UPDATE_JOURNAL_DAY, [journalDay, editedAt, id])
+
+      return { ...note, journalDay, editedAt }
+    },
+
+    async delete(id) {
+      await read(driver, id)
+      await driver.execute(DELETE_NOTE, [id])
     },
 
     async notesForJournalDay(journalDay) {
@@ -316,13 +396,36 @@ export function decideKeystroke(key: string, body: string): KeystrokeDecision {
   return 'ignore'
 }
 
+/**
+ * The Note an operation was asked to change. Every correction starts here, so
+ * changing a Note that is no longer there fails loudly rather than silently
+ * updating nothing.
+ */
+async function read(driver: SqlDriver, id: string): Promise<Note> {
+  const [row] = await driver.select<NoteRow>(SELECT_NOTE, [id])
+
+  if (row === undefined) {
+    throw new Error(`No such Note: ${id}.`)
+  }
+
+  return toNote(row)
+}
+
+/** A Journal Day is a `YYYY-MM-DD` label, not a date to be parsed. */
+function isJournalDay(journalDay: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(journalDay)
+}
+
 /** Nothing to commit: a Capture ends in one Note or in nothing at all. */
 function isBlank(body: string): boolean {
   return body.trim() === ''
 }
 
-function containsLineBreak(body: string): boolean {
-  return /[\n\r]/.test(body)
+/** The Body invariant, held in one place: a Note is a remark, not a document. */
+function assertOneLine(body: string): void {
+  if (/[\n\r]/.test(body)) {
+    throw new Error('A Body is one line: it cannot contain a line break.')
+  }
 }
 
 function toNote(row: NoteRow): Note {

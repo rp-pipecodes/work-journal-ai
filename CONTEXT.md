@@ -42,6 +42,10 @@ The instant a Note came into existence. Never changes, never editable — proven
 The single day a Note is filed under. Decided when the Note is captured, and thereafter the user's to change. Not recomputed from Captured At, so it never shifts under a timezone change or a Day Start change.
 _Avoid_: Date, day, created date
 
+**Edited At**:
+The instant a Note was last changed after capture — reworded or refiled. Nothing until then, so a Note still reading as it was typed claims nothing. It is what marks a corrected Note as corrected, so a reader knows the wording may not be the original.
+_Avoid_: Updated at, modified, revision
+
 **Day Start**:
 The hour at which one Journal Day gives way to the next. User-configurable, defaults to 04:00, so work done after midnight files under the day it felt like rather than the day the clock said.
 _Avoid_: Cutoff, rollover, midnight
