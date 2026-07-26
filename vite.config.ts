@@ -12,5 +12,9 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // Journal Day is a local-calendar decision, so the suite pins a timezone
+    // rather than inheriting the machine's. Lisbon has a DST transition, which
+    // the Journal Day tests rely on.
+    env: { TZ: "Europe/Lisbon" },
   },
 });
