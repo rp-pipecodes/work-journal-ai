@@ -1,4 +1,5 @@
 import CaptureView from './views/capture/CaptureView'
+import HistoryView from './views/history/HistoryView'
 import { viewForLabel } from './views/route'
 
 /**
@@ -16,6 +17,10 @@ export default function App({ windowLabel }: { windowLabel: string }) {
 
   if (view === 'capture') {
     return <CaptureView />
+  }
+
+  if (view === 'history') {
+    return <HistoryView />
   }
 
   return <main className="p-4 text-sm">{view}</main>

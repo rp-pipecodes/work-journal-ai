@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   createJournal,
   decideKeystroke,
+  formatJournalDay,
+  formatTimeOfDay,
+  groupByJournalDay,
   journalDayFor,
   DEFAULT_DAY_START_HOUR,
 } from './journal'
@@ -166,6 +169,139 @@ describe('notesForJournalDay', () => {
     const { journal } = await journalAt('2026-03-12T09:00:00')
 
     expect(await journal.notesForJournalDay('2026-03-11')).toEqual([])
+  })
+})
+
+describe('groupByJournalDay', () => {
+  it('gathers Notes under their day, keeping the order they arrive in', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+
+    await journal.capture('wednesday morning')
+    clock.set(local('2026-03-11T15:00:00'))
+    await journal.capture('wednesday afternoon')
+    clock.set(local('2026-03-13T09:00:00'))
+    await journal.capture('friday')
+
+    const groups = groupByJournalDay(
+      await journal.notesForFilter({ from: '2026-03-11', to: '2026-03-13' }),
+    )
+
+    expect(
+      groups.map((group) => [
+        group.journalDay,
+        group.notes.map((note) => note.body),
+      ]),
+    ).toEqual([
+      ['2026-03-13', ['friday']],
+      ['2026-03-11', ['wednesday afternoon', 'wednesday morning']],
+    ])
+  })
+
+  it('groups nothing into nothing', () => {
+    expect(groupByJournalDay([])).toEqual([])
+  })
+})
+
+describe('formatJournalDay', () => {
+  it('reads a Journal Day as the day it names, not the day it parses as', () => {
+    // 'YYYY-MM-DD' parses as UTC midnight, which is the previous evening in
+    // half the world's timezones; the heading must still say the 13th.
+    expect(formatJournalDay('2026-03-13')).toBe('Friday, 13 March 2026')
+  })
+})
+
+describe('formatTimeOfDay', () => {
+  it('reads Captured At as a local time of day', () => {
+    // 09:05 UTC is 09:05 in Europe/Lisbon on that date — see vite.config.ts.
+    expect(formatTimeOfDay('2026-03-13T09:05:00.000Z')).toBe('09:05')
+  })
+})
+
+describe('defaultFilter', () => {
+  it('opens on the most recent Occupied Day', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+
+    await journal.capture('wednesday')
+    clock.set(local('2026-03-13T09:00:00'))
+    await journal.capture('friday')
+
+    expect(await journal.defaultFilter()).toEqual({
+      from: '2026-03-13',
+      to: '2026-03-13',
+    })
+  })
+
+  it('skips unoccupied days entirely: a Monday resolves to the previous Friday', async () => {
+    const { journal, clock } = await journalAt('2026-03-13T17:00:00')
+
+    await journal.capture('friday, before the weekend')
+    // The weekend is empty, and it is now Monday morning.
+    clock.set(local('2026-03-16T09:00:00'))
+
+    expect(await journal.defaultFilter()).toEqual({
+      from: '2026-03-13',
+      to: '2026-03-13',
+    })
+  })
+
+  it('reaches back however long the gap', async () => {
+    const { journal, clock } = await journalAt('2026-02-27T17:00:00')
+
+    await journal.capture('last day before leave')
+    clock.set(local('2026-03-16T09:00:00'))
+
+    expect(await journal.defaultFilter()).toEqual({
+      from: '2026-02-27',
+      to: '2026-02-27',
+    })
+  })
+
+  it('resolves to nothing on an empty database rather than an arbitrary date', async () => {
+    const { journal } = await journalAt('2026-03-16T09:00:00')
+
+    expect(await journal.defaultFilter()).toBeNull()
+  })
+})
+
+describe('notesForFilter', () => {
+  it('returns the newest Note first', async () => {
+    const { journal, clock } = await journalAt('2026-03-13T09:00:00')
+
+    await journal.capture('first')
+    clock.set(local('2026-03-13T11:00:00'))
+    await journal.capture('second')
+
+    const notes = await journal.notesForFilter({
+      from: '2026-03-13',
+      to: '2026-03-13',
+    })
+
+    expect(notes.map((note) => note.body)).toEqual(['second', 'first'])
+  })
+
+  it('orders a Filter spanning several days by Journal Day, newest first', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+
+    await journal.capture('wednesday')
+    clock.set(local('2026-03-13T09:00:00'))
+    await journal.capture('friday')
+
+    const notes = await journal.notesForFilter({
+      from: '2026-03-11',
+      to: '2026-03-13',
+    })
+
+    expect(notes.map((note) => note.body)).toEqual(['friday', 'wednesday'])
+  })
+
+  it('returns nothing for a Filter no Note falls under', async () => {
+    const { journal } = await journalAt('2026-03-13T09:00:00')
+
+    await journal.capture('friday')
+
+    expect(
+      await journal.notesForFilter({ from: '2026-03-14', to: '2026-03-15' }),
+    ).toEqual([])
   })
 })
 

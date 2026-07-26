@@ -30,6 +30,17 @@ export interface Note {
   editedAt: string | null
 }
 
+/**
+ * The range of Journal Days currently being viewed, inclusive at both ends. A
+ * single day is a range whose ends are equal.
+ */
+export interface Filter {
+  /** `YYYY-MM-DD`, the oldest day in view. */
+  from: string
+  /** `YYYY-MM-DD`, the newest day in view. */
+  to: string
+}
+
 /** What a keystroke during a Capture means. */
 export type KeystrokeDecision = 'commit' | 'discard' | 'ignore'
 
@@ -51,6 +62,18 @@ export interface Journal {
    * reads in. How the history window orders them is its own decision.
    */
   notesForJournalDay(journalDay: string): Promise<Note[]>
+  /**
+   * The Filter a reader starts from: the most recent Occupied Day, which is
+   * the greatest Journal Day present and not yesterday's date — so a Monday
+   * resolves to Friday when the weekend is empty, however long the gap. Null
+   * when there are no Notes at all, rather than an arbitrary date.
+   */
+  defaultFilter(): Promise<Filter | null>
+  /**
+   * The Notes in a Filter, newest first — the order someone reading back at
+   * standup wants, and the reverse of a Digest's.
+   */
+  notesForFilter(filter: Filter): Promise<Note[]>
 }
 
 interface NoteRow {
@@ -66,11 +89,29 @@ const INSERT_NOTE = `
   VALUES (?, ?, ?, ?, NULL)
 `
 
-const SELECT_NOTES_FOR_JOURNAL_DAY = `
+/** Every read returns a whole Note; only the predicate and the order differ. */
+const SELECT_NOTES = `
   SELECT id, body, captured_at, journal_day, edited_at
   FROM notes
+`
+
+const SELECT_NOTES_FOR_JOURNAL_DAY = `
+  ${SELECT_NOTES}
   WHERE journal_day = ?
   ORDER BY captured_at ASC, id ASC
+`
+
+const SELECT_MOST_RECENT_OCCUPIED_DAY = `
+  SELECT journal_day
+  FROM notes
+  ORDER BY journal_day DESC
+  LIMIT 1
+`
+
+const SELECT_NOTES_FOR_FILTER = `
+  ${SELECT_NOTES}
+  WHERE journal_day BETWEEN ? AND ?
+  ORDER BY journal_day DESC, captured_at DESC, id DESC
 `
 
 export function createJournal({
@@ -117,6 +158,27 @@ export function createJournal({
       ])
       return rows.map(toNote)
     },
+
+    async defaultFilter() {
+      const [row] = await driver.select<{ journal_day: string }>(
+        SELECT_MOST_RECENT_OCCUPIED_DAY,
+        [],
+      )
+
+      if (row === undefined) {
+        return null
+      }
+
+      return { from: row.journal_day, to: row.journal_day }
+    },
+
+    async notesForFilter(filter) {
+      const rows = await driver.select<NoteRow>(SELECT_NOTES_FOR_FILTER, [
+        filter.from,
+        filter.to,
+      ])
+      return rows.map(toNote)
+    },
   }
 }
 
@@ -144,6 +206,55 @@ export function journalDayFor(instant: Date, dayStartHour: number): string {
     String(day.getMonth() + 1).padStart(2, '0'),
     String(day.getDate()).padStart(2, '0'),
   ].join('-')
+}
+
+/** The Notes of one Journal Day, under the day they are filed under. */
+export interface JournalDayGroup {
+  journalDay: string
+  notes: Note[]
+}
+
+/**
+ * Notes under day headings, in the order they arrive. A Filter is a range, so
+ * a result can span several days and each day says which one it is.
+ */
+export function groupByJournalDay(notes: Note[]): JournalDayGroup[] {
+  const groups: JournalDayGroup[] = []
+
+  for (const note of notes) {
+    const open = groups.at(-1)
+    if (open?.journalDay === note.journalDay) {
+      open.notes.push(note)
+    } else {
+      groups.push({ journalDay: note.journalDay, notes: [note] })
+    }
+  }
+
+  return groups
+}
+
+/**
+ * A Journal Day as a heading. Formatted in UTC because a Journal Day is a
+ * label rather than an instant: `YYYY-MM-DD` parses as UTC midnight, which is
+ * the previous evening in a negative offset.
+ */
+export function formatJournalDay(journalDay: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(journalDay))
+}
+
+/** Captured At as the local time of day it happened at. */
+export function formatTimeOfDay(capturedAt: string): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(capturedAt))
 }
 
 /**

@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "history",
+  "description": "History closes itself on dismiss; the capture window must never be able to",
+  "windows": [
+    "history"
+  ],
+  "permissions": [
+    "core:window:allow-close"
+  ]
+}

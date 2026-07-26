@@ -10,10 +10,12 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 const NEW_NOTE_MENU_ITEM: &str = "new-note";
+const VIEW_NOTES_MENU_ITEM: &str = "view-notes";
 const QUIT_MENU_ITEM: &str = "quit";
 
-/// The window label the frontend routes on — see `src/views/route.ts`.
+/// The window labels the frontend routes on — see `src/views/route.ts`.
 const CAPTURE_WINDOW: &str = "capture";
+const HISTORY_WINDOW: &str = "history";
 
 /// Told to the capture window every time it is shown. It is long-lived, so it
 /// clears its field and takes focus on this rather than on being built — see
@@ -135,6 +137,42 @@ fn show_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Opens History, building the window if it is not already open. Unlike the
+/// capture window this one is created on demand and genuinely closed on
+/// dismiss — see docs/adr/0002-capture-window-is-hidden-never-closed.md.
+fn open_history(app: &tauri::AppHandle) {
+    if let Err(error) = show_history_window(app) {
+        log::error!("could not open History: {error}");
+    }
+}
+
+fn show_history_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    // Dismissing a Capture hides the whole app, so the app itself has to be
+    // brought out of hiding first — on either path, since `show()` on a window
+    // of a hidden application puts nothing on screen.
+    #[cfg(target_os = "macos")]
+    app.show()?;
+
+    // Reaching the Tray Menu again with History already open raises it rather
+    // than building a second one.
+    if let Some(window) = app.get_webview_window(HISTORY_WINDOW) {
+        window.show()?;
+        return window.set_focus();
+    }
+
+    let window = WebviewWindowBuilder::new(app, HISTORY_WINDOW, WebviewUrl::default())
+        .title("Notes")
+        .inner_size(520.0, 620.0)
+        .min_inner_size(380.0, 320.0)
+        .center()
+        .build()?;
+
+    // A Dock-less app does not reliably receive focus when a window appears.
+    window.set_focus()?;
+
+    Ok(())
+}
+
 /// Registers the Hotkey and records the outcome where the rest of the app can
 /// read it. A registration macOS withholds must not take the app down with it:
 /// the Tray Menu still starts a Capture, and Settings reports the failure later.
@@ -185,20 +223,22 @@ fn hide_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// The Tray Menu — the Entry Point that always works. It gains View Notes and
-/// Settings as those arrive; Quit is here because without a Dock icon it is the
-/// only way out.
+/// The Tray Menu — the Entry Point that always works. It gains Settings as that
+/// arrives; Quit is here because without a Dock icon it is the only way out.
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let new_note = MenuItem::with_id(app, NEW_NOTE_MENU_ITEM, "New Note", true, None::<&str>)?;
+    let view_notes =
+        MenuItem::with_id(app, VIEW_NOTES_MENU_ITEM, "View Notes", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, QUIT_MENU_ITEM, "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&new_note, &separator, &quit])?;
+    let menu = Menu::with_items(app, &[&new_note, &view_notes, &separator, &quit])?;
 
     let mut tray = TrayIconBuilder::with_id("tray")
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
             NEW_NOTE_MENU_ITEM => start_capture(app),
+            VIEW_NOTES_MENU_ITEM => open_history(app),
             QUIT_MENU_ITEM => app.exit(0),
             _ => {}
         });
