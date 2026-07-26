@@ -1,75 +1,78 @@
-# React + TypeScript + Vite
+# Work Journal
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A personal, local-first log of short work notes captured throughout the day, so that what you did is recoverable later — at standup, in a review, or as context for an LLM.
 
-Currently, two official plugins are available:
+macOS on Apple Silicon only. Everything is local: no account, no server, no network call.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The vocabulary the app and its code use is defined in [CONTEXT.md](CONTEXT.md) and is normative.
 
-## React Compiler
+## Status
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+The menu-bar shell. The app launches into the menu bar with a **Quit** item and nothing else yet — Capture, history and settings arrive in later tickets.
 
-## Expanding the ESLint configuration
+## Prerequisites
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- Node 24+ and [pnpm](https://pnpm.io)
+- A Rust toolchain via [rustup](https://rustup.rs)
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Development
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Install dependencies, then run the app:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
+```bash
+pnpm install
 ```
+
+```bash
+pnpm tauri dev
+```
+
+There is no Dock icon and no `Cmd+Tab` entry — the app is in the menu bar. Quit it from the Tray Menu.
+
+## Tests
+
+```bash
+pnpm test
+```
+
+Vitest, run once. `pnpm test:watch` re-runs on change. OS integrations that a test could only assert mocks against are covered by [the manual checklist](docs/manual-verification.md) instead.
+
+## Type checking and linting
+
+```bash
+pnpm build
+```
+
+```bash
+pnpm lint
+```
+
+`pnpm build` runs `tsc -b` before bundling, so it doubles as the type check.
+
+## Building a release
+
+```bash
+pnpm tauri build --bundles app
+```
+
+The result lands in `src-tauri/target/release/bundle/macos/Work Journal.app`.
+
+### Gatekeeper and the quarantine attribute
+
+Builds are unsigned and unnotarized by design. macOS attaches a quarantine attribute to anything that arrives from another machine — via AirDrop, a download, or a shared drive — and Gatekeeper then refuses to open the app, usually with "the app is damaged and can't be opened".
+
+Clear the attribute on the copy you received:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Work Journal.app"
+```
+
+A build you produced locally and never moved is not quarantined and needs nothing.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE).
