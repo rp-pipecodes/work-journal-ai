@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { decideKeystroke, type KeystrokeDecision } from '@/journal/journal'
-import { journal } from '@/journal/tauri-journal'
+import { announceCapturedNote, journal } from '@/journal/tauri-journal'
 
 /** Must match `CAPTURE_SHOWN_EVENT` in `src-tauri/src/lib.rs`. */
 const CAPTURE_SHOWN_EVENT = 'capture://shown'
@@ -31,14 +31,28 @@ export default function CaptureView() {
 
   const commit = useCallback(
     async (text: string) => {
+      let note
       try {
-        await (await journal()).capture(text)
+        note = await (await journal()).capture(text)
       } catch (error) {
         // A Capture that could not be stored must not vanish: leave the window
         // open with the text still in it rather than discarding the thought.
         console.error('could not commit the Note', error)
         return
       }
+
+      // A history window on screen has no other way to learn of the Note, and
+      // the announcement has to leave before the window goes — dismissing hides
+      // the whole app. It failing is not the Capture's problem: the Note is
+      // stored either way.
+      if (note !== null) {
+        try {
+          await announceCapturedNote(note)
+        } catch (error) {
+          console.error('could not announce the Note', error)
+        }
+      }
+
       await dismiss()
     },
     [dismiss],

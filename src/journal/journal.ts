@@ -45,6 +45,15 @@ export interface Filter {
 export type KeystrokeDecision = 'commit' | 'discard' | 'ignore'
 
 /**
+ * What an open history window does about a Note captured while it is open.
+ * Either the Note belongs in what is on screen, or the day it was filed under
+ * is worth mentioning — never a Filter that moved on its own.
+ */
+export type ArrivalDecision =
+  | { kind: 'show' }
+  | { kind: 'nudge'; journalDay: string }
+
+/**
  * The hour at which one Journal Day gives way to the next. User-configurable
  * later; fixed here so work done after midnight files under the day it felt
  * like.
@@ -169,7 +178,7 @@ export function createJournal({
         return null
       }
 
-      return { from: row.journal_day, to: row.journal_day }
+      return filterForJournalDay(row.journal_day)
     },
 
     async notesForFilter(filter) {
@@ -255,6 +264,41 @@ export function formatTimeOfDay(capturedAt: string): string {
     minute: '2-digit',
     hour12: false,
   }).format(new Date(capturedAt))
+}
+
+/** One Journal Day as a Filter: a range whose ends are equal. */
+export function filterForJournalDay(journalDay: string): Filter {
+  return { from: journalDay, to: journalDay }
+}
+
+/**
+ * A range of Journal Days as a Filter, whichever end the reader picked first.
+ * A Filter always reads oldest end first, so the two ends of a picker cannot
+ * put the core in a state that selects nothing.
+ */
+export function filterForRange(oneEnd: string, otherEnd: string): Filter {
+  return oneEnd <= otherEnd
+    ? { from: oneEnd, to: otherEnd }
+    : { from: otherEnd, to: oneEnd }
+}
+
+/**
+ * A newly captured Note against the Filter on screen. A Note filed under a day
+ * in view belongs in the list; one filed outside it must not move the list
+ * under a reader, so it becomes a nudge naming the day that gained content —
+ * moving the Filter there stays the reader's decision.
+ *
+ * `YYYY-MM-DD` compares as a string in calendar order, which is why the Filter
+ * is a pair of them.
+ */
+export function decideArrival(
+  filter: Filter,
+  journalDay: string,
+): ArrivalDecision {
+  if (journalDay >= filter.from && journalDay <= filter.to) {
+    return { kind: 'show' }
+  }
+  return { kind: 'nudge', journalDay }
 }
 
 /**

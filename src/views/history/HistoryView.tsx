@@ -1,12 +1,17 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { Button } from '@/components/ui/button'
 import {
+  decideArrival,
+  filterForJournalDay,
+  filterForRange,
   formatJournalDay,
   formatTimeOfDay,
   groupByJournalDay,
+  type Filter,
   type JournalDayGroup,
 } from '@/journal/journal'
-import { journal } from '@/journal/tauri-journal'
+import { journal, onNoteCaptured } from '@/journal/tauri-journal'
 
 /** What History has to show, once the core has been asked. */
 type History =
@@ -19,43 +24,110 @@ type History =
  * Reading back what you did. The window behind this view is created on demand
  * and genuinely closed on dismiss, so the view loads once on mount and needs no
  * reset — see docs/adr/0002-capture-window-is-hidden-never-closed.md.
+ *
+ * The Filter moves only when the reader moves it. A Note captured for a day
+ * outside it leaves a Nudge rather than re-reading the list, so a reader partway
+ * through Friday's Notes never has the list shift under them.
  */
 export default function HistoryView() {
+  const [filter, setFilter] = useState<Filter | null>(null)
   const [history, setHistory] = useState<History>({ state: 'loading' })
-  const page = useRef<HTMLElement>(null)
+  const [nudgedDay, setNudgedDay] = useState<string | null>(null)
+  const page = useRef<HTMLDivElement>(null)
+  // Reads can overlap — a Nudge acted on while a range change is still in
+  // flight — and only the newest one may reach the screen.
+  const latestRead = useRef(0)
+  // The Filter as the arrival subscription sees it. That subscription is set up
+  // once and never rebuilt, so it cannot read the Filter from state: a Note
+  // announced while a rebuilt subscription was still resolving would be lost.
+  const filterInView = useRef<Filter | null>(null)
+
+  /** Better than a window that never stops loading, and never a stale read. */
+  const giveUp = useCallback((error: unknown, ticket: number) => {
+    console.error('could not read the journal', error)
+    if (latestRead.current === ticket) setHistory({ state: 'unreadable' })
+  }, [])
+
+  const read = useCallback(
+    async (next: Filter) => {
+      const ticket = ++latestRead.current
+      try {
+        const core = await journal()
+        const days = groupByJournalDay(await core.notesForFilter(next))
+        if (latestRead.current === ticket) setHistory({ state: 'notes', days })
+      } catch (error) {
+        giveUp(error, ticket)
+      }
+    },
+    [giveUp],
+  )
+
+  /** Every move of the Filter, and the only thing that clears a Nudge. */
+  const moveTo = useCallback(
+    (next: Filter) => {
+      filterInView.current = next
+      setFilter(next)
+      setNudgedDay(null)
+      void read(next)
+    },
+    [read],
+  )
+
+  /** Where History opens, and where it returns to once the first Note exists. */
+  const openOnMostRecentOccupiedDay = useCallback(async () => {
+    const ticket = ++latestRead.current
+    try {
+      const core = await journal()
+      // The Filter opens on the most recent Occupied Day, whenever that was;
+      // with no Notes at all there is no day to open on.
+      const opening = await core.defaultFilter()
+      if (latestRead.current !== ticket) return
+
+      if (opening === null) {
+        setHistory({ state: 'empty' })
+        return
+      }
+      moveTo(opening)
+    } catch (error) {
+      giveUp(error, ticket)
+    }
+  }, [giveUp, moveTo])
 
   useEffect(() => {
     // A Dock-less app does not reliably hand focus to a new window, and Escape
     // has to reach this view for the window to close.
     page.current?.focus()
 
-    let current = true
-
+    // Awaited inside the effect rather than called from its body: the first
+    // read is work that finishes later, not a state change on mount.
     void (async () => {
-      try {
-        const core = await journal()
-        // The Filter opens on the most recent Occupied Day, whenever that was;
-        // with no Notes at all there is no day to open on.
-        const filter = await core.defaultFilter()
-        if (filter === null) {
-          if (current) setHistory({ state: 'empty' })
-          return
-        }
-
-        const days = groupByJournalDay(await core.notesForFilter(filter))
-        if (current) setHistory({ state: 'notes', days })
-      } catch (error) {
-        // Better to say the journal could not be read than to leave a window
-        // that never stops loading.
-        console.error('could not read the journal', error)
-        if (current) setHistory({ state: 'unreadable' })
-      }
+      await openOnMostRecentOccupiedDay()
     })()
+  }, [openOnMostRecentOccupiedDay])
+
+  useEffect(() => {
+    const subscription = onNoteCaptured((journalDay) => {
+      const inView = filterInView.current
+
+      // No Notes at all until now: there is no Filter to hold still, and the
+      // empty state has just stopped being true.
+      if (inView === null) {
+        void openOnMostRecentOccupiedDay()
+        return
+      }
+
+      const arrival = decideArrival(inView, journalDay)
+      if (arrival.kind === 'show') {
+        void read(inView)
+      } else {
+        setNudgedDay(arrival.journalDay)
+      }
+    })
 
     return () => {
-      current = false
+      void subscription.then((stop) => stop())
     }
-  }, [])
+  }, [openOnMostRecentOccupiedDay, read])
 
   // Escape dismisses, and dismissing closes: History is not kept resident.
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
@@ -64,36 +136,142 @@ export default function HistoryView() {
     }
   }
 
+  /** A cleared date input is a half-picked range, not a Filter over nothing. */
+  function pick(from: string, to: string) {
+    if (from === '' || to === '') return
+    moveTo(filterForRange(from, to))
+  }
+
   return (
-    <main
+    <div
       ref={page}
       tabIndex={-1}
       onKeyDown={onKeyDown}
-      className="h-screen overflow-y-auto bg-background px-6 py-5 outline-none"
+      className="flex h-screen flex-col bg-background outline-none"
     >
-      {history.state === 'empty' && <EmptyState />}
-      {history.state === 'unreadable' && (
-        <Centred>The journal could not be read.</Centred>
+      {filter !== null && <Range filter={filter} onPick={pick} />}
+
+      <main className="flex-1 overflow-y-auto px-6 pb-5">
+        {history.state === 'empty' && <EmptyState />}
+        {history.state === 'unreadable' && (
+          <Centred>The journal could not be read.</Centred>
+        )}
+        {history.state === 'notes' && history.days.length === 0 && (
+          <Centred>No Notes in these days.</Centred>
+        )}
+        {history.state === 'notes' &&
+          history.days.map((day) => (
+            <section key={day.journalDay} className="mb-6 last:mb-0">
+              <h2 className="mb-3 text-sm font-medium text-muted-foreground">
+                {formatJournalDay(day.journalDay)}
+              </h2>
+              <ol className="flex flex-col gap-3">
+                {day.notes.map((note) => (
+                  <li key={note.id} className="flex gap-3 text-sm">
+                    <span className="shrink-0 pt-px font-mono text-xs tabular-nums text-muted-foreground">
+                      {formatTimeOfDay(note.capturedAt)}
+                    </span>
+                    <span>{note.body}</span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          ))}
+      </main>
+
+      {nudgedDay !== null && (
+        <Nudge
+          journalDay={nudgedDay}
+          onShow={() => moveTo(filterForJournalDay(nudgedDay))}
+          onDismiss={() => setNudgedDay(null)}
+        />
       )}
-      {history.state === 'notes' &&
-        history.days.map((day) => (
-          <section key={day.journalDay} className="mb-6 last:mb-0">
-            <h2 className="mb-3 text-sm font-medium text-muted-foreground">
-              {formatJournalDay(day.journalDay)}
-            </h2>
-            <ol className="flex flex-col gap-3">
-              {day.notes.map((note) => (
-                <li key={note.id} className="flex gap-3 text-sm">
-                  <span className="shrink-0 pt-px font-mono text-xs tabular-nums text-muted-foreground">
-                    {formatTimeOfDay(note.capturedAt)}
-                  </span>
-                  <span>{note.body}</span>
-                </li>
-              ))}
-            </ol>
-          </section>
-        ))}
-    </main>
+    </div>
+  )
+}
+
+/**
+ * The two ends of the Filter. Both are Journal Days rather than instants, which
+ * is exactly what a date input edits.
+ */
+function Range({
+  filter,
+  onPick,
+}: {
+  filter: Filter
+  onPick: (from: string, to: string) => void
+}) {
+  return (
+    <header className="flex shrink-0 items-center gap-3 px-6 py-4 text-xs text-muted-foreground">
+      <End
+        label="From"
+        value={filter.from}
+        onChange={(from) => onPick(from, filter.to)}
+      />
+      <End
+        label="To"
+        value={filter.to}
+        onChange={(to) => onPick(filter.from, to)}
+      />
+    </header>
+  )
+}
+
+function End({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <label className="flex items-center gap-1.5">
+      <span>{label}</span>
+      <input
+        type="date"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="rounded-md border border-border bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+      />
+    </label>
+  )
+}
+
+/**
+ * A day outside the Filter has gained a Note. Unobtrusive on purpose: it says
+ * what happened and waits, rather than moving what is being read.
+ */
+function Nudge({
+  journalDay,
+  onShow,
+  onDismiss,
+}: {
+  journalDay: string
+  onShow: () => void
+  onDismiss: () => void
+}) {
+  return (
+    <div
+      role="status"
+      className="flex shrink-0 items-center gap-3 border-t border-border bg-muted/40 px-6 py-3 text-xs"
+    >
+      <span className="flex-1 text-muted-foreground">
+        A new Note on {formatJournalDay(journalDay)}.
+      </span>
+      <Button variant="outline" size="sm" onClick={onShow}>
+        Show
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+      >
+        Dismiss
+      </Button>
+    </div>
   )
 }
 

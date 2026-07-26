@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   createJournal,
+  decideArrival,
   decideKeystroke,
+  filterForJournalDay,
+  filterForRange,
   formatJournalDay,
   formatTimeOfDay,
   groupByJournalDay,
@@ -302,6 +305,103 @@ describe('notesForFilter', () => {
     expect(
       await journal.notesForFilter({ from: '2026-03-14', to: '2026-03-15' }),
     ).toEqual([])
+  })
+
+  it('includes both ends of a range and excludes the days either side', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T09:00:00')
+
+    for (const day of ['09', '10', '11', '12', '13']) {
+      clock.set(local(`2026-03-${day}T09:00:00`))
+      await journal.capture(`the ${day}th`)
+    }
+
+    const notes = await journal.notesForFilter({
+      from: '2026-03-10',
+      to: '2026-03-12',
+    })
+
+    expect(notes.map((note) => note.body)).toEqual([
+      'the 12th',
+      'the 11th',
+      'the 10th',
+    ])
+  })
+
+  it('returns a single day when both ends of the range are the same', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+
+    await journal.capture('wednesday')
+    clock.set(local('2026-03-12T09:00:00'))
+    await journal.capture('thursday')
+
+    const notes = await journal.notesForFilter({
+      from: '2026-03-11',
+      to: '2026-03-11',
+    })
+
+    expect(notes.map((note) => note.body)).toEqual(['wednesday'])
+  })
+})
+
+describe('filterForRange', () => {
+  it('reads a range oldest-end first', () => {
+    expect(filterForRange('2026-03-09', '2026-03-13')).toEqual({
+      from: '2026-03-09',
+      to: '2026-03-13',
+    })
+  })
+
+  it('orders the ends whichever way round they were picked', () => {
+    expect(filterForRange('2026-03-13', '2026-03-09')).toEqual({
+      from: '2026-03-09',
+      to: '2026-03-13',
+    })
+  })
+
+  it('makes a single day out of two equal ends', () => {
+    expect(filterForRange('2026-03-13', '2026-03-13')).toEqual({
+      from: '2026-03-13',
+      to: '2026-03-13',
+    })
+  })
+})
+
+describe('filterForJournalDay', () => {
+  it('reads one day as a range whose ends are equal', () => {
+    expect(filterForJournalDay('2026-03-13')).toEqual({
+      from: '2026-03-13',
+      to: '2026-03-13',
+    })
+  })
+})
+
+describe('decideArrival', () => {
+  const friday = { from: '2026-03-13', to: '2026-03-13' }
+
+  it('shows a Note that falls inside the Filter', () => {
+    expect(decideArrival(friday, '2026-03-13')).toEqual({ kind: 'show' })
+  })
+
+  it('nudges rather than moving the list when the day is outside the Filter', () => {
+    expect(decideArrival(friday, '2026-03-16')).toEqual({
+      kind: 'nudge',
+      journalDay: '2026-03-16',
+    })
+    expect(decideArrival(friday, '2026-03-12')).toEqual({
+      kind: 'nudge',
+      journalDay: '2026-03-12',
+    })
+  })
+
+  it('counts both ends of a range as inside it', () => {
+    const week = { from: '2026-03-09', to: '2026-03-13' }
+
+    expect(decideArrival(week, '2026-03-09')).toEqual({ kind: 'show' })
+    expect(decideArrival(week, '2026-03-13')).toEqual({ kind: 'show' })
+    expect(decideArrival(week, '2026-03-08')).toEqual({
+      kind: 'nudge',
+      journalDay: '2026-03-08',
+    })
   })
 })
 

@@ -31,3 +31,15 @@ OS integrations that an automated test could only assert mocks against. Run thes
 - [ ] Launching the app from Spotlight while it is running opens a capture window instead of a second instance.
 - [ ] With the Hotkey unavailable — claim `Ctrl+Opt+Cmd+J` in another app first, e.g. as a System Settings keyboard shortcut — the app still launches, the tray icon appears, and **New Note** still starts a Capture.
 - [ ] In that state the log records the failed registration with a reason, and nothing hangs at startup.
+
+## The Filter and the Nudge
+
+- [ ] **View Notes** opens on the most recent Occupied Day, with that day in both ends of the range.
+- [ ] Widening the range to several days shows every Note in it under day headings, newest day first, and the two ends are included.
+- [ ] Setting the earlier end after the later one still shows the range between them rather than nothing.
+- [ ] A range holding no Notes says so instead of looking broken.
+- [ ] Capturing a Note for a day outside the range leaves the list exactly where it was — scroll position included — and shows a line naming that day.
+- [ ] **Show** on that line moves the range to that day; **Dismiss** leaves the range alone and the line goes away.
+- [ ] Capturing a Note for a day inside the range makes it appear in the list without the range changing.
+- [ ] With no Notes at all, capturing the first one replaces the empty state with that Note.
+- [ ] `Escape` still closes the history window while a Nudge is on screen.

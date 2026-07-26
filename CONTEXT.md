@@ -51,6 +51,10 @@ _Avoid_: Cutoff, rollover, midnight
 **Filter**:
 The range of Journal Days currently being viewed. Opens on the most recent Occupied Day and only changes when the user changes it — never on its own, even as new Notes arrive.
 
+**Nudge**:
+What a Note captured for a day outside the current Filter leaves behind: an unobtrusive line saying that day now has content, which the user can act on to move the Filter there, or dismiss. The reason a Filter can hold still without hiding new Notes.
+_Avoid_: Notification, toast, badge, alert
+
 **Occupied Day**:
 A Journal Day that has at least one Note. What "the previous day" means in practice — the most recent Occupied Day, not yesterday's date, so a Monday morning shows Friday rather than an empty Sunday.
 
