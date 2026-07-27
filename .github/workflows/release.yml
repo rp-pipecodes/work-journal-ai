@@ -1,0 +1,70 @@
+name: release
+
+# Pushing a vX.Y.Z tag builds the DMG and publishes it as a GitHub release.
+# The version lives in src-tauri/tauri.conf.json; the tag must match it.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # Fails in seconds rather than after a ~12 minute Rust build, and stops a
+      # release whose DMG would be named after a different version than its tag.
+      - name: Check the tag matches the version
+        run: |
+          config_version=$(jq -r .version src-tauri/tauri.conf.json)
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [ "$config_version" != "$tag_version" ]; then
+            echo "Tag $GITHUB_REF_NAME says $tag_version, src-tauri/tauri.conf.json says $config_version." >&2
+            echo "Bump the version in src-tauri/tauri.conf.json and commit it before tagging." >&2
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Before the build, so a red suite means no release at all.
+      - name: Test
+        run: pnpm test
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseDraft: false
+          prerelease: false
+          args: --target aarch64-apple-darwin --bundles dmg
+          releaseBody: |
+            Download the DMG, drag **Work Journal** to Applications, then clear the quarantine attribute macOS attached to it:
+
+            ```
+            xattr -dr com.apple.quarantine "/Applications/Work Journal.app"
+            ```
+
+            This build is unsigned and unnotarized — without that step macOS reports the app as damaged. Apple Silicon only.

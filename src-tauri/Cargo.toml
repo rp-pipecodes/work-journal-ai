@@ -1,6 +1,8 @@
 [package]
 name = "app"
-version = "0.1.0"
+# Not the app version — that lives in tauri.conf.json, which is what names the
+# DMG and fills CFBundleShortVersionString. Nothing reads this one.
+version = "0.0.0"
 description = "A personal, local-first log of short work notes"
 authors = ["Rafael Passos"]
 license = "MIT"

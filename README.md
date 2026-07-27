@@ -53,13 +53,25 @@ pnpm lint
 
 `pnpm build` runs `tsc -b` before bundling, so it doubles as the type check.
 
-## Building a release
+## Building locally
 
 ```bash
 pnpm tauri build --bundles app
 ```
 
 The result lands in `src-tauri/target/release/bundle/macos/Work Journal.app`.
+
+## Cutting a release
+
+Pushing a `vX.Y.Z` tag builds the DMG and publishes it as a GitHub release. The version lives in `src-tauri/tauri.conf.json` and nowhere else — the versions in `package.json` and `src-tauri/Cargo.toml` are fixed at `0.0.0` and mean nothing.
+
+Bump it, commit, then tag the commit that carries the bump:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+The workflow refuses to build if the tag and `tauri.conf.json` disagree, and runs the tests before the build, so a red suite produces no release at all. It builds for Apple Silicon only, and the DMG is unsigned — the release notes carry the `xattr` instruction below.
 
 ### Gatekeeper and the quarantine attribute
 

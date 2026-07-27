@@ -1,0 +1,44 @@
+name: ci
+
+# Runs on every push and pull request, so breakage surfaces before a tag is cut
+# rather than at release time. Node only — the Rust build belongs to release.yml.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+# A newer push to the same branch makes the in-flight run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm test
+
+      - name: Lint
+        run: pnpm lint
+
+      # `tsc -b && vite build`, so this is the type check as well.
+      - name: Build
+        run: pnpm build
