@@ -6,7 +6,9 @@ name: release
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+      # A glob, not a regex — GitHub's tag filters don't take regexes, so the
+      # strict vX.Y.Z shape is enforced in the check step below instead.
+      - 'v*'
 
 jobs:
   release:
@@ -21,6 +23,10 @@ jobs:
       # release whose DMG would be named after a different version than its tag.
       - name: Check the tag matches the version
         run: |
+          if ! echo "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Tag $GITHUB_REF_NAME is not of the form vX.Y.Z — not releasing." >&2
+            exit 1
+          fi
           config_version=$(jq -r .version src-tauri/tauri.conf.json)
           tag_version="${GITHUB_REF_NAME#v}"
           if [ "$config_version" != "$tag_version" ]; then
