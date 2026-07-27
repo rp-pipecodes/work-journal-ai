@@ -28,10 +28,14 @@ pnpm install
 ```
 
 ```bash
-pnpm tauri dev
+pnpm tauri:dev
 ```
 
 There is no Dock icon and no `Cmd+Tab` entry — the app is in the menu bar. Quit it from the Tray Menu.
+
+`pnpm tauri:dev` merges [`tauri.dev.conf.json`](src-tauri/tauri.dev.conf.json) over the release config, which swaps the bundle identifier for `com.pipecodes.work-journal.dev`. Everything the app stores — the journal database, `settings.json`, the login item — lives under the identifier, so the dev build gets its own copy and cannot touch the notes of an installed release. Plain `pnpm tauri dev` shares them; use it only when that is what you want.
+
+Both builds can run at once, but only one of them can hold the Hotkey: whichever registers second finds it taken and reports it unavailable. Give the dev build its own combination in its Settings — that choice persists separately too.
 
 ## Tests
 
