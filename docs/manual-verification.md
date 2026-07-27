@@ -1,15 +1,52 @@
 # Manual verification checklist
 
-OS integrations that an automated test could only assert mocks against. Run these against a release build (`pnpm tauri build --bundles app`) before calling a ticket done. Each ticket adds its own items.
+OS integrations that an automated test could only assert mocks against. Run these against a release build — except where an item says otherwise — before calling a ticket done. Each ticket adds its own items.
+
+You do not need to have written the app to run this. Every item says what to do and what should happen; if what happens is anything else, the item fails.
+
+## Before you start
+
+Build the app and open it:
+
+```bash
+pnpm install && pnpm tauri build --bundles app
+```
+
+```bash
+open "src-tauri/target/release/bundle/macos/Work Journal.app"
+```
+
+Three things are worth knowing before you begin.
+
+**Where the app keeps its state.** `~/Library/Application Support/com.pipecodes.work-journal` — `settings.json` holds the Day Start, the Hotkey and the Start at Login answer, and `work-journal.db` holds the Notes. Deleting the whole directory returns the app to a first run.
+
+```bash
+rm -rf ~/Library/Application\ Support/com.pipecodes.work-journal
+```
+
+Quit the app first, and only do this on a machine whose Notes you are willing to lose.
+
+**How to read the log.** A release build logs nothing — the log plugin is only in debug builds. The handful of items that ask what the app recorded need a development build instead, run from a terminal so its output lands there:
+
+```bash
+pnpm tauri dev
+```
+
+Everything else is checked against the release build.
+
+**How to fill this in.** Tick each item as it passes. Anything that fails gets written down at the bottom under [Walkthroughs](#walkthroughs) — with what you did and what happened instead — and then fixed or filed as an issue. Every walk gets a row there, including one that found nothing and one that stopped early: an unwalked list and a clean one must not read the same.
 
 ## The app itself
 
 - [ ] The app launches and stays running with no Dock icon.
 - [ ] `Cmd+Tab` does not list the app.
 - [ ] A tray icon appears in the menu bar.
-- [ ] Clicking the tray icon opens a menu containing **Quit**.
+- [ ] Clicking the tray icon opens a menu holding **New Note**, **View Notes**, **Settings** and **Quit**, and nothing else.
+- [ ] **New Note** opens a capture window.
+- [ ] **View Notes** opens the history window.
+- [ ] **Settings** opens the settings window.
 - [ ] **Quit** ends the process — the tray icon disappears and nothing is left running.
-- [ ] Launching the app a second time while it is running leaves exactly one tray icon and one process.
+- [ ] Launching the app a second time while it is running — from Spotlight, and again from the Finder — leaves exactly one tray icon and one process each time, and opens a capture window rather than a second app.
 
 ## Capture from the Tray Menu
 
@@ -20,6 +57,7 @@ OS integrations that an automated test could only assert mocks against. Run thes
 - [ ] `Enter` on an empty field, and on a field holding only spaces, dismisses nothing and commits nothing.
 - [ ] Pasting multi-line text into the field leaves a single line.
 - [ ] Re-opening **New Note** after abandoning a Capture shows an empty field.
+- [ ] Re-opening **New Note** straight after committing a Note shows an empty field too — the committed text is not still sitting there.
 - [ ] Notes committed before quitting are still there after relaunching the app, and after a restart of the machine.
 
 ## The Hotkey and relaunch
@@ -28,9 +66,10 @@ OS integrations that an automated test could only assert mocks against. Run thes
 - [ ] The keystroke does not reach the application that was in front (it is intercepted, not passed through).
 - [ ] Holding the Hotkey down starts exactly one Capture.
 - [ ] Pressing the Hotkey during a Capture already in progress leaves one capture window and does not clear what has been typed.
-- [ ] Launching the app from Spotlight while it is running opens a capture window instead of a second instance.
 - [ ] With the Hotkey unavailable — claim `Ctrl+Opt+Cmd+J` in another app first, e.g. as a System Settings keyboard shortcut — the app still launches, the tray icon appears, and **New Note** still starts a Capture.
-- [ ] In that state the log records the failed registration with a reason, and nothing hangs at startup.
+- [ ] In that state the app starts normally and nothing hangs — and on a development build the terminal records the failed registration with a reason.
+- [ ] In that state **Settings** shows a message naming the combination and the reason, and pointing at the Tray Menu — not a silent or broken-looking Hotkey section.
+- [ ] Releasing the combination in the other app and relaunching Work Journal makes the Hotkey work again and the message go away.
 
 ## The Filter and the Nudge
 
@@ -100,3 +139,11 @@ OS integrations that an automated test could only assert mocks against. Run thes
 - [ ] The file holds every Note in the journal, each exactly once, including Notes on days outside the Filter History was last showing.
 - [ ] Exporting twice leaves two files rather than overwriting the first.
 - [ ] Exporting an empty journal writes a file and says so, rather than failing.
+
+## Walkthroughs
+
+One line per end-to-end walk: the date, the build, and what it turned up. "Nothing" is a result.
+
+| Date | Build | Findings |
+| ---- | ----- | -------- |
+| 2026-07-27 | `pnpm tauri build --bundles app`, 0.1.0 | Partial — only the items checkable without a person at the keyboard were run: the bundle builds, launches, and a second launch leaves exactly one process. The release build logs nothing, so the log item moved to a development build. The rest of the list is unwalked. |

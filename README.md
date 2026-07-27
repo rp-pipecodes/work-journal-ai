@@ -8,7 +8,7 @@ The vocabulary the app and its code use is defined in [CONTEXT.md](CONTEXT.md) a
 
 ## Status
 
-The menu-bar shell. The app launches into the menu bar with a **Quit** item and nothing else yet — Capture, history and settings arrive in later tickets.
+v1 is in place: Capture from every Entry Point, history over a Filter of Journal Days with the Nudge, editing, refiling and deletion, the Digest, and Settings — Day Start, Hotkey remap, Start at Login, and Export.
 
 ## Prerequisites
 
