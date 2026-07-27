@@ -13,6 +13,9 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_sql::{Migration, MigrationKind};
 use tauri_plugin_store::StoreExt;
 
+/// The menu bar glyph, compiled in so the tray never depends on a file on disk.
+const TRAY_ICON: &[u8] = include_bytes!("../icons/tray-icon.png");
+
 const NEW_NOTE_MENU_ITEM: &str = "new-note";
 const VIEW_NOTES_MENU_ITEM: &str = "view-notes";
 const SETTINGS_MENU_ITEM: &str = "settings";
@@ -401,8 +404,25 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             _ => {}
         });
 
-    if let Some(icon) = app.default_window_icon() {
-        tray = tray.icon(icon.clone());
+    // The menu bar wants a flat monochrome glyph, not the app icon: macOS
+    // recolours a template image for the light and the dark bar itself, while
+    // the rounded app tile would sit up there as a coloured sticker. Falling
+    // back to the app icon keeps the tray — the Entry Point that always works —
+    // from being lost if the glyph ever fails to decode.
+    match tauri::image::Image::from_bytes(TRAY_ICON) {
+        Ok(icon) => {
+            tray = tray.icon(icon);
+            #[cfg(target_os = "macos")]
+            {
+                tray = tray.icon_as_template(true);
+            }
+        }
+        Err(error) => {
+            log::error!("tray glyph failed to decode, using the app icon: {error}");
+            if let Some(icon) = app.default_window_icon() {
+                tray = tray.icon(icon.clone());
+            }
+        }
     }
 
     tray.build(app)?;

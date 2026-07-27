@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 248 200" width="248" height="200">
+  <style>
+    .ink { fill: #1c1a17 }
+    @media (prefers-color-scheme: dark) {
+      .ink { fill: #ece8e2 }
+    }
+  </style>
+  <g class="ink">
+    <circle cx="18" cy="18" r="18"/>
+    <rect x="66" y="1" width="172" height="34" rx="17"/>
+    <circle cx="18" cy="94" r="18"/>
+    <rect x="66" y="77" width="140" height="34" rx="17"/>
+    <circle cx="18" cy="170" r="18" opacity="0.4"/>
+  </g>
+  <rect x="66" y="151" width="32" height="40" rx="11" fill="#e0913a"/>
+</svg>
