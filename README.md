@@ -4,6 +4,8 @@ A personal, local-first log of short work notes captured throughout the day, so 
 
 macOS on Apple Silicon only. Everything is local: no account, no server, no network call.
 
+To install rather than build, the [download page](https://rp-pipecodes.github.io/work-journal-ai/) has the DMG and the one command macOS needs before it will open it. The page's source is [`site/index.html`](site/index.html), published by [`pages.yml`](.github/workflows/pages.yml) on every push to `main` that touches it.
+
 The vocabulary the app and its code use is defined in [CONTEXT.md](CONTEXT.md) and is normative.
 
 ## Status

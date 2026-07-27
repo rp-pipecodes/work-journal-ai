@@ -1,0 +1,46 @@
+name: pages
+
+# Publishes the download page in site/ to GitHub Pages. The page is plain HTML
+# with no build step, so this uploads the directory as it stands.
+
+on:
+  push:
+    branches:
+      - main
+    # The page is the only thing this deploys, so nothing else should trigger it.
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  # So the page can be republished without an empty commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and never cancel one in flight — a half-published site
+# is worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

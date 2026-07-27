@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Work Journal — a local-first log of short work notes</title>
+    <meta
+      name="description"
+      content="A personal, local-first macOS menu bar app for capturing short work notes, so what you did is recoverable at standup, in a review, or as context for an LLM."
+    />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+    <meta property="og:title" content="Work Journal" />
+    <meta
+      property="og:description"
+      content="A personal, local-first log of short work notes captured throughout the day."
+    />
+    <meta property="og:type" content="website" />
+
+    <style>
+      :root {
+        color-scheme: light dark;
+
+        --bg: #fbfaf9;
+        --fg: #1c1a17;
+        --muted: #6b655d;
+        --rule: #e4e0da;
+        --code-bg: #f2efeb;
+        --accent: #1c1a17;
+        --accent-fg: #fbfaf9;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #161513;
+          --fg: #ece8e2;
+          --muted: #9a938a;
+          --rule: #2c2a27;
+          --code-bg: #211f1d;
+          --accent: #ece8e2;
+          --accent-fg: #161513;
+        }
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 17px/1.6 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      main {
+        max-width: 34rem;
+        margin: 0 auto;
+        padding: 5rem 1.5rem 6rem;
+      }
+
+      /* The lockup: icon and name read as one unit. */
+      .lockup {
+        display: flex;
+        align-items: center;
+        gap: 0.9rem;
+        margin-bottom: 1.75rem;
+      }
+
+      .lockup img {
+        width: 56px;
+        height: 56px;
+        border-radius: 12px;
+      }
+
+      h1 {
+        font-size: 1.75rem;
+        letter-spacing: -0.02em;
+        margin: 0;
+      }
+
+      .tagline {
+        font-size: 1.2rem;
+        line-height: 1.45;
+        letter-spacing: -0.01em;
+        margin: 0 0 1.5rem;
+      }
+
+      p {
+        margin: 0 0 1.1rem;
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      h2 {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        color: var(--muted);
+        margin: 0 0 1rem;
+        font-weight: 600;
+      }
+
+      section {
+        border-top: 1px solid var(--rule);
+        margin-top: 3rem;
+        padding-top: 2rem;
+      }
+
+      a {
+        color: inherit;
+        text-underline-offset: 3px;
+        text-decoration-thickness: 1px;
+      }
+
+      .download {
+        display: inline-block;
+        background: var(--accent);
+        color: var(--accent-fg);
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 1.05rem;
+        padding: 0.8rem 1.5rem;
+        border-radius: 10px;
+      }
+
+      .download:hover {
+        opacity: 0.85;
+      }
+
+      .download:focus-visible {
+        outline: 2px solid var(--fg);
+        outline-offset: 3px;
+      }
+
+      /* Sits directly under the button on purpose: nobody should reach the
+         DMG without having read the requirements and the xattr step. */
+      .requirements {
+        margin: 0.9rem 0 1.5rem;
+        font-size: 0.95rem;
+        color: var(--muted);
+      }
+
+      /* Wraps rather than scrolls: a horizontally clipped command is one a
+         reader can copy half of, and this is the command the app depends on. */
+      pre {
+        background: var(--code-bg);
+        border-radius: 8px;
+        padding: 0.9rem 1rem;
+        margin: 0 0 1.1rem;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      code {
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+        font-size: 0.875rem;
+      }
+
+      ul {
+        padding-left: 1.1rem;
+        margin: 0 0 1.1rem;
+      }
+
+      li {
+        margin-bottom: 0.4rem;
+      }
+
+      footer {
+        border-top: 1px solid var(--rule);
+        margin-top: 3rem;
+        padding-top: 2rem;
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+
+  <body>
+    <main>
+      <div class="lockup">
+        <img src="icon.png" alt="" />
+        <h1>Work Journal</h1>
+      </div>
+
+      <p class="tagline">
+        A personal, local-first log of short work notes captured throughout the
+        day, so that what you did is recoverable later.
+      </p>
+
+      <p>
+        You write one line whenever something happens. Later — at standup, in a
+        review, or as context for an LLM — you read the day back as Markdown and
+        paste it wherever it needs to go.
+      </p>
+
+      <p>
+        It lives in the menu bar. There is no Dock icon, no window to manage, and
+        no app to switch to: a global hotkey opens a single text field, you type
+        a line, and it disappears again.
+      </p>
+
+      <p>
+        Everything is local. No account, no server, no network call — the notes
+        are a SQLite file on your Mac, and Export writes the whole journal to
+        Markdown so nothing is locked in.
+      </p>
+
+      <section>
+        <h2>Download</h2>
+
+        <a
+          class="download"
+          href="https://github.com/rp-pipecodes/work-journal-ai/releases/latest"
+          >Download for macOS</a
+        >
+
+        <p class="requirements">
+          Apple Silicon only. Unsigned and unnotarized — after dragging it to
+          Applications you <strong>must</strong> clear the quarantine attribute
+          macOS attached to it, or macOS will report the app as damaged:
+        </p>
+
+        <pre><code>xattr -dr com.apple.quarantine "/Applications/Work Journal.app"</code></pre>
+
+        <p class="muted">
+          That step is not optional for a downloaded copy. A build you compiled
+          yourself and never moved is not quarantined and needs nothing.
+        </p>
+      </section>
+
+      <section>
+        <h2>What it does</h2>
+
+        <ul>
+          <li>Capture a note from a global hotkey, the tray menu, or relaunching the app.</li>
+          <li>Read back any range of days, grouped and ordered oldest first.</li>
+          <li>Edit a note's wording, move it to another day, or delete it.</li>
+          <li>Copy the range you are looking at as Markdown.</li>
+          <li>Export the entire journal to a Markdown file.</li>
+          <li>Set when your day starts, so work after midnight files under the day it felt like.</li>
+        </ul>
+      </section>
+
+      <footer>
+        <p>
+          MIT licensed.
+          <a href="https://github.com/rp-pipecodes/work-journal-ai"
+            >Source on GitHub</a
+          >.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>
