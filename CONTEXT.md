@@ -66,5 +66,18 @@ A Journal Day that has at least one Note. What "the previous day" means in pract
 The Markdown rendering of every Note in the current Filter, oldest first, grouped under day headings when the Filter spans more than one day. The journal's only output — written to be pasted into a standup or an LLM prompt.
 _Avoid_: Export, report, summary, copy-all text
 
+**Export**:
+Every Note in the journal written to a Markdown file, each appearing exactly once, under a heading for the day it is filed under. The way out of the SQLite file, so nothing captured here is locked in — which is why it ignores the Filter entirely, and why it is a core operation rather than a convenience.
+_Avoid_: Backup, dump, save as
+
 **Deletion**:
 Permanent removal of a Note. There is no trash, no archive, and no recovery — a deleted Note is gone.
+
+## Settings
+
+**Settings**:
+The four things about the app the user gets to decide: the Day Start, the Hotkey, whether the app starts at login, and — as the one action rather than a setting — Export. Reached from the Tray Menu, and closed on dismiss rather than kept resident.
+
+**Start at Login**:
+Whether the app launches when the user logs in. Off until the user says otherwise, and asked once on first run so the app never adds itself to the login items uninvited. Declining is an answer: the question is not asked again.
+_Avoid_: Autostart, launch at startup, open at boot

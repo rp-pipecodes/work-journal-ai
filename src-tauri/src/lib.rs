@@ -1,6 +1,9 @@
+mod export;
 mod hotkey;
 
+use export::ExportedFile;
 use hotkey::HotkeyStatus;
+use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
@@ -8,14 +11,30 @@ use tauri::{
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_sql::{Migration, MigrationKind};
+use tauri_plugin_store::StoreExt;
 
 const NEW_NOTE_MENU_ITEM: &str = "new-note";
 const VIEW_NOTES_MENU_ITEM: &str = "view-notes";
+const SETTINGS_MENU_ITEM: &str = "settings";
 const QUIT_MENU_ITEM: &str = "quit";
 
 /// The window labels the frontend routes on — see `src/views/route.ts`.
 const CAPTURE_WINDOW: &str = "capture";
 const HISTORY_WINDOW: &str = "history";
+const SETTINGS_WINDOW: &str = "settings";
+
+/// Where the settings live. Written from both sides — see
+/// `src/settings/tauri-settings.ts` — which is acceptable only because v1 has
+/// no secrets in it; see docs/adr/0001-defer-voice-capture-to-v2.md.
+const SETTINGS_FILE: &str = "settings.json";
+
+/// The Hotkey is claimed from the OS rather than merely stored, so this side
+/// owns both registering it and remembering it.
+const HOTKEY_KEY: &str = "hotkey";
+
+/// Whether the app starts at login. Only its presence is read here: an absent
+/// answer is a first run, and a first run is when the question gets asked.
+const START_AT_LOGIN_KEY: &str = "startAtLogin";
 
 /// Told to the capture window every time it is shown. It is long-lived, so it
 /// clears its field and takes focus on this rather than on being built — see
@@ -45,7 +64,12 @@ pub fn run() {
                 .add_migrations(DATABASE_URL, migrations())
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![dismiss_capture, hotkey_status])
+        .invoke_handler(tauri::generate_handler![
+            dismiss_capture,
+            hotkey_status,
+            set_hotkey,
+            export_notes
+        ])
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -67,6 +91,13 @@ pub fn run() {
             // webview costs a few hundred milliseconds a Capture cannot afford.
             build_capture_window(app.handle())?;
             build_tray(app.handle())?;
+
+            // Start at login is offered once, and only once: the app must
+            // never add itself to the login items without being asked, and
+            // must not keep asking after being told no.
+            if !has_answered_start_at_login(app.handle()) {
+                open_settings(app.handle());
+            }
 
             Ok(())
         })
@@ -147,23 +178,37 @@ fn open_history(app: &tauri::AppHandle) {
 }
 
 fn show_history_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    show_on_demand_window(app, HISTORY_WINDOW, "Notes", (520.0, 620.0), (380.0, 320.0))
+}
+
+/// A window built the first time it is asked for and raised every time after,
+/// until it is dismissed and genuinely closed. The two windows that work this
+/// way — History and Settings — differ only in their label and their size; the
+/// awkward parts are the same for both, so they are only written once.
+fn show_on_demand_window(
+    app: &tauri::AppHandle,
+    label: &str,
+    title: &str,
+    size: (f64, f64),
+    min_size: (f64, f64),
+) -> tauri::Result<()> {
     // Dismissing a Capture hides the whole app, so the app itself has to be
     // brought out of hiding first — on either path, since `show()` on a window
     // of a hidden application puts nothing on screen.
     #[cfg(target_os = "macos")]
     app.show()?;
 
-    // Reaching the Tray Menu again with History already open raises it rather
-    // than building a second one.
-    if let Some(window) = app.get_webview_window(HISTORY_WINDOW) {
+    // Reaching the Tray Menu again with the window already open raises it
+    // rather than building a second one.
+    if let Some(window) = app.get_webview_window(label) {
         window.show()?;
         return window.set_focus();
     }
 
-    let window = WebviewWindowBuilder::new(app, HISTORY_WINDOW, WebviewUrl::default())
-        .title("Notes")
-        .inner_size(520.0, 620.0)
-        .min_inner_size(380.0, 320.0)
+    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::default())
+        .title(title)
+        .inner_size(size.0, size.1)
+        .min_inner_size(min_size.0, min_size.1)
         .center()
         .build()?;
 
@@ -173,33 +218,140 @@ fn show_history_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Registers the Hotkey and records the outcome where the rest of the app can
-/// read it. A registration macOS withholds must not take the app down with it:
-/// the Tray Menu still starts a Capture, and Settings reports the failure later.
-fn register_hotkey(app: &tauri::AppHandle) {
-    let handle = app.clone();
-    let status = hotkey::register(hotkey::DEFAULT_HOTKEY, |hotkey| {
-        app.global_shortcut()
+/// Opens Settings, building the window if it is not already open. Created on
+/// demand and genuinely closed on dismiss, like History.
+fn open_settings(app: &tauri::AppHandle) {
+    if let Err(error) = show_settings_window(app) {
+        log::error!("could not open Settings: {error}");
+    }
+}
+
+fn show_settings_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    show_on_demand_window(
+        app,
+        SETTINGS_WINDOW,
+        "Settings",
+        (480.0, 560.0),
+        (400.0, 420.0),
+    )
+}
+
+/// Whether the app has ever been told what to do about starting at login. Only
+/// the presence of an answer matters here — honouring it is the frontend's job,
+/// since that is where the autostart plugin is driven from.
+fn has_answered_start_at_login(app: &tauri::AppHandle) -> bool {
+    match app.store(SETTINGS_FILE) {
+        Ok(store) => store.has(START_AT_LOGIN_KEY),
+        Err(error) => {
+            // Unreadable settings must not turn into a question asked on every
+            // launch, nor into an app that adds itself to the login items.
+            log::error!("could not read the settings: {error}");
+            true
+        }
+    }
+}
+
+/// The OS's global shortcut table, plus the one thing pressing the Hotkey does.
+struct GlobalShortcuts {
+    app: tauri::AppHandle,
+}
+
+impl hotkey::Registrar for GlobalShortcuts {
+    fn register(&self, hotkey: &str) -> Result<(), String> {
+        let handle = self.app.clone();
+        self.app
+            .global_shortcut()
             .on_shortcut(hotkey, move |_app, _shortcut, event| {
                 // Press and release both arrive; one Capture per press.
                 if event.state() == ShortcutState::Pressed {
                     start_capture(&handle);
                 }
             })
+            .map_err(|error| error.to_string())
+    }
+
+    fn unregister(&self, hotkey: &str) {
+        if let Err(error) = self.app.global_shortcut().unregister(hotkey) {
+            log::warn!("could not give up the Hotkey {hotkey}: {error}");
+        }
+    }
+}
+
+/// Registers the Hotkey the user last settled on and records the outcome where
+/// the rest of the app can read it. A registration macOS withholds must not
+/// take the app down with it: the Tray Menu still starts a Capture, and
+/// Settings reports the failure.
+fn register_hotkey(app: &tauri::AppHandle) {
+    let registrar = GlobalShortcuts { app: app.clone() };
+    let status = hotkey::register(&stored_hotkey(app), |hotkey| {
+        hotkey::Registrar::register(&registrar, hotkey)
     });
 
     if let HotkeyStatus::Unavailable { hotkey, reason } = &status {
         log::error!("the Hotkey {hotkey} is unavailable: {reason}");
     }
 
-    app.manage(status);
+    app.manage(Mutex::new(status));
 }
 
-/// The Hotkey's availability, for whichever window asks — Settings, once it
-/// exists, reports a failed registration to the user.
+/// The Hotkey remembered from a previous run, or the one the app ships with.
+fn stored_hotkey(app: &tauri::AppHandle) -> String {
+    app.store(SETTINGS_FILE)
+        .ok()
+        .and_then(|store| store.get(HOTKEY_KEY))
+        .and_then(|value| value.as_str().map(str::to_string))
+        .filter(|hotkey| !hotkey.trim().is_empty())
+        .unwrap_or_else(|| hotkey::DEFAULT_HOTKEY.to_string())
+}
+
+/// The Hotkey's availability, for whichever window asks — Settings reports a
+/// failed registration to the user, and points them at the Tray Menu.
 #[tauri::command]
-fn hotkey_status(status: tauri::State<'_, HotkeyStatus>) -> HotkeyStatus {
-    status.inner().clone()
+fn hotkey_status(status: tauri::State<'_, Mutex<HotkeyStatus>>) -> Result<HotkeyStatus, String> {
+    Ok(status.lock().map_err(|_| lost_hotkey())?.clone())
+}
+
+/// Moves the Hotkey to another combination. A combination the OS refuses is
+/// reported as an error and is not remembered: restoring it on the next run
+/// would leave the app with no Hotkey and no explanation.
+#[tauri::command]
+fn set_hotkey(
+    app: tauri::AppHandle,
+    status: tauri::State<'_, Mutex<HotkeyStatus>>,
+    hotkey: String,
+) -> Result<HotkeyStatus, String> {
+    let registrar = GlobalShortcuts { app: app.clone() };
+    let mut current = status.lock().map_err(|_| lost_hotkey())?;
+    let next = hotkey::remap(&current, &hotkey, &registrar)?;
+
+    let store = app.store(SETTINGS_FILE).map_err(|error| error.to_string())?;
+    store.set(HOTKEY_KEY, next.hotkey());
+    store.save().map_err(|error| error.to_string())?;
+
+    *current = next.clone();
+
+    Ok(next)
+}
+
+fn lost_hotkey() -> String {
+    "the Hotkey could not be read".to_string()
+}
+
+/// Writes every Note to a Markdown file — the way out of the SQLite file. The
+/// Markdown is rendered by the journal core; all that is left here is putting
+/// it somewhere the user can find it, and saying where that was.
+#[tauri::command]
+fn export_notes(
+    app: tauri::AppHandle,
+    markdown: String,
+    file_name: String,
+) -> Result<ExportedFile, String> {
+    let directory = app
+        .path()
+        .download_dir()
+        .map_err(|error| format!("there is nowhere to export to: {error}"))?;
+
+    export::write(&directory, &file_name, &markdown).map_err(|error| error.to_string())
 }
 
 /// Ends a Capture, whether it committed a Note or discarded one. The window is
@@ -223,15 +375,20 @@ fn hide_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// The Tray Menu — the Entry Point that always works. It gains Settings as that
-/// arrives; Quit is here because without a Dock icon it is the only way out.
+/// The Tray Menu — the Entry Point that always works, and the one Settings
+/// points at when the Hotkey cannot be registered. Quit is here because without
+/// a Dock icon it is the only way out.
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let new_note = MenuItem::with_id(app, NEW_NOTE_MENU_ITEM, "New Note", true, None::<&str>)?;
     let view_notes =
         MenuItem::with_id(app, VIEW_NOTES_MENU_ITEM, "View Notes", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, SETTINGS_MENU_ITEM, "Settings", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, QUIT_MENU_ITEM, "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&new_note, &view_notes, &separator, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[&new_note, &view_notes, &settings, &separator, &quit],
+    )?;
 
     let mut tray = TrayIconBuilder::with_id("tray")
         .menu(&menu)
@@ -239,6 +396,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             NEW_NOTE_MENU_ITEM => start_capture(app),
             VIEW_NOTES_MENU_ITEM => open_history(app),
+            SETTINGS_MENU_ITEM => open_settings(app),
             QUIT_MENU_ITEM => app.exit(0),
             _ => {}
         });

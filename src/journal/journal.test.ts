@@ -8,7 +8,9 @@ import {
   filterForRange,
   formatJournalDay,
   formatTimeOfDay,
+  exportFileName,
   groupByJournalDay,
+  fixedDayStart,
   journalDayFor,
   DEFAULT_DAY_START_HOUR,
 } from './journal'
@@ -646,6 +648,149 @@ describe('digest', () => {
     })
 
     expect(digest).toEqual({ markdown: '', noteCount: 0 })
+  })
+})
+
+describe('exportAll', () => {
+  it('includes every Note in the database exactly once', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+    const bodies = []
+    for (const day of ['09', '11', '12', '16']) {
+      for (const hour of ['09', '15']) {
+        clock.set(local(`2026-03-${day}T${hour}:00:00`))
+        bodies.push(`the ${day}th at ${hour}`)
+        await journal.capture(`the ${day}th at ${hour}`)
+      }
+    }
+
+    const exported = await journal.exportAll()
+
+    const bullets = exported.markdown
+      .split('\n')
+      .filter((line) => line.startsWith('- '))
+    expect(exported.noteCount).toBe(bodies.length)
+    expect(bullets).toHaveLength(bodies.length)
+    for (const body of bodies) {
+      expect(bullets.filter((bullet) => bullet === `- ${body}`)).toHaveLength(1)
+    }
+  })
+
+  it('reaches Notes no Filter the reader has opened would show', async () => {
+    const { journal, clock } = await journalAt('2024-01-02T09:00:00')
+    await journal.capture('two years ago')
+    clock.set(local('2026-03-13T09:00:00'))
+    await journal.capture('today')
+
+    const exported = await journal.exportAll()
+
+    expect(exported.markdown).toContain('- two years ago')
+    expect(exported.markdown).toContain('- today')
+    expect(exported.noteCount).toBe(2)
+  })
+
+  it('reads oldest first, under a heading for every day', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+    await journal.capture('the migration landed')
+    clock.set(local('2026-03-13T09:00:00'))
+    await journal.capture('took the on-call handover')
+
+    const exported = await journal.exportAll()
+
+    expect(exported.markdown).toBe(
+      [
+        '## Wed 11 Mar',
+        '- the migration landed',
+        '',
+        '## Fri 13 Mar',
+        '- took the on-call handover',
+      ].join('\n'),
+    )
+  })
+
+  it('heads the single day of a journal holding only one', async () => {
+    const { journal } = await journalAt('2026-03-13T09:00:00')
+    await journal.capture('the only day with anything on it')
+
+    const exported = await journal.exportAll()
+
+    expect(exported.markdown).toBe(
+      '## Fri 13 Mar\n- the only day with anything on it',
+    )
+  })
+
+  it('renders nothing at all for a journal with no Notes', async () => {
+    const { journal } = await journalAt('2026-03-13T09:00:00')
+
+    expect(await journal.exportAll()).toEqual({ markdown: '', noteCount: 0 })
+  })
+})
+
+describe('exportFileName', () => {
+  it('names the file after the journal and the day it was taken', () => {
+    expect(exportFileName(local('2026-03-09T21:15:00'))).toBe(
+      'work-journal-2026-03-09.md',
+    )
+  })
+
+  it('is a plain file name, with nowhere to traverse to', () => {
+    expect(exportFileName(local('2026-03-09T21:15:00'))).not.toMatch(/[/\\]/)
+  })
+})
+
+describe('the Day Start in force', () => {
+  it('files a Capture under the Day Start currently set', async () => {
+    const { driver, close } = await openTestDatabase()
+    openJournals.push(close)
+    const clock = fixedClock(local('2026-03-12T02:30:00'))
+    const journal = createJournal({
+      clock,
+      driver,
+      dayStart: fixedDayStart(0),
+    })
+
+    const captured = await journal.capture('up late, and it counts as today')
+
+    expect(captured?.journalDay).toBe('2026-03-12')
+  })
+
+  it('leaves every Note already filed exactly where it is', async () => {
+    const { driver, close } = await openTestDatabase()
+    openJournals.push(close)
+    const clock = fixedClock(local('2026-03-12T02:30:00'))
+    let hour = 4
+    const journal = createJournal({ clock, driver, dayStart: { hour: () => hour } })
+    const captured = await journal.capture('filed under the 11th')
+    expect(captured?.journalDay).toBe('2026-03-11')
+
+    // The Day Start changes; nothing recomputes.
+    hour = 0
+
+    expect(await journal.notesForJournalDay('2026-03-11')).toHaveLength(1)
+    expect(await journal.notesForJournalDay('2026-03-12')).toHaveLength(0)
+  })
+
+  it('reads the Day Start again for every Capture', async () => {
+    const { driver, close } = await openTestDatabase()
+    openJournals.push(close)
+    const clock = fixedClock(local('2026-03-12T02:30:00'))
+    let hour = 4
+    const journal = createJournal({ clock, driver, dayStart: { hour: () => hour } })
+
+    const before = await journal.capture('before the change')
+    hour = 0
+    const after = await journal.capture('after the change')
+
+    expect(before?.journalDay).toBe('2026-03-11')
+    expect(after?.journalDay).toBe('2026-03-12')
+  })
+
+  it('defaults to the Day Start the app ships with', async () => {
+    const { journal } = await journalAt('2026-03-12T02:30:00')
+
+    const captured = await journal.capture('the default still applies')
+
+    expect(DEFAULT_DAY_START_HOUR).toBe(4)
+    expect(captured?.journalDay).toBe('2026-03-11')
   })
 })
 

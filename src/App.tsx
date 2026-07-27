@@ -1,12 +1,11 @@
 import CaptureView from './views/capture/CaptureView'
 import HistoryView from './views/history/HistoryView'
+import SettingsView from './views/settings/SettingsView'
 import { viewForLabel } from './views/route'
 
 /**
- * Every window loads the same bundle; the window label picks the view. The
- * views themselves arrive with the tickets that build them — until then a
- * recognised label renders a placeholder and an unrecognised one renders
- * nothing.
+ * Every window loads the same bundle; the window label picks the view. An
+ * unrecognised label renders nothing at all.
  */
 export default function App({ windowLabel }: { windowLabel: string }) {
   const view = viewForLabel(windowLabel)
@@ -23,5 +22,5 @@ export default function App({ windowLabel }: { windowLabel: string }) {
     return <HistoryView />
   }
 
-  return <main className="p-4 text-sm">{view}</main>
+  return <SettingsView />
 }

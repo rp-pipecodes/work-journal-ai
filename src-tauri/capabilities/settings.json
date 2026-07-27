@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "settings",
+  "description": "Settings closes itself on dismiss; the capture window must never be able to",
+  "windows": [
+    "settings"
+  ],
+  "permissions": [
+    "core:window:allow-close"
+  ]
+}

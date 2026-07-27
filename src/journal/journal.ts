@@ -12,6 +12,16 @@ export interface Clock {
   now(): Date
 }
 
+/**
+ * The Day Start as it stands right now. Asked afresh for every Capture rather
+ * than fixed when the journal is built, so changing the setting takes effect on
+ * the next Note without the running windows being rebuilt — and so it can only
+ * ever reach a Note being written, never one already stored.
+ */
+export interface DayStart {
+  hour(): number
+}
+
 /** The whole of the app's storage surface: a SQL string plus parameters. */
 export interface SqlDriver {
   execute(sql: string, params: unknown[]): Promise<unknown>
@@ -66,11 +76,15 @@ export type ArrivalDecision =
   | { kind: 'nudge'; journalDay: string }
 
 /**
- * The hour at which one Journal Day gives way to the next. User-configurable
- * later; fixed here so work done after midnight files under the day it felt
- * like.
+ * The hour at which one Journal Day gives way to the next, until the user says
+ * otherwise, so work done after midnight files under the day it felt like.
  */
 export const DEFAULT_DAY_START_HOUR = 4
+
+/** A Day Start that does not move: the app's default, and every test's. */
+export function fixedDayStart(hour: number): DayStart {
+  return { hour: () => hour }
+}
 
 export interface Journal {
   /**
@@ -120,6 +134,16 @@ export interface Journal {
    * chronology.
    */
   digest(filter: Filter): Promise<Digest>
+  /**
+   * Every Note in the journal as Markdown, under a heading for each day — the
+   * way out of the SQLite file, so nothing captured here is locked in. Every
+   * Note appears exactly once, whatever Filter the reader last looked at.
+   *
+   * An Export is rendered exactly as a Digest is, and so has the same shape,
+   * but it is not one: a Digest is bound to the Filter on screen and an Export
+   * ignores the Filter entirely.
+   */
+  exportAll(): Promise<Digest>
 }
 
 interface NoteRow {
@@ -181,21 +205,30 @@ const SELECT_NOTES_FOR_FILTER = `
   ORDER BY journal_day DESC, captured_at DESC, id DESC
 `
 
+/** Chronological: the order Markdown reads in, whatever is being rendered. */
+const IN_DIGEST_ORDER = `ORDER BY journal_day ASC, captured_at ASC, id ASC`
+
 /** The same rows as a Filter's, in the order a Digest reads in. */
 const SELECT_NOTES_FOR_DIGEST = `
   ${SELECT_NOTES}
   WHERE journal_day BETWEEN ? AND ?
-  ORDER BY journal_day ASC, captured_at ASC, id ASC
+  ${IN_DIGEST_ORDER}
+`
+
+/** The same rows again with no predicate at all: the whole journal. */
+const SELECT_ALL_NOTES_FOR_EXPORT = `
+  ${SELECT_NOTES}
+  ${IN_DIGEST_ORDER}
 `
 
 export function createJournal({
   clock,
   driver,
-  dayStartHour = DEFAULT_DAY_START_HOUR,
+  dayStart = fixedDayStart(DEFAULT_DAY_START_HOUR),
 }: {
   clock: Clock
   driver: SqlDriver
-  dayStartHour?: number
+  dayStart?: DayStart
 }): Journal {
   return {
     async capture(body) {
@@ -210,7 +243,9 @@ export function createJournal({
         id: crypto.randomUUID(),
         body: body.trim(),
         capturedAt: capturedAt.toISOString(),
-        journalDay: journalDayFor(capturedAt, dayStartHour),
+        // Read now, for this Note only: a later change to the Day Start has
+        // nothing to say about a Journal Day already written down.
+        journalDay: journalDayFor(capturedAt, dayStart.hour()),
         editedAt: null,
       }
 
@@ -299,7 +334,16 @@ export function createJournal({
         filter.from,
         filter.to,
       ])
-      return renderDigest(filter, rows.map(toNote))
+      // A single day is the common case and pastes without ceremony; any wider
+      // Filter says which day each bullet belongs to.
+      return renderDigest(rows.map(toNote), filter.from !== filter.to)
+    },
+
+    async exportAll() {
+      const rows = await driver.select<NoteRow>(SELECT_ALL_NOTES_FOR_EXPORT, [])
+      // An export always spans whatever the journal holds, so every day is
+      // named — a file with unlabelled bullets is not a journal.
+      return renderDigest(rows.map(toNote), true)
     },
   }
 }
@@ -309,20 +353,19 @@ export function createJournal({
  * Digest is meant to paste into a standup thread or an LLM prompt with no
  * cleanup, so it carries nothing the app knows and the reader does not need.
  *
- * Headings are decided by the Filter rather than by the Notes: a single day is
- * the common case and pastes without ceremony, while any wider Filter says
- * which day each bullet belongs to. Days with no Notes are simply absent.
+ * Headings are the caller's decision rather than the Notes': what is being
+ * rendered decides whether a bullet needs to say which day it belongs to. Days
+ * with no Notes are simply absent either way.
  *
  * `notes` must already be in Digest order, which is what the core's read does.
  */
-function renderDigest(filter: Filter, notes: Note[]): Digest {
-  const spansDays = filter.from !== filter.to
+function renderDigest(notes: Note[], headings: boolean): Digest {
   const days = groupByJournalDay(notes)
 
   const markdown = days
     .map((day) => {
       const bullets = day.notes.map((note) => `- ${note.body}`).join('\n')
-      return spansDays
+      return headings
         ? `## ${formatDigestDay(day.journalDay)}\n${bullets}`
         : bullets
     })
@@ -380,6 +423,21 @@ export function journalDayFor(instant: Date, dayStartHour: number): string {
     String(day.getMonth() + 1).padStart(2, '0'),
     String(day.getDate()).padStart(2, '0'),
   ].join('-')
+}
+
+/**
+ * What an export is called: the journal, and the day it was taken. Dated so a
+ * second export sits beside the first as a later snapshot rather than as an
+ * anonymous copy.
+ */
+export function exportFileName(taken: Date): string {
+  const day = [
+    String(taken.getFullYear()).padStart(4, '0'),
+    String(taken.getMonth() + 1).padStart(2, '0'),
+    String(taken.getDate()).padStart(2, '0'),
+  ].join('-')
+
+  return `work-journal-${day}.md`
 }
 
 /** The Notes of one Journal Day, under the day they are filed under. */

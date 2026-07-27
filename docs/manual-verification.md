@@ -68,3 +68,35 @@ OS integrations that an automated test could only assert mocks against. Run thes
 - [ ] Copying twice in a row copies the same thing both times — the clipboard write is not lost after the first click.
 - [ ] **Copy All** on a range holding no Notes says so and leaves the clipboard as it was.
 - [ ] Moving either end of the range clears the confirmation, and the next copy carries the new range.
+
+## Settings
+
+- [ ] **Settings** in the Tray Menu opens the settings window; `Escape` closes it, and re-opening it builds a fresh one.
+- [ ] On a first run — with no `settings.json` in the app data directory — the settings window opens on its own and asks about starting at login.
+- [ ] Answering **Not now** leaves the app out of System Settings → General → Login Items, and the question is not asked again on the next launch.
+- [ ] Closing the window without answering counts as **Not now** — the app is not added to the login items, and the question is not asked again either.
+- [ ] Answering **Start at login** adds it, and the app launches after a log out and back in.
+- [ ] The checkbox afterwards adds and removes the login item, and matches what System Settings shows when Settings is re-opened.
+
+## The Day Start
+
+- [ ] Changing the Day Start to 00:00 and capturing at, say, 01:00 files the Note under today rather than yesterday.
+- [ ] Notes captured before the change are still filed under exactly the days they were, in History.
+- [ ] The new Day Start applies to a Capture started from the Hotkey without the app being restarted (the capture window is never rebuilt).
+- [ ] The Day Start survives quitting and relaunching the app.
+
+## The Hotkey, remapped
+
+- [ ] **Change**, then pressing a combination, rebinds the Hotkey — the new one starts a Capture and the old one no longer does.
+- [ ] The remapped Hotkey still works after quitting and relaunching the app.
+- [ ] `Escape` while recording abandons it and leaves the Hotkey as it was.
+- [ ] Choosing a combination another application has registered globally (for example `Ctrl+Opt+Cmd+Space` while another tool holds it) reports the refusal, names the combination, and points at the Work Journal menu — and the previous Hotkey still works.
+- [ ] Pressing a bare key, or only modifiers, records nothing.
+- [ ] Settings says in as many words that a conflict with an application's own in-window shortcut cannot be detected.
+
+## Export
+
+- [ ] **Export all to Markdown** writes a file to the Downloads folder and names the path it wrote to.
+- [ ] The file holds every Note in the journal, each exactly once, including Notes on days outside the Filter History was last showing.
+- [ ] Exporting twice leaves two files rather than overwriting the first.
+- [ ] Exporting an empty journal writes a file and says so, rather than failing.

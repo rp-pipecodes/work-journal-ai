@@ -1,6 +1,13 @@
 import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import Database from '@tauri-apps/plugin-sql'
-import { createJournal, type Journal, type Note, type SqlDriver } from './journal'
+import { loadSettings, onDayStartChanged } from '@/settings/tauri-settings'
+import {
+  createJournal,
+  DEFAULT_DAY_START_HOUR,
+  type Journal,
+  type Note,
+  type SqlDriver,
+} from './journal'
 
 /** Must match `DATABASE_URL` in `src-tauri/src/lib.rs`. */
 const DATABASE_URL = 'sqlite:work-journal.db'
@@ -49,5 +56,25 @@ async function load(): Promise<Journal> {
     select: (sql, params) => database.select(sql, params),
   }
 
-  return createJournal({ clock: { now: () => new Date() }, driver })
+  // The Day Start in force, kept current for as long as this window lives. The
+  // capture window is built once and never rebuilt, so without this it would
+  // spend the rest of the run filing Notes under the Day Start that was set
+  // when it started.
+  let dayStartHour = DEFAULT_DAY_START_HOUR
+  try {
+    dayStartHour = (await loadSettings()).dayStartHour
+  } catch (error) {
+    // A journal that files under the default beats a Capture that cannot be
+    // made at all.
+    console.error('could not read the Day Start', error)
+  }
+  void onDayStartChanged((hour) => {
+    dayStartHour = hour
+  })
+
+  return createJournal({
+    clock: { now: () => new Date() },
+    driver,
+    dayStart: { hour: () => dayStartHour },
+  })
 }
