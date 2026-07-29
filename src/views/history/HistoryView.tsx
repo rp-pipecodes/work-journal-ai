@@ -337,7 +337,7 @@ function NoteLine({
           <button
             type="button"
             onClick={onEdit}
-            className="flex-1 cursor-text text-left outline-none focus-visible:underline"
+            className="flex-1 cursor-text rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           >
             {note.body}
             {note.editedAt !== null && (

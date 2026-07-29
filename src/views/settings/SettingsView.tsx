@@ -11,8 +11,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { useTheme } from '@/components/theme-context'
 import { exportFileName } from '@/journal/journal'
 import { journal } from '@/journal/tauri-journal'
+import { describeTheme, isTheme, THEME_CHOICES } from '@/settings/theme'
 import {
   DAY_START_HOURS,
   DEFAULT_SETTINGS,
@@ -50,6 +52,9 @@ export default function SettingsView() {
   // The first-run question, asked once and never again — whichever way it is
   // answered. False until the store has been asked whether it was answered.
   const [asking, setAsking] = useState(false)
+  // Read from the provider rather than loaded here: the Hotkey and every other
+  // window can change the Theme too, and a second copy would drift from it.
+  const { theme, resolved, setTheme } = useTheme()
   const page = useRef<HTMLDivElement>(null)
   // Guards the one path that closes the window on the user's behalf, so
   // closing it cannot re-enter this and loop.
@@ -234,6 +239,37 @@ export default function SettingsView() {
           here and reported. A combination an application uses only inside its
           own window cannot be detected — the Hotkey will simply take precedence
           there.
+        </Aside>
+      </Section>
+
+      <Section
+        title="Appearance"
+        explanation="Whether the app is light or dark, and whether it decides that for itself."
+      >
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Appearance</span>
+          <select
+            value={theme}
+            onChange={(event) => {
+              // The picker only ever offers Themes; anything else is a bug
+              // rather than a value to store.
+              if (isTheme(event.target.value)) {
+                setTheme(event.target.value)
+              }
+            }}
+            className="rounded-md border border-border bg-transparent px-2 py-1 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+          >
+            {THEME_CHOICES.map((choice) => (
+              <option key={choice} value={choice}>
+                {describeTheme(choice)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Aside>
+          {theme === 'system'
+            ? `Following the system, which is currently ${resolved}. Cmd+Shift+D switches to the other one.`
+            : `Cmd+Shift+D switches between light and dark from any window.`}
         </Aside>
       </Section>
 

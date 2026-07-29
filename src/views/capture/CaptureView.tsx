@@ -96,10 +96,13 @@ export default function CaptureView() {
       value={body}
       onChange={(event) => setBody(event.target.value)}
       onKeyDown={onKeyDown}
+      aria-label="What did you just do?"
       placeholder="What did you just do?"
       autoComplete="off"
       spellCheck={false}
-      className="h-16 w-full bg-background px-5 text-lg outline-none"
+      // The ring is drawn inside: this field is the whole window, and an
+      // outset one would be clipped by the window's own edge.
+      className="h-16 w-full bg-background px-5 text-lg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
     />
   )
 }

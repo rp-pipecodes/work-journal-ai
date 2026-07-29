@@ -11,6 +11,7 @@ import {
   type Settings,
   type SettingsStore,
 } from './settings'
+import { readTheme, writeTheme, type Theme } from './theme'
 
 /** Must match `SETTINGS_FILE` in `src-tauri/src/lib.rs`. */
 const SETTINGS_FILE = 'settings.json'
@@ -22,6 +23,13 @@ const SETTINGS_FILE = 'settings.json'
  * the rest of the run.
  */
 const DAY_START_CHANGED_EVENT = 'settings://day-start'
+
+/**
+ * The Theme has changed. Every window paints itself, so one already on screen
+ * only learns of a new Theme by being told — and the capture window, which is
+ * never rebuilt, would otherwise stay the old palette for the rest of the run.
+ */
+const THEME_CHANGED_EVENT = 'settings://theme'
 
 let loading: Promise<SettingsStore> | null = null
 
@@ -61,6 +69,28 @@ export function onDayStartChanged(
 ): Promise<UnlistenFn> {
   return listen<{ hour: number }>(DAY_START_CHANGED_EVENT, ({ payload }) =>
     handle(payload.hour),
+  )
+}
+
+/** The Theme as it stands, or `system` until the user has chosen one. */
+export async function loadTheme(): Promise<Theme> {
+  return readTheme(await store())
+}
+
+/**
+ * A new Theme, remembered and announced. Every window repaints, including the
+ * one the toggle was not pressed in.
+ */
+export async function saveTheme(theme: Theme): Promise<void> {
+  await writeTheme(await store(), theme)
+  await emit(THEME_CHANGED_EVENT, { theme })
+}
+
+export function onThemeChanged(
+  handle: (theme: Theme) => void,
+): Promise<UnlistenFn> {
+  return listen<{ theme: Theme }>(THEME_CHANGED_EVENT, ({ payload }) =>
+    handle(payload.theme),
   )
 }
 
