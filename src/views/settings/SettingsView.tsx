@@ -232,11 +232,11 @@ export default function SettingsView({
       </Section>
 
       <Section
-        title="Appearance"
+        title="Theme"
         explanation="Whether the app is light or dark, and whether it decides that for itself."
       >
         <label className="flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground">Appearance</span>
+          <span className="text-muted-foreground">Theme</span>
           <select
             value={theme}
             onChange={(event) => {

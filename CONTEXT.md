@@ -76,7 +76,17 @@ Permanent removal of a Note. There is no trash, no archive, and no recovery — 
 ## Settings
 
 **Settings**:
-The four things about the app the user gets to decide: the Day Start, the Hotkey, whether the app starts at login, and — as the one action rather than a setting — Export. Reached from the Tray Menu, and closed on dismiss rather than kept resident.
+The five things about the app the user gets to decide: the Day Start, the Hotkey, the Theme, whether the app starts at login, and — as the one action rather than a setting — Export. Reached from the Tray Menu, and closed on dismiss rather than kept resident.
+
+**Theme**:
+Whether the app paints itself light or dark. Three answers, not two: `light`, `dark`, and `system` — and `system` is the absence of a preference rather than a third palette, so an unasked user follows the OS. Settable from Settings, and toggled from any window with Cmd+Shift+D. One preference for the whole app, so a window that did not host the change still hears about it and repaints.
+_Avoid_: Appearance, dark mode, colour scheme, skin
+
+**Resolved Theme**:
+The palette actually on screen once the OS has been asked: only `light` or `dark`, never `system`. What the Theme comes to, not what the user chose — the distinction that lets the toggle switch to the opposite of what is visible rather than the next name in a list, and lets a `system` preference change with the OS under a window that is already open.
+
+**Theme Toggle**:
+Cmd+Shift+D, from any window. Never a bare `d`, and it stands aside entirely wherever text is being entered: this app is a text field with a window around it, and a shortcut that could fire mid-word would eat the Capture it was meant to serve. Using it settles the Theme on a palette — after a toggle the app no longer follows the OS.
 
 **Start at Login**:
 Whether the app launches when the user logs in. Off until the user says otherwise, and asked once on first run so the app never adds itself to the login items uninvited. Declining is an answer: the question is not asked again.
