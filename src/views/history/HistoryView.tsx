@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,178 +12,66 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
-  decideArrival,
+  createHistorySession,
+  openingSnapshot,
+  type HistorySnapshot,
+} from '@/journal/history-session'
+import {
   decideKeystroke,
-  describeCopiedDigest,
   filterForJournalDay,
   filterForRange,
   formatJournalDay,
   formatTimeOfDay,
-  groupByJournalDay,
-  type Digest,
   type Filter,
-  type Journal,
-  type JournalDayGroup,
   type Note,
 } from '@/journal/journal'
 import { journal, onNoteCaptured } from '@/journal/tauri-journal'
 import { copyToClipboard } from '@/lib/clipboard'
 
-/** What History has to show, once the core has been asked. */
-type History =
-  | { state: 'loading' }
-  | { state: 'empty' }
-  | { state: 'notes'; days: JournalDayGroup[] }
-  | { state: 'unreadable' }
-
 /**
- * Reading back what you did. The window behind this view is created on demand
- * and genuinely closed on dismiss, so the view loads once on mount and needs no
- * reset — see docs/adr/0002-capture-window-is-hidden-never-closed.md.
+ * Reading back what you did. Every rule of reading back — where the Filter
+ * opens, what an arrival does to it, what a correction re-reads — belongs to
+ * the History session; this view renders its snapshot and calls its verbs.
  *
- * The Filter moves only when the reader moves it. A Note captured for a day
- * outside it leaves a Nudge rather than re-reading the list, so a reader partway
- * through Friday's Notes never has the list shift under them.
+ * The window behind the view is created on demand and genuinely closed on
+ * dismiss, so the session is built once per window and needs no reset — see
+ * docs/adr/0002-capture-window-is-hidden-never-closed.md.
  */
 export default function HistoryView() {
-  const [filter, setFilter] = useState<Filter | null>(null)
-  const [history, setHistory] = useState<History>({ state: 'loading' })
-  const [nudgedDay, setNudgedDay] = useState<string | null>(null)
+  const [snapshot, setSnapshot] = useState<HistorySnapshot>(openingSnapshot)
+  const [session] = useState(() =>
+    createHistorySession({
+      journal: journal(),
+      clipboard: copyToClipboard,
+      onChange: setSnapshot,
+    }),
+  )
+  const { filter, history, nudgedDay, confirmation } = snapshot
+
   // The one Note being reworded, and the one waiting on a confirmed deletion.
-  // Both are single: a list only ever has one correction in progress.
+  // Both are single, and both are about this screen rather than the session: a
+  // list only ever has one correction in progress.
   const [editing, setEditing] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<Note | null>(null)
-  // The Filter as Markdown, kept ready rather than fetched on the click: the
-  // webview only allows a clipboard write while the click is still granting
-  // user activation, which no await survives.
-  const [digest, setDigest] = useState<Digest | null>(null)
-  // What the last copy did, said back to the reader so they know it worked
-  // before they paste. Nothing until they copy, and until they move the Filter.
-  const [confirmation, setConfirmation] = useState<string | null>(null)
   const page = useRef<HTMLDivElement>(null)
-  // Reads can overlap — a Nudge acted on while a range change is still in
-  // flight — and only the newest one may reach the screen.
-  const latestRead = useRef(0)
-  // The Filter as the arrival subscription sees it. That subscription is set up
-  // once and never rebuilt, so it cannot read the Filter from state: a Note
-  // announced while a rebuilt subscription was still resolving would be lost.
-  const filterInView = useRef<Filter | null>(null)
-
-  /** Better than a window that never stops loading, and never a stale read. */
-  const giveUp = useCallback((error: unknown, ticket: number) => {
-    console.error('could not read the journal', error)
-    if (latestRead.current === ticket) setHistory({ state: 'unreadable' })
-  }, [])
-
-  const read = useCallback(
-    async (next: Filter) => {
-      const ticket = ++latestRead.current
-      try {
-        const core = await journal()
-        // The list and the Digest are the same Notes in opposite orders, and
-        // both are asked of the core: the list on screen is never the source
-        // of what gets copied.
-        const [notes, rendered] = await Promise.all([
-          core.notesForFilter(next),
-          core.digest(next),
-        ])
-        if (latestRead.current !== ticket) return
-        setHistory({ state: 'notes', days: groupByJournalDay(notes) })
-        setDigest(rendered)
-      } catch (error) {
-        giveUp(error, ticket)
-      }
-    },
-    [giveUp],
-  )
-
-  /**
-   * One correction to the record, then the list as it now reads. A refiled Note
-   * can leave the Filter and a deleted one is gone, so the list is re-read from
-   * the core rather than patched in place.
-   */
-  const correct = useCallback(
-    async (change: (core: Journal) => Promise<unknown>) => {
-      try {
-        const core = await journal()
-        await change(core)
-      } catch (error) {
-        console.error('could not change the Note', error)
-      }
-      const inView = filterInView.current
-      if (inView !== null) await read(inView)
-    },
-    [read],
-  )
-
-  /** Every move of the Filter, and the only thing that clears a Nudge. */
-  const moveTo = useCallback(
-    (next: Filter) => {
-      filterInView.current = next
-      setFilter(next)
-      setNudgedDay(null)
-      // A confirmation is about the Filter that was copied, not this one.
-      setConfirmation(null)
-      void read(next)
-    },
-    [read],
-  )
-
-  /** Where History opens, and where it returns to once the first Note exists. */
-  const openOnMostRecentOccupiedDay = useCallback(async () => {
-    const ticket = ++latestRead.current
-    try {
-      const core = await journal()
-      // The Filter opens on the most recent Occupied Day, whenever that was;
-      // with no Notes at all there is no day to open on.
-      const opening = await core.defaultFilter()
-      if (latestRead.current !== ticket) return
-
-      if (opening === null) {
-        setHistory({ state: 'empty' })
-        return
-      }
-      moveTo(opening)
-    } catch (error) {
-      giveUp(error, ticket)
-    }
-  }, [giveUp, moveTo])
 
   useEffect(() => {
     // A Dock-less app does not reliably hand focus to a new window, and Escape
     // has to reach this view for the window to close.
     page.current?.focus()
 
-    // Awaited inside the effect rather than called from its body: the first
-    // read is work that finishes later, not a state change on mount.
-    void (async () => {
-      await openOnMostRecentOccupiedDay()
-    })()
-  }, [openOnMostRecentOccupiedDay])
+    void session.open()
+  }, [session])
 
   useEffect(() => {
     const subscription = onNoteCaptured((journalDay) => {
-      const inView = filterInView.current
-
-      // No Notes at all until now: there is no Filter to hold still, and the
-      // empty state has just stopped being true.
-      if (inView === null) {
-        void openOnMostRecentOccupiedDay()
-        return
-      }
-
-      const arrival = decideArrival(inView, journalDay)
-      if (arrival.kind === 'show') {
-        void read(inView)
-      } else {
-        setNudgedDay(arrival.journalDay)
-      }
+      void session.noteArrived(journalDay)
     })
 
     return () => {
       void subscription.then((stop) => stop())
     }
-  }, [openOnMostRecentOccupiedDay, read])
+  }, [session])
 
   // Escape dismisses, and dismissing closes: History is not kept resident.
   // While a correction is open, Escape belongs to it — abandoning an edit or a
@@ -196,47 +84,25 @@ export default function HistoryView() {
 
   function commitEdit(note: Note, body: string) {
     setEditing(null)
-    void correct((core) => core.editBody(note.id, body))
+    void session.editBody(note.id, body)
   }
 
   function refile(note: Note, journalDay: string) {
     // A cleared date input is a half-picked day, not a day to file under.
     if (journalDay === '') return
-    void correct((core) => core.refile(note.id, journalDay))
+    void session.refile(note.id, journalDay)
   }
 
   /** The one irreversible operation, and the only one that is confirmed. */
   function confirmDelete(note: Note) {
     setDeleting(null)
-    void correct((core) => core.delete(note.id))
-  }
-
-  /**
-   * The whole Filter on the clipboard, and a word back about what went there.
-   * The Digest is already in hand — see where it is read — so the write is the
-   * first thing the click does.
-   */
-  function copyDigest() {
-    if (digest === null) return
-
-    if (digest.noteCount === 0) {
-      setConfirmation(describeCopiedDigest(digest))
-      return
-    }
-
-    copyToClipboard(digest.markdown).then(
-      () => setConfirmation(describeCopiedDigest(digest)),
-      (error: unknown) => {
-        console.error('could not copy the Digest', error)
-        setConfirmation('Could not copy.')
-      },
-    )
+    void session.delete(note.id)
   }
 
   /** A cleared date input is a half-picked range, not a Filter over nothing. */
   function pick(from: string, to: string) {
     if (from === '' || to === '') return
-    moveTo(filterForRange(from, to))
+    void session.moveTo(filterForRange(from, to))
   }
 
   return (
@@ -249,7 +115,10 @@ export default function HistoryView() {
       {filter !== null && (
         <header className="flex shrink-0 items-center gap-3 px-6 py-4 text-xs text-muted-foreground">
           <Range filter={filter} onPick={pick} />
-          <CopyDigest confirmation={confirmation} onCopy={copyDigest} />
+          <CopyDigest
+            confirmation={confirmation}
+            onCopy={() => session.copy()}
+          />
         </header>
       )}
 
@@ -288,8 +157,8 @@ export default function HistoryView() {
       {nudgedDay !== null && (
         <Nudge
           journalDay={nudgedDay}
-          onShow={() => moveTo(filterForJournalDay(nudgedDay))}
-          onDismiss={() => setNudgedDay(null)}
+          onShow={() => void session.moveTo(filterForJournalDay(nudgedDay))}
+          onDismiss={() => session.dismissNudge()}
         />
       )}
 
