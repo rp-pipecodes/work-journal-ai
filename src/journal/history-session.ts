@@ -44,6 +44,12 @@ export interface HistorySnapshot {
    * before they paste. Nothing until they copy, and until they move the Filter.
    */
   confirmation: string | null
+  /**
+   * A correction the record refused, said in the app's voice rather than the
+   * error's. Nothing until one fails, and gone again the moment one succeeds or
+   * the Filter moves — a list that reads as the reader asked claims nothing.
+   */
+  problem: string | null
 }
 
 /** Where every session starts: nothing asked yet, so nothing to show. */
@@ -52,6 +58,7 @@ export const openingSnapshot: HistorySnapshot = {
   history: { state: 'loading' },
   nudgedDay: null,
   confirmation: null,
+  problem: null,
 }
 
 export interface HistorySession {
@@ -153,8 +160,10 @@ export function createHistorySession({
     show({
       filter,
       nudgedDay: null,
-      // A confirmation is about the Filter that was copied, not this one.
+      // A confirmation is about the Filter that was copied, not this one; a
+      // problem is about a Note in the list being left behind.
       confirmation: null,
+      problem: null,
     })
     await read(filter)
   }
@@ -163,16 +172,26 @@ export function createHistorySession({
    * One correction to the record, then the list as it now reads. A refiled Note
    * can leave the Filter and a deleted one is gone, so the list is re-read from
    * the core rather than patched in place.
+   *
+   * A refused correction leaves a list that looks exactly as it would if the
+   * reader had never asked, so it has to say so: `refusal` is what did not
+   * happen, in the app's voice rather than the error's.
    */
   async function correct(
+    refusal: string,
     change: (core: Journal) => Promise<unknown>,
   ): Promise<void> {
+    let problem: string | null = null
     try {
       const core = await journal
       await change(core)
     } catch (error) {
       console.error('could not change the Note', error)
+      problem = refusal
     }
+    // Said whether or not it changed: a correction that worked clears the one
+    // before it, so no problem outlives the list it was about.
+    show({ problem })
     if (snapshot.filter !== null) await read(snapshot.filter)
   }
 
@@ -201,9 +220,16 @@ export function createHistorySession({
       show({ nudgedDay: null })
     },
 
-    editBody: (id, body) => correct((core) => core.editBody(id, body)),
-    refile: (id, journalDay) => correct((core) => core.refile(id, journalDay)),
-    delete: (id) => correct((core) => core.delete(id)),
+    editBody: (id, body) =>
+      correct('That Note could not be reworded.', (core) =>
+        core.editBody(id, body),
+      ),
+    refile: (id, journalDay) =>
+      correct('That Note could not be refiled.', (core) =>
+        core.refile(id, journalDay),
+      ),
+    delete: (id) =>
+      correct('That Note could not be deleted.', (core) => core.delete(id)),
 
     copy() {
       const copied = digest

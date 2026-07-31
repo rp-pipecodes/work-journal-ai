@@ -52,7 +52,7 @@ export default function HistoryView({
       onChange: setSnapshot,
     }),
   )
-  const { filter, history, nudgedDay, confirmation } = snapshot
+  const { filter, history, nudgedDay, confirmation, problem } = snapshot
 
   // The one Note being reworded, and the one waiting on a confirmed deletion.
   // Both are single, and both are about this screen rather than the session: a
@@ -128,6 +128,8 @@ export default function HistoryView({
         </header>
       )}
 
+      {problem !== null && <Problem>{problem}</Problem>}
+
       <main className="flex-1 overflow-y-auto px-6 pb-5">
         {history.state === 'empty' && <EmptyState />}
         {history.state === 'unreadable' && (
@@ -174,6 +176,19 @@ export default function HistoryView({
         onCancel={() => setDeleting(null)}
       />
     </div>
+  )
+}
+
+/**
+ * A correction the record refused. Above the list rather than inside it: the
+ * Note it is about may have moved or may not be on screen at all, and a reader
+ * with no devtools to hand has nowhere else to learn that nothing happened.
+ */
+function Problem({ children }: { children: React.ReactNode }) {
+  return (
+    <p role="alert" className="shrink-0 px-6 pb-3 text-xs text-destructive">
+      {children}
+    </p>
   )
 }
 

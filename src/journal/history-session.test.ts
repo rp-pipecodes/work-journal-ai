@@ -260,6 +260,50 @@ describe('correcting a Note', () => {
 
     expect(bodiesOf(session.snapshot())).toEqual(['Friday'])
   })
+
+  it('says what did not happen when a correction fails', async () => {
+    silenceErrors()
+    const { session, notes } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'Friday' },
+    ])
+
+    await session.open()
+
+    await session.delete('no-such-note')
+    expect(session.snapshot().problem).toBe('That Note could not be deleted.')
+
+    await session.refile(notes[0].id, 'not-a-day')
+    expect(session.snapshot().problem).toBe('That Note could not be refiled.')
+
+    await session.editBody(notes[0].id, '   ')
+    expect(session.snapshot().problem).toBe('That Note could not be reworded.')
+  })
+
+  it('stops saying so once a correction works', async () => {
+    silenceErrors()
+    const { session, notes } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'Friday' },
+    ])
+
+    await session.open()
+    await session.delete('no-such-note')
+    await session.editBody(notes[0].id, 'Friday, reworded')
+
+    expect(session.snapshot().problem).toBeNull()
+  })
+
+  it('stops saying so once the Filter moves', async () => {
+    silenceErrors()
+    const { session } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'Friday' },
+    ])
+
+    await session.open()
+    await session.delete('no-such-note')
+    await session.moveTo(filterForJournalDay('2026-03-09'))
+
+    expect(session.snapshot().problem).toBeNull()
+  })
 })
 
 describe('copying the Digest', () => {
