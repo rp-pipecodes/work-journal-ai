@@ -554,9 +554,14 @@ async function read(driver: SqlDriver, id: string): Promise<Note> {
   return toNote(row)
 }
 
-/** A Journal Day is a `YYYY-MM-DD` label, not a date to be parsed. */
+/**
+ * A Journal Day is a `YYYY-MM-DD` label, not a date to be parsed — but the
+ * shape alone is not the rule. A journal of work notes files nothing in the
+ * third century, so the year is bounded: it keeps a half-typed year out of the
+ * database, since a date input hands over `0002-07-31` on the way to `2026`.
+ */
 function isJournalDay(journalDay: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(journalDay)
+  return /^[2-9]\d{3}-\d{2}-\d{2}$/.test(journalDay)
 }
 
 /** Nothing to commit: a Capture ends in one Note or in nothing at all. */

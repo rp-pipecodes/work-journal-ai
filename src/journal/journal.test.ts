@@ -285,6 +285,22 @@ describe('refile', () => {
     )
   })
 
+  it('refuses a year the journal cannot have been written in', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('still where it was')
+
+    // What a date input emits while a year is being typed: `2026` arrives as
+    // `0002`, `0020`, `0202` first, each of them a shaped, valid-looking day.
+    await expect(journal.refile(captured!.id, '0002-03-12')).rejects.toThrow(
+      /journal day/i,
+    )
+
+    const march = { from: '2026-03-12', to: '2026-03-12' }
+    expect((await journal.notesForFilter(march)).map((note) => note.body)).toEqual([
+      'still where it was',
+    ])
+  })
+
   it('refuses to refile a Note that is not there', async () => {
     const { journal } = await journalAt('2026-03-12T09:30:00')
 
