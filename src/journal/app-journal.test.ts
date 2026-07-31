@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { fakeDesktop } from '../platform/testing/desktop'
 import { createAppSettings, followDayStart } from '../settings/app-settings'
 import { createAppJournal } from './app-journal'
+import { filterForJournalDay } from './journal'
 import { fixedClock, openTestDatabase } from './testing/database'
 
 // The wiring the running app uses, driven over a real database: the core,
@@ -22,7 +23,9 @@ describe('the app journal', () => {
     const note = await journal.capture('Shipped the thing')
 
     expect(note?.body).toBe('Shipped the thing')
-    expect(await journal.notesForJournalDay(note!.journalDay)).toHaveLength(1)
+    expect(
+      await journal.notesForFilter(filterForJournalDay(note!.journalDay)),
+    ).toHaveLength(1)
   })
 
   it('files under the stored Day Start from the very first Capture', async () => {

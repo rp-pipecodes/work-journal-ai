@@ -13,6 +13,7 @@ import {
   fixedDayStart,
   journalDayFor,
   DEFAULT_DAY_START_HOUR,
+  type Journal,
 } from './journal'
 import { fixedClock, migrationSql, openTestDatabase } from './testing/database'
 
@@ -32,6 +33,15 @@ async function journalAt(instant: string) {
   openJournals.push(close)
   const clock = fixedClock(instant)
   return { journal: createJournal({ clock, driver }), clock }
+}
+
+/**
+ * What one day holds, for tests that want to see what a Capture stored rather
+ * than to exercise a read. A single day is a Filter whose ends are equal, so
+ * this is `notesForFilter` and nothing more: newest first, like the list.
+ */
+function notesOn(journal: Journal, journalDay: string) {
+  return journal.notesForFilter(filterForJournalDay(journalDay))
 }
 
 describe('journalDayFor', () => {
@@ -91,7 +101,7 @@ describe('capture', () => {
     const captured = await journal.capture('rewrote the digest grouping')
 
     expect(captured?.body).toBe('rewrote the digest grouping')
-    const stored = await journal.notesForJournalDay('2026-03-12')
+    const stored = await notesOn(journal, '2026-03-12')
     expect(stored.map((note) => note.body)).toEqual([
       'rewrote the digest grouping',
     ])
@@ -110,7 +120,7 @@ describe('capture', () => {
 
     expect(await journal.capture('')).toBeNull()
     expect(await journal.capture('   \t ')).toBeNull()
-    expect(await journal.notesForJournalDay('2026-03-12')).toEqual([])
+    expect(await notesOn(journal, '2026-03-12')).toEqual([])
   })
 
   it('refuses a Body containing a line break', async () => {
@@ -136,8 +146,8 @@ describe('capture', () => {
     const captured = await journal.capture('still debugging the tray')
 
     expect(captured?.journalDay).toBe('2026-03-11')
-    expect(await journal.notesForJournalDay('2026-03-12')).toEqual([])
-    expect((await journal.notesForJournalDay('2026-03-11')).length).toBe(1)
+    expect(await notesOn(journal, '2026-03-12')).toEqual([])
+    expect((await notesOn(journal, '2026-03-11')).length).toBe(1)
   })
 
   it('gives a fresh Note no Edited At', async () => {
@@ -165,7 +175,7 @@ describe('editBody', () => {
 
     await journal.editBody(captured!.id, 'shipped the tray menu')
 
-    const [stored] = await journal.notesForJournalDay('2026-03-12')
+    const [stored] = await notesOn(journal, '2026-03-12')
     expect(stored.body).toBe('shipped the tray menu')
   })
 
@@ -206,7 +216,7 @@ describe('editBody', () => {
     await expect(journal.editBody(captured!.id, '   ')).rejects.toThrow(
       /empty/i,
     )
-    const [stored] = await journal.notesForJournalDay('2026-03-12')
+    const [stored] = await notesOn(journal, '2026-03-12')
     expect(stored.body).toBe('something worth keeping')
   })
 
@@ -324,7 +334,7 @@ describe('delete', () => {
       (await journal.notesForFilter(everything)).map((note) => note.body),
     ).toEqual(['said in earnest'])
     expect(
-      (await journal.notesForJournalDay('2026-03-12')).map((note) => note.body),
+      (await notesOn(journal, '2026-03-12')).map((note) => note.body),
     ).toEqual(['said in earnest'])
   })
 
@@ -352,26 +362,6 @@ describe('delete', () => {
     const { journal } = await journalAt('2026-03-12T09:30:00')
 
     await expect(journal.delete('nobody')).rejects.toThrow(/no such note/i)
-  })
-})
-
-describe('notesForJournalDay', () => {
-  it('returns the oldest Note first', async () => {
-    const { journal, clock } = await journalAt('2026-03-12T09:00:00')
-
-    await journal.capture('first')
-    clock.set(local('2026-03-12T11:00:00'))
-    await journal.capture('second')
-
-    const notes = await journal.notesForJournalDay('2026-03-12')
-
-    expect(notes.map((note) => note.body)).toEqual(['first', 'second'])
-  })
-
-  it('returns nothing for a day with no Notes', async () => {
-    const { journal } = await journalAt('2026-03-12T09:00:00')
-
-    expect(await journal.notesForJournalDay('2026-03-11')).toEqual([])
   })
 })
 
@@ -781,8 +771,8 @@ describe('the Day Start in force', () => {
     // The Day Start changes; nothing recomputes.
     hour = 0
 
-    expect(await journal.notesForJournalDay('2026-03-11')).toHaveLength(1)
-    expect(await journal.notesForJournalDay('2026-03-12')).toHaveLength(0)
+    expect(await notesOn(journal, '2026-03-11')).toHaveLength(1)
+    expect(await notesOn(journal, '2026-03-12')).toHaveLength(0)
   })
 
   it('reads the Day Start again for every Capture', async () => {
