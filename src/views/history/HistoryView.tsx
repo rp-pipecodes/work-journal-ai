@@ -235,12 +235,10 @@ function NoteLine({
           <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
             <label className="flex items-center gap-1 text-xs text-muted-foreground">
               <span className="sr-only">File under</span>
-              <input
-                type="date"
+              <DayField
                 value={note.journalDay}
-                onChange={(event) => onRefile(event.target.value)}
-                aria-label={`File "${note.body}" under another day`}
-                className="rounded-md border border-border bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                onPick={onRefile}
+                label={`File "${note.body}" under another day`}
               />
             </label>
             <Button
@@ -404,13 +402,67 @@ function End({
   return (
     <label className="flex items-center gap-1.5">
       <span>{label}</span>
-      <input
-        type="date"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="rounded-md border border-border bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-      />
+      <DayField value={value} onPick={onChange} />
     </label>
+  )
+}
+
+/**
+ * A Journal Day being edited, which is not the same as one being typed. A date
+ * input that already holds a day — both of these always do — reports a whole,
+ * shaped value on every segment a keystroke touches, so typing the year `2026`
+ * announces `0002`, `0020` and `0202` first. Committing those would refile a
+ * Note three times on the way to the day the reader meant.
+ *
+ * So the typing is kept here and only the settled value leaves: the picked day
+ * is announced when the field is left, or when the picker itself commits one.
+ * The core refuses a nonsense day regardless — that guard is the one that
+ * matters — but a field that asks three times is wrong even when it is refused.
+ */
+function DayField({
+  value,
+  onPick,
+  label,
+}: {
+  value: string
+  onPick: (value: string) => void
+  label?: string
+}) {
+  const [typed, setTyped] = useState(value)
+  const [settled, setSettled] = useState(value)
+
+  // The day changed underneath us — a refile landed, or the Filter moved — so
+  // what is being typed is stale and the field goes back to showing the truth.
+  if (value !== settled) {
+    setSettled(value)
+    setTyped(value)
+  }
+
+  function commit() {
+    if (typed === value) return
+
+    onPick(typed)
+    // The field goes back to the day on record, and gets there again only if
+    // the pick is accepted: a blank or refused day never lingers on screen as
+    // though it had been filed.
+    setTyped(value)
+  }
+
+  return (
+    <input
+      type="date"
+      value={typed}
+      onChange={(event) => setTyped(event.target.value)}
+      onBlur={commit}
+      // Enter is how the keyboard says it is done without leaving the field.
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          commit()
+        }
+      }}
+      aria-label={label}
+      className="rounded-md border border-border bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+    />
   )
 }
 
