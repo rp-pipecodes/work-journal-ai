@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -23,10 +22,11 @@ import {
   formatJournalDay,
   formatTimeOfDay,
   type Filter,
+  type Journal,
   type Note,
 } from '@/journal/journal'
-import { journal, onNoteCaptured } from '@/journal/tauri-journal'
 import { copyToClipboard } from '@/lib/clipboard'
+import type { Desktop } from '@/platform/desktop'
 
 /**
  * Reading back what you did. Every rule of reading back — where the Filter
@@ -37,11 +37,17 @@ import { copyToClipboard } from '@/lib/clipboard'
  * dismiss, so the session is built once per window and needs no reset — see
  * docs/adr/0002-capture-window-is-hidden-never-closed.md.
  */
-export default function HistoryView() {
+export default function HistoryView({
+  desktop,
+  journal,
+}: {
+  desktop: Desktop
+  journal: Promise<Journal>
+}) {
   const [snapshot, setSnapshot] = useState<HistorySnapshot>(openingSnapshot)
   const [session] = useState(() =>
     createHistorySession({
-      journal: journal(),
+      journal,
       clipboard: copyToClipboard,
       onChange: setSnapshot,
     }),
@@ -64,21 +70,21 @@ export default function HistoryView() {
   }, [session])
 
   useEffect(() => {
-    const subscription = onNoteCaptured((journalDay) => {
+    const subscription = desktop.onNoteCaptured((journalDay) => {
       void session.noteArrived(journalDay)
     })
 
     return () => {
       void subscription.then((stop) => stop())
     }
-  }, [session])
+  }, [desktop, session])
 
   // Escape dismisses, and dismissing closes: History is not kept resident.
   // While a correction is open, Escape belongs to it — abandoning an edit or a
   // confirmation must not take the window with it.
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
     if (event.key === 'Escape' && editing === null && deleting === null) {
-      void getCurrentWindow().close()
+      void desktop.closeWindow()
     }
   }
 

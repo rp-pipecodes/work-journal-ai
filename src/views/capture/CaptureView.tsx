@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import { decideKeystroke, type KeystrokeDecision } from '@/journal/journal'
-import { announceCapturedNote, journal } from '@/journal/tauri-journal'
-
-/** Must match `CAPTURE_SHOWN_EVENT` in `src-tauri/src/lib.rs`. */
-const CAPTURE_SHOWN_EVENT = 'capture://shown'
+import {
+  decideKeystroke,
+  type Journal,
+  type KeystrokeDecision,
+} from '@/journal/journal'
+import type { Desktop } from '@/platform/desktop'
 
 /**
  * One line, one keystroke. The window behind this view is created at startup
  * and only ever shown and hidden, so the view resets itself every time the
  * Capture begins rather than relying on a fresh React tree.
  */
-export default function CaptureView() {
+export default function CaptureView({
+  desktop,
+  journal,
+}: {
+  desktop: Desktop
+  journal: Promise<Journal>
+}) {
   const [body, setBody] = useState('')
   const field = useRef<HTMLInputElement>(null)
 
@@ -22,18 +26,16 @@ export default function CaptureView() {
     field.current?.focus()
   }, [])
 
-  // Hiding the window is the Rust side's job: it also has to hand focus back to
-  // the application the Capture interrupted.
   const dismiss = useCallback(async () => {
     setBody('')
-    await invoke('dismiss_capture')
-  }, [])
+    await desktop.dismissCapture()
+  }, [desktop])
 
   const commit = useCallback(
     async (text: string) => {
       let note
       try {
-        note = await (await journal()).capture(text)
+        note = await (await journal).capture(text)
       } catch (error) {
         // A Capture that could not be stored must not vanish: leave the window
         // open with the text still in it rather than discarding the thought.
@@ -47,7 +49,7 @@ export default function CaptureView() {
       // stored either way.
       if (note !== null) {
         try {
-          await announceCapturedNote(note)
+          await desktop.announceCapturedNote(note.journalDay)
         } catch (error) {
           console.error('could not announce the Note', error)
         }
@@ -55,7 +57,7 @@ export default function CaptureView() {
 
       await dismiss()
     },
-    [dismiss],
+    [desktop, journal, dismiss],
   )
 
   useEffect(() => {
@@ -63,19 +65,15 @@ export default function CaptureView() {
     // with the window being shown.
     field.current?.focus()
 
-    const shown = listen(CAPTURE_SHOWN_EVENT, begin)
+    const shown = desktop.onCaptureShown(begin)
     // Clicking away is a discard, not a Capture left floating over the screen.
-    const blurred = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-      if (!focused) {
-        void dismiss()
-      }
-    })
+    const blurred = desktop.onWindowBlurred(() => void dismiss())
 
     return () => {
       void shown.then((stop) => stop())
       void blurred.then((stop) => stop())
     }
-  }, [begin, dismiss])
+  }, [desktop, begin, dismiss])
 
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     void act(decideKeystroke(event.key, body))

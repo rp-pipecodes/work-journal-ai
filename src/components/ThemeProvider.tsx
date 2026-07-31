@@ -6,7 +6,7 @@ import {
   DEFAULT_THEME,
   type Theme,
 } from '@/settings/theme'
-import { loadTheme, onThemeChanged, saveTheme } from '@/settings/tauri-settings'
+import type { AppSettings } from '@/settings/app-settings'
 import { ThemeContext } from './theme-context'
 
 /** The one class `src/index.css` paints a dark palette from. */
@@ -22,8 +22,10 @@ const DARK_CLASS = 'dark'
  * follows the OS for the run and forgets any toggle when the page reloads.
  */
 export default function ThemeProvider({
+  settings,
   children,
 }: {
+  settings: AppSettings
   children: React.ReactNode
 }) {
   const [theme, setTheme] = useState<Theme>(DEFAULT_THEME)
@@ -33,7 +35,8 @@ export default function ThemeProvider({
     let current = true
     // A store that cannot be read is not worth failing the window over: the
     // default follows the OS, which is what an unasked user gets anyway.
-    void loadTheme()
+    void settings
+      .loadTheme()
       .then((stored) => {
         if (current) {
           setTheme(stored)
@@ -43,7 +46,7 @@ export default function ThemeProvider({
         console.error('could not read the Theme', error)
       })
 
-    const changed = onThemeChanged(setTheme).catch((error: unknown) => {
+    const changed = settings.onThemeChanged(setTheme).catch((error: unknown) => {
       console.error('could not follow the Theme', error)
       return null
     })
@@ -52,7 +55,7 @@ export default function ThemeProvider({
       current = false
       void changed.then((stop) => stop?.())
     }
-  }, [])
+  }, [settings])
 
   // The OS palette can change under a window that is following it.
   useEffect(() => {
@@ -72,15 +75,18 @@ export default function ThemeProvider({
     root.style.colorScheme = resolved
   }, [resolved])
 
-  const ask = useCallback((next: Theme) => {
-    // Applied here rather than waited for: the announcement is how the *other*
-    // windows find out, and a store that cannot be written must still repaint
-    // the window whose user asked for it.
-    setTheme(next)
-    void saveTheme(next).catch((error: unknown) => {
-      console.error('could not remember the Theme', error)
-    })
-  }, [])
+  const ask = useCallback(
+    (next: Theme) => {
+      // Applied here rather than waited for: the announcement is how the
+      // *other* windows find out, and a store that cannot be written must
+      // still repaint the window whose user asked for it.
+      setTheme(next)
+      void settings.saveTheme(next).catch((error: unknown) => {
+        console.error('could not remember the Theme', error)
+      })
+    },
+    [settings],
+  )
 
   const toggle = useCallback(() => {
     ask(toggledTheme(theme, prefersDark))

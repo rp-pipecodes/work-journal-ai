@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -12,8 +11,9 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useTheme } from '@/components/theme-context'
-import { exportFileName } from '@/journal/journal'
-import { journal } from '@/journal/tauri-journal'
+import { exportFileName, type Journal } from '@/journal/journal'
+import type { Desktop } from '@/platform/desktop'
+import type { AppSettings } from '@/settings/app-settings'
 import { describeTheme, isTheme, THEME_CHOICES } from '@/settings/theme'
 import {
   DAY_START_HOURS,
@@ -23,16 +23,6 @@ import {
   hotkeyForKeystroke,
   type HotkeyStatus,
 } from '@/settings/settings'
-import {
-  exportNotes,
-  hasBeenAskedAboutStartAtLogin,
-  hotkeyStatus,
-  loadSettings,
-  saveDayStartHour,
-  saveStartAtLogin,
-  setHotkey as remapHotkey,
-  startsAtLogin,
-} from '@/settings/tauri-settings'
 
 /**
  * The four things about the app the user gets to decide, and the way out of
@@ -40,7 +30,15 @@ import {
  * genuinely closed on dismiss, so the view loads once on mount and needs no
  * reset — see docs/adr/0002-capture-window-is-hidden-never-closed.md.
  */
-export default function SettingsView() {
+export default function SettingsView({
+  desktop,
+  settings,
+  journal,
+}: {
+  desktop: Desktop
+  settings: AppSettings
+  journal: Promise<Journal>
+}) {
   const [dayStartHour, setDayStartHour] = useState(DEFAULT_SETTINGS.dayStartHour)
   const [startAtLogin, setStartAtLogin] = useState(DEFAULT_SETTINGS.startAtLogin)
   const [hotkey, setHotkey] = useState<HotkeyStatus | null>(null)
@@ -56,9 +54,6 @@ export default function SettingsView() {
   // window can change the Theme too, and a second copy would drift from it.
   const { theme, resolved, setTheme } = useTheme()
   const page = useRef<HTMLDivElement>(null)
-  // Guards the one path that closes the window on the user's behalf, so
-  // closing it cannot re-enter this and loop.
-  const closing = useRef(false)
 
   useEffect(() => {
     // A Dock-less app does not reliably hand focus to a new window, and Escape
@@ -67,13 +62,13 @@ export default function SettingsView() {
 
     void (async () => {
       try {
-        const [settings, status, atLogin, answered] = await Promise.all([
-          loadSettings(),
-          hotkeyStatus(),
-          startsAtLogin(),
-          hasBeenAskedAboutStartAtLogin(),
+        const [stored, status, atLogin, answered] = await Promise.all([
+          settings.load(),
+          desktop.hotkeyStatus(),
+          desktop.startsAtLogin(),
+          settings.hasBeenAskedAboutStartAtLogin(),
         ])
-        setDayStartHour(settings.dayStartHour)
+        setDayStartHour(stored.dayStartHour)
         setStartAtLogin(atLogin)
         setHotkey(status)
         setAsking(!answered)
@@ -81,7 +76,7 @@ export default function SettingsView() {
         console.error('could not read the settings', error)
       }
     })()
-  }, [])
+  }, [desktop, settings])
 
   useEffect(() => {
     if (!asking) return
@@ -89,45 +84,36 @@ export default function SettingsView() {
     // Closing the window rather than choosing is an answer too, and the same
     // one: the app is not added to the login items. It has to be recorded, or
     // the question would return on every launch until it heard a yes.
-    const closeRequested = getCurrentWindow().onCloseRequested((event) => {
-      if (closing.current) return
-      closing.current = true
-      // Held open until the answer is written down; a window closing takes its
-      // webview, and with it any write still in flight.
-      event.preventDefault()
-      void saveStartAtLogin(false)
-        .catch((error: unknown) => {
-          console.error('could not record the answer', error)
-        })
-        .finally(() => {
-          void getCurrentWindow().close()
-        })
-    })
+    const closeRequested = desktop.onCloseRequested(() =>
+      settings.saveStartAtLogin(false).catch((error: unknown) => {
+        console.error('could not record the answer', error)
+      }),
+    )
 
     return () => {
       void closeRequested.then((stop) => stop())
     }
-  }, [asking])
+  }, [asking, desktop, settings])
 
   // Escape dismisses, and dismissing closes: Settings is not kept resident.
   // While the recorder is listening, Escape belongs to it — abandoning a
   // half-pressed combination must not take the window with it.
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
     if (event.key === 'Escape' && !recording && !asking) {
-      void getCurrentWindow().close()
+      void desktop.closeWindow()
     }
   }
 
   function pickDayStart(hour: number) {
     setDayStartHour(hour)
-    saveDayStartHour(hour).catch((error: unknown) => {
+    settings.saveDayStartHour(hour).catch((error: unknown) => {
       console.error('could not save the Day Start', error)
     })
   }
 
   function toggleStartAtLogin(next: boolean) {
     setStartAtLogin(next)
-    saveStartAtLogin(next).catch((error: unknown) => {
+    settings.saveStartAtLogin(next).catch((error: unknown) => {
       console.error('could not change the login item', error)
       setStartAtLogin(!next)
     })
@@ -139,18 +125,21 @@ export default function SettingsView() {
     toggleStartAtLogin(next)
   }
 
-  const remap = useCallback((next: string) => {
-    setRecording(false)
-    remapHotkey(next).then(
-      (status) => {
-        setHotkey(status)
-        setHotkeyProblem(null)
-      },
-      (reason: unknown) => {
-        setHotkeyProblem(describeUnavailableHotkey(next, String(reason)))
-      },
-    )
-  }, [])
+  const remap = useCallback(
+    (next: string) => {
+      setRecording(false)
+      desktop.setHotkey(next).then(
+        (status) => {
+          setHotkey(status)
+          setHotkeyProblem(null)
+        },
+        (reason: unknown) => {
+          setHotkeyProblem(describeUnavailableHotkey(next, String(reason)))
+        },
+      )
+    },
+    [desktop],
+  )
 
   /** The whole journal, on disk and outside this app. */
   function exportAll() {
@@ -158,8 +147,8 @@ export default function SettingsView() {
     setExported(null)
     void (async () => {
       try {
-        const digest = await (await journal()).exportAll()
-        const file = await exportNotes(
+        const digest = await (await journal).exportAll()
+        const file = await desktop.exportNotes(
           digest.markdown,
           exportFileName(new Date()),
         )
