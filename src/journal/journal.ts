@@ -112,11 +112,6 @@ export interface Journal {
    */
   delete(id: string): Promise<void>
   /**
-   * The Notes filed under one Journal Day, oldest first — the order a Digest
-   * reads in. How the history window orders them is its own decision.
-   */
-  notesForJournalDay(journalDay: string): Promise<Note[]>
-  /**
    * The Filter a reader starts from: the most recent Occupied Day, which is
    * the greatest Journal Day present and not yesterday's date — so a Monday
    * resolves to Friday when the weekend is empty, however long the gap. Null
@@ -163,12 +158,6 @@ const INSERT_NOTE = `
 const SELECT_NOTES = `
   SELECT id, body, captured_at, journal_day, edited_at
   FROM notes
-`
-
-const SELECT_NOTES_FOR_JOURNAL_DAY = `
-  ${SELECT_NOTES}
-  WHERE journal_day = ?
-  ORDER BY captured_at ASC, id ASC
 `
 
 const SELECT_NOTE = `
@@ -299,13 +288,6 @@ export function createJournal({
     async delete(id) {
       await read(driver, id)
       await driver.execute(DELETE_NOTE, [id])
-    },
-
-    async notesForJournalDay(journalDay) {
-      const rows = await driver.select<NoteRow>(SELECT_NOTES_FOR_JOURNAL_DAY, [
-        journalDay,
-      ])
-      return rows.map(toNote)
     },
 
     async defaultFilter() {
