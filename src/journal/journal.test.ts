@@ -395,18 +395,26 @@ describe('groupByJournalDay', () => {
   })
 })
 
+// Both on-screen formatters follow the reader's locale, so these tests say
+// which day and which time is shown rather than which words it is shown in.
+// The one format that must not move is the Digest heading, pinned in the
+// Digest tests.
 describe('formatJournalDay', () => {
   it('reads a Journal Day as the day it names, not the day it parses as', () => {
     // 'YYYY-MM-DD' parses as UTC midnight, which is the previous evening in
     // half the world's timezones; the heading must still say the 13th.
-    expect(formatJournalDay('2026-03-13')).toBe('Friday, 13 March 2026')
+    const heading = formatJournalDay('2026-03-13')
+
+    expect(heading).toContain('13')
+    expect(heading).not.toContain('12')
   })
 })
 
 describe('formatTimeOfDay', () => {
   it('reads Captured At as a local time of day', () => {
     // 09:05 UTC is 09:05 in Europe/Lisbon on that date — see vite.config.ts.
-    expect(formatTimeOfDay('2026-03-13T09:05:00.000Z')).toBe('09:05')
+    // Written 09:05 or 09:05 AM depending on the reader's locale.
+    expect(formatTimeOfDay('2026-03-13T09:05:00.000Z')).toMatch(/\b09.05\b/)
   })
 })
 

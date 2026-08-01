@@ -402,6 +402,10 @@ export function describeCopiedDigest(digest: Digest): string {
 /**
  * A Journal Day as a Digest heading: short enough to read as a date in a
  * standup thread. In UTC for the same reason as `formatJournalDay`.
+ *
+ * Pinned to `en-GB` on purpose, unlike the on-screen formatters. A Digest is
+ * output — pasted into a thread or a prompt — and a heading whose shape depends
+ * on the machine that produced it is worse than one that is merely British.
  */
 function formatDigestDay(journalDay: string): string {
   return new Intl.DateTimeFormat('en-GB', {
@@ -479,12 +483,13 @@ export function groupByJournalDay(notes: Note[]): JournalDayGroup[] {
 }
 
 /**
- * A Journal Day as a heading. Formatted in UTC because a Journal Day is a
- * label rather than an instant: `YYYY-MM-DD` parses as UTC midnight, which is
+ * A Journal Day as a heading. In the reader's own locale, so the date reads the
+ * way the rest of their machine does. Formatted in UTC because a Journal Day is
+ * a label rather than an instant: `YYYY-MM-DD` parses as UTC midnight, which is
  * the previous evening in a negative offset.
  */
 export function formatJournalDay(journalDay: string): string {
-  return new Intl.DateTimeFormat('en-GB', {
+  return new Intl.DateTimeFormat(undefined, {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
@@ -493,12 +498,14 @@ export function formatJournalDay(journalDay: string): string {
   }).format(new Date(journalDay))
 }
 
-/** Captured At as the local time of day it happened at. */
+/**
+ * Captured At as the local time of day it happened at, in the reader's own
+ * locale — including whether that locale writes a 12- or 24-hour clock.
+ */
 export function formatTimeOfDay(capturedAt: string): string {
-  return new Intl.DateTimeFormat('en-GB', {
+  return new Intl.DateTimeFormat(undefined, {
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
   }).format(new Date(capturedAt))
 }
 
