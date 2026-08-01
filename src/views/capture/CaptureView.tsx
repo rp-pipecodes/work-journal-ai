@@ -19,15 +19,23 @@ export default function CaptureView({
   journal: Promise<Journal>
 }) {
   const [body, setBody] = useState('')
+  // How many times this Capture has been refused. Zero until one is, and zero
+  // again when the next Capture begins — a window that stayed open claims
+  // nothing on its own. Counted rather than flagged so a second refusal is a
+  // second thing on screen: the message invites another Enter, and one that
+  // changed nothing would read as the silence it replaced.
+  const [refusals, setRefusals] = useState(0)
   const field = useRef<HTMLInputElement>(null)
 
   const begin = useCallback(() => {
     setBody('')
+    setRefusals(0)
     field.current?.focus()
   }, [])
 
   const dismiss = useCallback(async () => {
     setBody('')
+    setRefusals(0)
     await desktop.dismissCapture()
   }, [desktop])
 
@@ -38,8 +46,11 @@ export default function CaptureView({
         note = await (await journal).capture(text)
       } catch (error) {
         // A Capture that could not be stored must not vanish: leave the window
-        // open with the text still in it rather than discarding the thought.
+        // open with the Body still in it rather than discarding the thought —
+        // and say so, since a window that merely stayed open reads as a missed
+        // keystroke.
         console.error('could not commit the Note', error)
+        setRefusals((refused) => refused + 1)
         return
       }
 
@@ -88,19 +99,50 @@ export default function CaptureView({
   }
 
   return (
-    <input
-      ref={field}
-      type="text"
-      value={body}
-      onChange={(event) => setBody(event.target.value)}
-      onKeyDown={onKeyDown}
-      aria-label="What did you just do?"
-      placeholder="What did you just do?"
-      autoComplete="off"
-      spellCheck={false}
-      // The ring is drawn inside: this field is the whole window, and an
-      // outset one would be clipped by the window's own edge.
-      className="h-16 w-full bg-background px-5 text-lg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
-    />
+    <div className="flex h-screen flex-col bg-background">
+      <input
+        ref={field}
+        type="text"
+        value={body}
+        onChange={(event) => setBody(event.target.value)}
+        onKeyDown={onKeyDown}
+        aria-label="What did you just do?"
+        placeholder="What did you just do?"
+        aria-describedby={refusals > 0 ? PROBLEM_ID : undefined}
+        autoComplete="off"
+        spellCheck={false}
+        // The ring is drawn inside: the field all but fills the window, and an
+        // outset one would be clipped by the window's own edge.
+        className="min-h-0 w-full flex-1 bg-transparent px-5 text-lg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
+      />
+      {/*
+        Under the field rather than in place of it: the window does not resize,
+        so the line takes its room from the field — the Body the user is being
+        told about has to stay in sight and stay editable.
+
+        Keyed by the count so each refusal is a new node: a repeated one is then
+        announced again rather than passing as the same message still sitting
+        there.
+      */}
+      {refusals > 0 && (
+        <p
+          key={refusals}
+          id={PROBLEM_ID}
+          role="alert"
+          className="shrink-0 px-5 pb-2 text-xs text-destructive"
+        >
+          {CAPTURE_REFUSED}
+        </p>
+      )}
+    </div>
   )
 }
+
+const PROBLEM_ID = 'capture-problem'
+
+/**
+ * What a refused Capture says, in the app's voice rather than the error's. Names
+ * what did not happen and what to do about it, because a window that stayed open
+ * has already told the user that pressing Enter changed nothing.
+ */
+const CAPTURE_REFUSED = 'That Note could not be stored. Press Enter to retry.'
