@@ -124,6 +124,18 @@ export interface Journal {
    */
   notesForFilter(filter: Filter): Promise<Note[]>
   /**
+   * A Search: the Notes anywhere in the journal whose Body contains the term,
+   * newest first like a Filter's list. It takes a term rather than a Filter
+   * because a Search is a way of moving the Filter and never of narrowing it —
+   * see docs/adr/0004-search-moves-the-filter-rather-than-narrowing-it.md.
+   *
+   * Matching is a case-insensitive substring of the Body and nothing more: the
+   * whole term is one substring, and no other column is looked at. The known
+   * limit is non-ASCII case folding, which SQLite's `LIKE` does not do —
+   * `MIGRAÇÃO` does not match `migração`.
+   */
+  notesMatching(term: string): Promise<Note[]>
+  /**
    * The Filter as Markdown to paste elsewhere. Oldest first — the reverse of
    * what the list shows, because scanning wants recency and narrative wants
    * chronology.
@@ -191,6 +203,18 @@ const SELECT_MOST_RECENT_OCCUPIED_DAY = `
 const SELECT_NOTES_FOR_FILTER = `
   ${SELECT_NOTES}
   WHERE journal_day BETWEEN ? AND ?
+  ORDER BY journal_day DESC, captured_at DESC, id DESC
+`
+
+/**
+ * The same order as a Filter's list, over the whole journal and predicated on
+ * the Body instead. `LIKE` is case-insensitive for ASCII in SQLite, which is
+ * the whole of the matching rule; the escape character is named so that a term
+ * containing `%` or `_` reads as those characters rather than as a pattern.
+ */
+const SELECT_NOTES_MATCHING = `
+  ${SELECT_NOTES}
+  WHERE body LIKE ? ESCAPE '\\'
   ORDER BY journal_day DESC, captured_at DESC, id DESC
 `
 
@@ -307,6 +331,13 @@ export function createJournal({
       const rows = await driver.select<NoteRow>(SELECT_NOTES_FOR_FILTER, [
         filter.from,
         filter.to,
+      ])
+      return rows.map(toNote)
+    },
+
+    async notesMatching(term) {
+      const rows = await driver.select<NoteRow>(SELECT_NOTES_MATCHING, [
+        `%${escapeForLike(term)}%`,
       ])
       return rows.map(toNote)
     },
@@ -544,6 +575,15 @@ async function read(driver: SqlDriver, id: string): Promise<Note> {
  */
 function isJournalDay(journalDay: string): boolean {
   return /^[2-9]\d{3}-\d{2}-\d{2}$/.test(journalDay)
+}
+
+/**
+ * A term as the literal text it is. What a reader types is a substring of a
+ * Body, so `LIKE`'s own wildcards have to be spelled out: `50%` finds the Note
+ * about the queue rather than every Note in the journal.
+ */
+function escapeForLike(term: string): string {
+  return term.replace(/[\\%_]/g, (character) => `\\${character}`)
 }
 
 /** Nothing to commit: a Capture ends in one Note or in nothing at all. */

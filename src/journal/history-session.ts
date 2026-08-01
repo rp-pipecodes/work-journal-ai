@@ -23,20 +23,50 @@ import {
   type Filter,
   type Journal,
   type JournalDayGroup,
+  type Note,
 } from './journal'
 
-/** What History has to show, once the core has been asked. */
+/**
+ * What History has to show, once the core has been asked. One arm at a time,
+ * which is what makes the screen either the Filter's list or a Search's
+ * results and never both — see
+ * docs/adr/0004-search-moves-the-filter-rather-than-narrowing-it.md.
+ */
 export type HistoryState =
   | { state: 'loading' }
   | { state: 'empty' }
   | { state: 'notes'; days: JournalDayGroup[] }
+  | { state: 'results'; term: string; notes: Note[] }
   | { state: 'unreadable' }
+
+/**
+ * How long a term has to stand still before it is asked of the journal. Short
+ * enough to feel like typing, long enough that a word is one read rather than
+ * seven.
+ */
+export const SEARCH_DEBOUNCE_MS = 150
+
+/**
+ * The shortest term worth asking about. One character matches most of a
+ * journal, which is a slower way of showing the reader nothing.
+ */
+export const SEARCH_MIN_TERM_LENGTH = 2
 
 /** Everything a history window renders, and the only thing it renders. */
 export interface HistorySnapshot {
   /** Null until the first read lands, and whenever there are no Notes at all. */
   filter: Filter | null
   history: HistoryState
+  /** What the reader has typed into the search field, and what it shows. */
+  term: string
+  /**
+   * Whether a Search has taken the screen over — true from the keystroke that
+   * reaches two characters until the term is cleared or the Filter moves, and
+   * true whether or not the term matched anything. What Escape belongs to, and
+   * why Copy All is not on screen: the Digest is bound to the Filter, so it
+   * must not be offered beside something that is not one.
+   */
+  searching: boolean
   /** The day a Nudge is about; null when there is nothing to nudge about. */
   nudgedDay: string | null
   /**
@@ -56,6 +86,8 @@ export interface HistorySnapshot {
 export const openingSnapshot: HistorySnapshot = {
   filter: null,
   history: { state: 'loading' },
+  term: '',
+  searching: false,
   nudgedDay: null,
   confirmation: null,
   problem: null,
@@ -66,8 +98,20 @@ export interface HistorySession {
   snapshot(): HistorySnapshot
   /** The first read: the most recent Occupied Day, or nothing to open on. */
   open(): Promise<void>
-  /** Every move of the Filter, and one of the two ways a Nudge is cleared. */
+  /**
+   * Every move of the Filter, and one of the two ways a Nudge is cleared. Also
+   * how a Search ends: answering a result and answering a Nudge are both this,
+   * so both inherit everything a move already does.
+   */
   moveTo(filter: Filter): Promise<void>
+  /**
+   * The term as it now reads, after every keystroke. Nothing is asked of the
+   * journal until it has stood still for `SEARCH_DEBOUNCE_MS` and is at least
+   * `SEARCH_MIN_TERM_LENGTH` long; a shorter term takes the results off the
+   * screen and gives the Filter's list back. Resolves once the term it was
+   * given has either landed or been overtaken, so a test can await it.
+   */
+  search(term: string): Promise<void>
   /** A Note was captured, in this window or another one. */
   noteArrived(journalDay: string): Promise<void>
   /** The other way: the day gained content and the reader does not care. */
@@ -104,6 +148,9 @@ export function createHistorySession({
   // The Filter as Markdown, kept ready for a copy. Read from the core with the
   // list, so what gets copied is never the list on screen.
   let digest: Digest | null = null
+  // A term waiting out its debounce, and how to abandon it: the reader typed
+  // another character, or the Filter moved out from under it.
+  let waiting: { cancel: () => void } | null = null
 
   function show(change: Partial<HistorySnapshot>): void {
     snapshot = { ...snapshot, ...change }
@@ -157,8 +204,13 @@ export function createHistorySession({
   }
 
   async function moveTo(filter: Filter): Promise<void> {
+    // Answering a result or a Nudge ends the Search: the day it named is what
+    // the reader asked to see. The term stays in the field, so asking again
+    // costs no retyping.
+    abandonWaitingTerm()
     show({
       filter,
+      searching: false,
       nudgedDay: null,
       // A confirmation is about the Filter that was copied, not this one; a
       // problem is about a Note in the list being left behind.
@@ -166,6 +218,79 @@ export function createHistorySession({
       problem: null,
     })
     await read(filter)
+  }
+
+  /** A term that will never be asked for now, let go of without asking. */
+  function abandonWaitingTerm(): void {
+    waiting?.cancel()
+    waiting = null
+  }
+
+  /**
+   * A term as the reader typed it. The field is answered at once so typing
+   * never lags, but the journal is asked only once the term has stood still —
+   * and the main area keeps whatever it is showing until that read lands, so
+   * there is no loading state to flash between keystrokes.
+   */
+  function search(term: string): Promise<void> {
+    abandonWaitingTerm()
+    const showing = term.length >= SEARCH_MIN_TERM_LENGTH
+    show({ term, searching: showing })
+
+    if (!showing) return stopShowingResults()
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        waiting = null
+        void run(term).then(resolve)
+      }, SEARCH_DEBOUNCE_MS)
+
+      waiting = {
+        cancel: () => {
+          clearTimeout(timer)
+          // The term it was given has been overtaken, which is as settled as
+          // it is ever going to get.
+          resolve()
+        },
+      }
+    })
+  }
+
+  /** One settled term, asked of the whole journal. */
+  async function run(term: string): Promise<void> {
+    const ticket = ++latestRead
+    try {
+      const core = await journal
+      const notes = await core.notesMatching(term)
+      // Newest read wins as everywhere else, and a result may only land while
+      // it is still the term in the field: the reader typed on, or the Filter
+      // moved, and either way this answers a question nobody is asking.
+      if (latestRead !== ticket || !isStillAsking(term)) return
+      show({ history: { state: 'results', term, notes } })
+    } catch (error) {
+      giveUp(error, ticket)
+    }
+  }
+
+  /**
+   * Whether the question a read went to answer is still the one on screen: the
+   * reader has neither typed on nor moved the Filter since it was asked.
+   */
+  function isStillAsking(term: string): boolean {
+    return snapshot.searching && snapshot.term === term
+  }
+
+  /**
+   * The screen back to the Filter it never stopped having. A Search still in
+   * flight needs nothing done to it: the term has already changed, which is
+   * what keeps it from landing.
+   */
+  function stopShowingResults(): Promise<void> {
+    if (snapshot.history.state !== 'results') return Promise.resolve()
+    // Searched before the first read landed, so there is no Filter to go back
+    // to yet: ask for the opening one rather than claiming an empty journal.
+    if (snapshot.filter === null) return open()
+    return read(snapshot.filter)
   }
 
   /**
@@ -199,8 +324,17 @@ export function createHistorySession({
     snapshot: () => snapshot,
     open,
     moveTo,
+    search,
 
     async noteArrived(journalDay) {
+      // While a Search is showing there is no Filter on screen for a Note to
+      // belong to, so it always nudges and the results hold still — the
+      // reader's question is answered as it was asked.
+      if (snapshot.searching) {
+        show({ nudgedDay: journalDay })
+        return
+      }
+
       // No Notes at all until now: there is no Filter to hold still, and the
       // empty state has just stopped being true.
       if (snapshot.filter === null) {

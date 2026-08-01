@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createHistorySession, type HistorySnapshot } from './history-session'
+import {
+  createHistorySession,
+  SEARCH_DEBOUNCE_MS,
+  type HistorySnapshot,
+} from './history-session'
 import {
   createJournal,
   filterForJournalDay,
@@ -306,6 +310,211 @@ describe('correcting a Note', () => {
   })
 })
 
+describe('searching the journal', () => {
+  it('shows every matching Note in the journal, newest first, whatever the Filter', async () => {
+    const { session } = await sessionOver([
+      { at: '2026-03-09T10:00:00', body: 'planned the migration' },
+      { at: '2026-03-11T10:00:00', body: 'nothing to do with it' },
+      { at: '2026-03-13T10:00:00', body: 'ran the MIGRATION' },
+    ])
+
+    await session.open()
+    await session.search('migration')
+
+    expect(resultsOf(session.snapshot())).toEqual([
+      'ran the MIGRATION',
+      'planned the migration',
+    ])
+    // The Filter is where it was: a Search is a way in, not a narrowing.
+    expect(session.snapshot().filter).toEqual(filterForJournalDay('2026-03-13'))
+  })
+
+  it('asks nothing of the journal for a term of one character', async () => {
+    const asked: string[] = []
+    const { session } = await sessionOver(
+      [{ at: '2026-03-13T10:00:00', body: 'Friday' }],
+      {
+        journal: (core) => ({
+          ...core,
+          notesMatching(term) {
+            asked.push(term)
+            return core.notesMatching(term)
+          },
+        }),
+      },
+    )
+
+    await session.open()
+    await session.search('F')
+
+    expect(asked).toEqual([])
+    expect(bodiesOf(session.snapshot())).toEqual(['Friday'])
+    expect(session.snapshot().searching).toBe(false)
+  })
+
+  it('is showing a Search even when nothing matched', async () => {
+    const { session } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'Friday' },
+    ])
+
+    await session.open()
+    await session.search('migration')
+
+    expect(session.snapshot().history).toEqual({
+      state: 'results',
+      term: 'migration',
+      notes: [],
+    })
+    expect(session.snapshot().searching).toBe(true)
+  })
+
+  it('holds the list still while a search is in flight, rather than loading', async () => {
+    const slow = gate()
+    const { session } = await sessionOver(
+      [{ at: '2026-03-13T10:00:00', body: 'Friday' }],
+      {
+        journal: (core) => ({
+          ...core,
+          async notesMatching(term) {
+            const notes = await core.notesMatching(term)
+            await slow.reached(term)
+            return notes
+          },
+        }),
+      },
+    )
+
+    await session.open()
+    slow.hold('Fri')
+    const searching = session.search('Fri')
+    await afterDebounce()
+
+    expect(bodiesOf(session.snapshot())).toEqual(['Friday'])
+
+    slow.release('Fri')
+    await searching
+
+    expect(resultsOf(session.snapshot())).toEqual(['Friday'])
+  })
+
+  it('lets only the newest of two overlapping searches reach the view', async () => {
+    const slow = gate()
+    const { session } = await sessionOver(
+      [
+        { at: '2026-03-13T10:00:00', body: 'the migration' },
+        { at: '2026-03-13T11:00:00', body: 'the tray menu' },
+      ],
+      {
+        journal: (core) => ({
+          ...core,
+          async notesMatching(term) {
+            const notes = await core.notesMatching(term)
+            await slow.reached(term)
+            return notes
+          },
+        }),
+      },
+    )
+
+    await session.open()
+    slow.hold('migration')
+    slow.hold('tray')
+
+    // The reader kept typing: the first term is asked for first and answers
+    // last, and must not land on top of the term they settled on.
+    const stale = session.search('migration')
+    await afterDebounce()
+    const fresh = session.search('tray')
+    slow.release('tray')
+    await fresh
+    slow.release('migration')
+    await stale
+
+    expect(resultsOf(session.snapshot())).toEqual(['the tray menu'])
+    expect(session.snapshot().term).toBe('tray')
+  })
+
+  it('goes back to the Filter when the term drops below two characters', async () => {
+    const { session } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'Friday' },
+    ])
+
+    await session.open()
+    await session.search('Fri')
+    await session.search('')
+
+    expect(bodiesOf(session.snapshot())).toEqual(['Friday'])
+    expect(session.snapshot().term).toBe('')
+    expect(session.snapshot().searching).toBe(false)
+  })
+
+  it('moves the Filter to the day a result is filed under, keeping the term', async () => {
+    const { session } = await sessionOver([
+      { at: '2026-03-09T10:00:00', body: 'planned the migration' },
+      { at: '2026-03-09T11:00:00', body: 'and the rest of Monday' },
+      { at: '2026-03-13T10:00:00', body: 'ran the migration' },
+    ])
+
+    await session.open()
+    await session.search('migration')
+    await session.moveTo(filterForJournalDay('2026-03-09'))
+
+    expect(session.snapshot().filter).toEqual(filterForJournalDay('2026-03-09'))
+    expect(bodiesOf(session.snapshot())).toEqual([
+      'and the rest of Monday',
+      'planned the migration',
+    ])
+    expect(session.snapshot().searching).toBe(false)
+    expect(session.snapshot().term).toBe('migration')
+  })
+
+  it('nudges for a Note captured while results are showing, matching or not', async () => {
+    const { session, capture } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'ran the migration' },
+    ])
+
+    await session.open()
+    await session.search('migration')
+    // Filed under the day in view, and matching the term: it still nudges,
+    // because there is no Filter on screen for it to belong to.
+    await capture('2026-03-13T11:00:00', 'the migration again')
+    await session.noteArrived('2026-03-13')
+
+    expect(session.snapshot().nudgedDay).toBe('2026-03-13')
+    expect(resultsOf(session.snapshot())).toEqual(['ran the migration'])
+  })
+
+  it('closes the results when the reader acts on that Nudge', async () => {
+    const { session, capture } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'ran the migration' },
+    ])
+
+    await session.open()
+    await session.search('migration')
+    await capture('2026-03-16T10:00:00', 'Monday')
+    await session.noteArrived('2026-03-16')
+    await session.moveTo(filterForJournalDay('2026-03-16'))
+
+    expect(bodiesOf(session.snapshot())).toEqual(['Monday'])
+    expect(session.snapshot().nudgedDay).toBeNull()
+    expect(session.snapshot().searching).toBe(false)
+  })
+
+  it('leaves the Digest bound to the Filter while a Search is showing', async () => {
+    const { session, clipboard } = await sessionOver([
+      { at: '2026-03-09T10:00:00', body: 'planned the migration' },
+      { at: '2026-03-13T10:00:00', body: 'ran the migration' },
+    ])
+
+    await session.open()
+    await session.search('migration')
+    session.copy()
+    await settle()
+
+    expect(clipboard.written).toEqual(['- ran the migration'])
+  })
+})
+
 describe('copying the Digest', () => {
   it('writes the whole Filter and says how many Notes went', async () => {
     const { session, clipboard } = await sessionOver([
@@ -450,9 +659,22 @@ function bodiesOf(snapshot: HistorySnapshot): string[] {
   )
 }
 
+/** The bodies of a Search's results, in the order the list shows them. */
+function resultsOf(snapshot: HistorySnapshot): string[] {
+  if (snapshot.history.state !== 'results') {
+    throw new Error(`History is ${snapshot.history.state}, not results`)
+  }
+  return snapshot.history.notes.map((note) => note.body)
+}
+
 /** Lets a `copy()` — deliberately not awaitable — finish before asserting. */
 function settle() {
   return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+/** Long enough for one debounced search to be asked for, and no longer. */
+function afterDebounce() {
+  return new Promise((resolve) => setTimeout(resolve, SEARCH_DEBOUNCE_MS + 10))
 }
 
 function silenceErrors() {

@@ -52,7 +52,8 @@ export default function HistoryView({
       onChange: setSnapshot,
     }),
   )
-  const { filter, history, nudgedDay, confirmation, problem } = snapshot
+  const { filter, history, term, searching, nudgedDay, confirmation, problem } =
+    snapshot
 
   // The one Note being reworded, and the one waiting on a confirmed deletion.
   // Both are single, and both are about this screen rather than the session: a
@@ -79,13 +80,19 @@ export default function HistoryView({
     }
   }, [desktop, session])
 
-  // Escape dismisses, and dismissing closes: History is not kept resident.
-  // While a correction is open, Escape belongs to it — abandoning an edit or a
-  // confirmation must not take the window with it.
+  // Escape belongs to whatever has taken the screen over: a correction first,
+  // then a Search, and the window when neither has. Dismissing the window
+  // closes it — History is not kept resident.
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
-    if (event.key === 'Escape' && editing === null && deleting === null) {
-      void desktop.closeWindow()
+    if (event.key !== 'Escape' || editing !== null || deleting !== null) return
+
+    if (searching) {
+      // Clears the results and empties the field; the window stays open.
+      void session.search('')
+      return
     }
+
+    void desktop.closeWindow()
   }
 
   function commitEdit(note: Note, body: string) {
@@ -121,10 +128,21 @@ export default function HistoryView({
       {filter !== null && (
         <header className="flex shrink-0 items-center gap-3 px-6 py-4 text-xs text-muted-foreground">
           <Range filter={filter} onPick={pick} />
-          <CopyDigest
-            confirmation={confirmation}
-            onCopy={() => session.copy()}
+          <SearchField
+            term={term}
+            onType={(typed) => void session.search(typed)}
           />
+          {/*
+            Gone while a Search is showing: the Digest is bound to the Filter,
+            and a button that copies something not on screen is how the wrong
+            month reaches a standup thread.
+          */}
+          {!searching && (
+            <CopyDigest
+              confirmation={confirmation}
+              onCopy={() => session.copy()}
+            />
+          )}
         </header>
       )}
 
@@ -137,6 +155,22 @@ export default function HistoryView({
         )}
         {history.state === 'notes' && history.days.length === 0 && (
           <Centred>No Notes in these days.</Centred>
+        )}
+        {history.state === 'results' && history.notes.length === 0 && (
+          <Centred>No Notes say “{history.term}”.</Centred>
+        )}
+        {history.state === 'results' && history.notes.length > 0 && (
+          <ol className="flex flex-col gap-1">
+            {history.notes.map((note) => (
+              <ResultLine
+                key={note.id}
+                note={note}
+                onShow={() =>
+                  void session.moveTo(filterForJournalDay(note.journalDay))
+                }
+              />
+            ))}
+          </ol>
         )}
         {history.state === 'notes' &&
           history.days.map((day) => (
@@ -272,6 +306,29 @@ function NoteLine({
 }
 
 /**
+ * One Search result: what the Note says, and the day it is filed under. The
+ * whole row is the way in, because answering a result has exactly one meaning
+ * — take History to that day in full. The Notes are not correctable here: a
+ * result is a signpost to a day, and the day is where the list lives.
+ */
+function ResultLine({ note, onShow }: { note: Note; onShow: () => void }) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onShow}
+        className="flex w-full gap-3 rounded-md px-2 py-1 text-left text-sm outline-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/30"
+      >
+        <span className="flex-1">{note.body}</span>
+        <span className="shrink-0 pt-px text-xs text-muted-foreground">
+          {formatJournalDay(note.journalDay)}
+        </span>
+      </button>
+    </li>
+  )
+}
+
+/**
  * A Body being reworded. Enter commits and Escape abandons — the same bargain
  * a Capture makes, so correcting a Note is the interaction that wrote it.
  */
@@ -377,6 +434,34 @@ function Range({
         onChange={(to) => onPick(filter.from, to)}
       />
     </>
+  )
+}
+
+/**
+ * What the reader is looking for, anywhere in the journal. The field holds the
+ * term the session holds, so clearing the Search with Escape empties it
+ * without the view keeping a second copy of the truth — and the debounce, the
+ * two-character threshold and which read may land are the session's, not this
+ * input's.
+ */
+function SearchField({
+  term,
+  onType,
+}: {
+  term: string
+  onType: (term: string) => void
+}) {
+  return (
+    <label className="flex items-center gap-1.5">
+      <span className="sr-only">Search</span>
+      <input
+        type="search"
+        value={term}
+        onChange={(event) => onType(event.target.value)}
+        placeholder="Search"
+        className="w-48 rounded-md border border-border bg-transparent px-1.5 py-0.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+      />
+    </label>
   )
 }
 

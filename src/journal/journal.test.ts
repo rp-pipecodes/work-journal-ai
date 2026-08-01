@@ -533,6 +533,69 @@ describe('notesForFilter', () => {
   })
 })
 
+describe('notesMatching', () => {
+  it('finds a Note whose Body contains the term, whatever the case', async () => {
+    const { journal } = await journalAt('2026-03-13T09:00:00')
+
+    await journal.capture('the MIGRATION went wrong')
+
+    expect(
+      (await journal.notesMatching('migration')).map((note) => note.body),
+    ).toEqual(['the MIGRATION went wrong'])
+  })
+
+  it('reads the whole journal, newest first, whatever days the matches are on', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T09:00:00')
+
+    await journal.capture('planned the migration')
+    clock.set(local('2026-03-11T09:00:00'))
+    await journal.capture('nothing to do with it')
+    clock.set(local('2026-03-13T09:00:00'))
+    await journal.capture('ran the migration')
+
+    expect(
+      (await journal.notesMatching('migration')).map((note) => note.body),
+    ).toEqual(['ran the migration', 'planned the migration'])
+  })
+
+  it('returns nothing when no Body contains the term', async () => {
+    const { journal } = await journalAt('2026-03-13T09:00:00')
+
+    await journal.capture('shipped the tray menu')
+
+    expect(await journal.notesMatching('migration')).toEqual([])
+  })
+
+  it('matches a term in the middle of a word, as a substring does', async () => {
+    const { journal } = await journalAt('2026-03-13T09:00:00')
+
+    await journal.capture('rewrote the digest grouping')
+
+    expect(
+      (await journal.notesMatching('grat')).map((note) => note.body),
+    ).toEqual([])
+    expect(
+      (await journal.notesMatching('roup')).map((note) => note.body),
+    ).toEqual(['rewrote the digest grouping'])
+  })
+
+  it('reads a wildcard as the character it is, not as a pattern', async () => {
+    const { journal, clock } = await journalAt('2026-03-13T09:00:00')
+
+    await journal.capture('cut the queue by 50%')
+    clock.set(local('2026-03-13T11:00:00'))
+    await journal.capture('nothing to do with it')
+
+    expect(
+      (await journal.notesMatching('50%')).map((note) => note.body),
+    ).toEqual(['cut the queue by 50%'])
+    // A bare wildcard would otherwise match every Note in the journal.
+    expect((await journal.notesMatching('%')).map((note) => note.body)).toEqual(
+      ['cut the queue by 50%'],
+    )
+  })
+})
+
 describe('digest', () => {
   it('renders one bullet per Note, oldest first and without timestamps', async () => {
     const { journal, clock } = await journalAt('2026-03-13T09:00:00')
