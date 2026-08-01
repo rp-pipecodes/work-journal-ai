@@ -1,5 +1,6 @@
 import type { SqlDriver } from '../../journal/journal'
-import type { HotkeyStatus, SettingsStore } from '../../settings/settings'
+import type { HotkeyStatus } from '../../settings/hotkey'
+import type { SettingsStore } from '../../settings/settings'
 import type { Theme } from '../../settings/theme'
 import type { Desktop, ExportedFile, Unlisten } from '../desktop'
 

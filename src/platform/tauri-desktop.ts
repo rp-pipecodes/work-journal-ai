@@ -10,7 +10,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import Database from '@tauri-apps/plugin-sql'
 import { load } from '@tauri-apps/plugin-store'
-import type { HotkeyStatus } from '@/settings/settings'
+import type { HotkeyStatus } from '@/settings/hotkey'
 import type { Theme } from '@/settings/theme'
 import {
   CAPTURE_SHOWN_EVENT,

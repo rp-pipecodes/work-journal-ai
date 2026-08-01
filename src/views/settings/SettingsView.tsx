@@ -16,12 +16,14 @@ import type { Desktop } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
 import { describeTheme, isTheme, THEME_CHOICES } from '@/settings/theme'
 import {
-  DAY_START_HOURS,
-  DEFAULT_SETTINGS,
   describeUnavailableHotkey,
-  formatDayStartHour,
   hotkeyForKeystroke,
   type HotkeyStatus,
+} from '@/settings/hotkey'
+import {
+  DAY_START_HOURS,
+  DEFAULT_SETTINGS,
+  formatDayStartHour,
 } from '@/settings/settings'
 
 /**
