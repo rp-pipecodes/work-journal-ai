@@ -249,7 +249,7 @@ function NoteLine({
   onDelete: () => void
 }) {
   return (
-    <li className="group flex gap-3 rounded-md px-2 py-1 text-sm hover:bg-muted/40 focus-within:bg-muted/40">
+    <li className="group relative flex gap-3 rounded-md px-2 py-1 text-sm hover:bg-muted/40 focus-within:bg-muted/40">
       <span className="shrink-0 pt-px font-mono text-xs tabular-nums text-muted-foreground">
         {formatTimeOfDay(note.capturedAt)}
       </span>
@@ -280,24 +280,38 @@ function NoteLine({
             Out of the way until wanted, and genuinely out of the way: an
             invisible control is not one to click by accident. Kept focusable
             rather than hidden, so tabbing to it reveals it.
+
+            Laid over the row's trailing edge rather than beside it, because a
+            control nobody can see should not be taking width off the Body —
+            and taking it back on hover would rewrap the line under the cursor.
+            The Body keeps the whole row and the actions cover its tail while
+            they are up, which is why the layer is opaque: the two backgrounds
+            below compose to exactly the row's own `bg-muted/40` over
+            `bg-background`.
+
+            Up on the row's hover, but only on these controls' own focus: what
+            covers the end of a line has to be something the reader asked for,
+            and tabbing to the Body is asking to read it.
           */}
-          <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
-            <label className="flex items-center gap-1 text-xs text-muted-foreground">
-              <span className="sr-only">File under</span>
-              <DayField
-                value={note.journalDay}
-                onPick={onRefile}
-                label={`File "${note.body}" under another day`}
-              />
-            </label>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onDelete}
-              aria-label={`Delete "${note.body}"`}
-            >
-              Delete
-            </Button>
+          <div className="absolute inset-y-1 right-2 flex items-center rounded-md bg-background opacity-0 transition-opacity pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
+            <div className="flex h-full items-center gap-1 rounded-md bg-muted/40 pl-3">
+              <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                <span className="sr-only">File under</span>
+                <DayField
+                  value={note.journalDay}
+                  onPick={onRefile}
+                  label={`File "${note.body}" under another day`}
+                />
+              </label>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onDelete}
+                aria-label={`Delete "${note.body}"`}
+              >
+                Delete
+              </Button>
+            </div>
           </div>
         </>
       )}
