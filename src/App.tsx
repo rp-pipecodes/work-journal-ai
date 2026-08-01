@@ -38,5 +38,20 @@ export default function App({
     return <HistoryView desktop={desktop} journal={journal} />
   }
 
-  return <SettingsView desktop={desktop} settings={settings} journal={journal} />
+  if (view === 'settings') {
+    return (
+      <SettingsView desktop={desktop} settings={settings} journal={journal} />
+    )
+  }
+
+  return noViewFor(view)
+}
+
+/**
+ * The `View` union is closed, so by here nothing is left. A member added
+ * without a branch above arrives as something other than `never` and fails
+ * typecheck at this call.
+ */
+function noViewFor(view: never): never {
+  throw new Error(`No view for ${String(view)}.`)
 }
