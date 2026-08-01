@@ -126,7 +126,7 @@ export default function HistoryView({
       className="flex h-screen flex-col bg-background outline-none"
     >
       {filter !== null && (
-        <header className="flex shrink-0 items-center gap-3 px-6 py-4 text-xs text-muted-foreground">
+        <header className="flex shrink-0 items-center gap-3 overflow-hidden px-6 py-4 text-xs text-muted-foreground">
           <Range filter={filter} onPick={pick} />
           <SearchField
             term={term}
@@ -452,14 +452,16 @@ function SearchField({
   onType: (term: string) => void
 }) {
   return (
-    <label className="flex items-center gap-1.5">
+    // The one control that gives way when the window is narrow: the Filter and
+    // the Digest are fixed things, a field is just as usable half as wide.
+    <label className="flex min-w-0 flex-1 items-center gap-1.5">
       <span className="sr-only">Search</span>
       <input
         type="search"
         value={term}
         onChange={(event) => onType(event.target.value)}
         placeholder="Search"
-        className="w-48 rounded-md border border-border bg-transparent px-1.5 py-0.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+        className="w-full min-w-0 rounded-md border border-border bg-transparent px-1.5 py-0.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
       />
     </label>
   )
@@ -478,7 +480,7 @@ function CopyDigest({
   onCopy: () => void
 }) {
   return (
-    <div className="ml-auto flex items-center gap-3">
+    <div className="ml-auto flex shrink-0 items-center gap-3">
       {/* Empty until something has been copied, and announced when it is. */}
       <span role="status" aria-live="polite">
         {confirmation}
@@ -500,7 +502,7 @@ function End({
   onChange: (value: string) => void
 }) {
   return (
-    <label className="flex items-center gap-1.5">
+    <label className="flex shrink-0 items-center gap-1.5">
       <span>{label}</span>
       <DayField value={value} onPick={onChange} />
     </label>
