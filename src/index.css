@@ -124,6 +124,11 @@
   body {
     @apply bg-background text-foreground;
     }
+  /* The Capture window is transparent so its rounded corners show the desktop
+     rather than a squared-off page behind them. */
+  body.capture-window {
+    @apply bg-transparent;
+    }
   html {
     @apply font-sans;
     }

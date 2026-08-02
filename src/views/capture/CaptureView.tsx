@@ -72,6 +72,10 @@ export default function CaptureView({
   )
 
   useEffect(() => {
+    // The page behind the window has to give way to the rounded corners drawn
+    // below; only this window's document is marked, since the bundle is shared.
+    document.body.classList.add('capture-window')
+
     // On mount the field is already empty; from here on, every Capture begins
     // with the window being shown.
     field.current?.focus()
@@ -81,6 +85,7 @@ export default function CaptureView({
     const blurred = desktop.onWindowBlurred(() => void dismiss())
 
     return () => {
+      document.body.classList.remove('capture-window')
       void shown.then((stop) => stop())
       void blurred.then((stop) => stop())
     }
@@ -99,7 +104,9 @@ export default function CaptureView({
   }
 
   return (
-    <div className="flex h-screen flex-col bg-background">
+    // The corners are rounded here rather than on the field: the field all but
+    // fills the window, so this is the shape the user sees.
+    <div className="flex h-screen flex-col overflow-hidden rounded-2xl border border-border bg-background">
       <input
         ref={field}
         type="text"
@@ -113,7 +120,7 @@ export default function CaptureView({
         spellCheck={false}
         // The ring is drawn inside: the field all but fills the window, and an
         // outset one would be clipped by the window's own edge.
-        className="min-h-0 w-full flex-1 bg-transparent px-5 text-lg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
+        className="min-h-0 w-full flex-1 rounded-2xl bg-transparent px-5 text-lg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
       />
       {/*
         Under the field rather than in place of it: the window does not resize,

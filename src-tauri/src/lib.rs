@@ -125,6 +125,9 @@ fn build_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
         .inner_size(560.0, 64.0)
         .resizable(false)
         .decorations(false)
+        // The rounded corners are drawn by the view, so the window itself has
+        // to let the desktop through outside them.
+        .transparent(true)
         .always_on_top(true)
         .skip_taskbar(true)
         .center()
