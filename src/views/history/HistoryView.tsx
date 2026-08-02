@@ -27,6 +27,7 @@ import {
 } from '@/journal/journal'
 import { copyToClipboard } from '@/lib/clipboard'
 import type { Desktop } from '@/platform/desktop'
+import type { HotkeyStatus } from '@/settings/hotkey'
 
 /**
  * Reading back what you did. Every rule of reading back — where the Filter
@@ -60,6 +61,9 @@ export default function HistoryView({
   // list only ever has one correction in progress.
   const [editing, setEditing] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<Note | null>(null)
+  // Only the empty state reads this, and only to teach the fastest way in.
+  // Null until the OS has been asked, and after a question it refused.
+  const [hotkey, setHotkey] = useState<HotkeyStatus | null>(null)
   const page = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -69,6 +73,15 @@ export default function HistoryView({
 
     void session.open()
   }, [session])
+
+  useEffect(() => {
+    desktop.hotkeyStatus().then(setHotkey, (error: unknown) => {
+      // The Hotkey is not what this window is for: a status that cannot be
+      // read leaves the empty state on the Tray Menu wording rather than
+      // saying anything about it.
+      console.error('could not read the hotkey', error)
+    })
+  }, [desktop])
 
   useEffect(() => {
     const subscription = desktop.onNoteCaptured((journalDay) => {
@@ -149,7 +162,7 @@ export default function HistoryView({
       {problem !== null && <Problem>{problem}</Problem>}
 
       <main className="flex-1 overflow-y-auto px-6 pb-5">
-        {history.state === 'empty' && <EmptyState />}
+        {history.state === 'empty' && <EmptyState hotkey={hotkey} />}
         {history.state === 'unreadable' && (
           <Centred>The journal could not be read.</Centred>
         )}
@@ -618,15 +631,31 @@ function Nudge({
   )
 }
 
-/** No Notes at all is a beginning, not an empty day. */
-function EmptyState() {
+/**
+ * No Notes at all is a beginning, not an empty day — and the one screen a new
+ * user is guaranteed to read, so it teaches the Hotkey: the fastest Entry
+ * Point, named as the combination actually bound rather than in the abstract.
+ *
+ * The Tray Menu is the fallback, and is all this says when the Hotkey is
+ * unavailable or unknown: an empty state that taught a combination doing
+ * nothing would be worse than the slow way in.
+ */
+function EmptyState({ hotkey }: { hotkey: HotkeyStatus | null }) {
   return (
     <Centred>
       <p className="font-medium">No Notes yet</p>
-      <p className="text-muted-foreground">
-        Choose New Note from the Work Journal menu, type one line about what you
-        just did, and press Enter.
-      </p>
+      {hotkey?.state === 'registered' ? (
+        <p className="text-muted-foreground">
+          Press <span className="font-mono">{hotkey.hotkey}</span>, type one
+          line about what you just did, and press Enter. New Note in the Work
+          Journal menu does the same thing.
+        </p>
+      ) : (
+        <p className="text-muted-foreground">
+          Choose New Note from the Work Journal menu, type one line about what
+          you just did, and press Enter.
+        </p>
+      )}
     </Centred>
   )
 }
