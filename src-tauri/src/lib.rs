@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
+    webview::Color,
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -38,6 +39,10 @@ const HOTKEY_KEY: &str = "hotkey";
 /// Whether the app starts at login. Only its presence is read here: an absent
 /// answer is a first run, and a first run is when the question gets asked.
 const START_AT_LOGIN_KEY: &str = "startAtLogin";
+
+/// The Theme the user settled on. Must match `THEME_KEY` in
+/// `src/platform/desktop.ts`.
+const THEME_KEY: &str = "theme";
 
 /// Told to the capture window every time it is shown. It is long-lived, so it
 /// clears its field and takes focus on this rather than on being built — see
@@ -211,11 +216,20 @@ fn show_on_demand_window(
         return window.set_focus();
     }
 
+    // A window opens on whatever it was built with and keeps it until its
+    // webview has something of its own to show — a fifth of a second later. Both
+    // of these are about that gap: the window is painted the palette it is
+    // going to end up in, and the webview is told which one that is before it
+    // parses a line of the document, so its first frame is already right.
+    let theme = resolved_theme(app);
+
     let window = WebviewWindowBuilder::new(app, label, WebviewUrl::default())
         .title(title)
         .inner_size(size.0, size.1)
         .min_inner_size(min_size.0, min_size.1)
         .center()
+        .background_color(theme.background())
+        .initialization_script(theme.announcement())
         .build()?;
 
     // A Dock-less app does not reliably receive focus when a window appears.
@@ -240,6 +254,68 @@ fn show_settings_window(app: &tauri::AppHandle) -> tauri::Result<()> {
         (480.0, 560.0),
         (400.0, 420.0),
     )
+}
+
+/// The Resolved Theme — the palette actually painted, never `system`; see
+/// [CONTEXT.md](../../CONTEXT.md). Worked out here as well as in
+/// `src/settings/theme.ts` because a window needs its palette *before* it has a
+/// webview, which is the one question the frontend cannot answer in time.
+#[derive(Clone, Copy)]
+enum ResolvedTheme {
+    Light,
+    Dark,
+}
+
+impl ResolvedTheme {
+    /// What the window itself is painted while its webview has nothing to show
+    /// — `--background` from `src/index.css`, in sRGB. Tauri's default is
+    /// white, which in a dark app is a flash of the wrong colour on every open.
+    fn background(self) -> Color {
+        match self {
+            Self::Dark => Color(10, 10, 10, 255),
+            Self::Light => Color(255, 255, 255, 255),
+        }
+    }
+
+    /// Handed to the webview before its document is parsed, so the very first
+    /// frame is painted in the right palette rather than repainted into it.
+    /// Must match `__THEME__` in `src/platform/desktop.ts`.
+    fn announcement(self) -> String {
+        let name = match self {
+            Self::Dark => "dark",
+            Self::Light => "light",
+        };
+        format!("window.__THEME__ = '{name}'")
+    }
+}
+
+/// The palette the app is about to paint in: the stored preference, or the OS
+/// where there is none. The capture window is asked about the OS because it is
+/// built before any of this and outlives every other window.
+fn resolved_theme(app: &tauri::AppHandle) -> ResolvedTheme {
+    let stored = app
+        .store(SETTINGS_FILE)
+        .ok()
+        .and_then(|store| store.get(THEME_KEY))
+        .and_then(|value| value.as_str().map(str::to_string));
+
+    match stored.as_deref() {
+        Some("dark") => ResolvedTheme::Dark,
+        Some("light") => ResolvedTheme::Light,
+        // `system`, or nothing said yet: whatever the OS is painting.
+        _ => {
+            let dark = app
+                .get_webview_window(CAPTURE_WINDOW)
+                .and_then(|window| window.theme().ok())
+                .is_some_and(|theme| theme == tauri::Theme::Dark);
+
+            if dark {
+                ResolvedTheme::Dark
+            } else {
+                ResolvedTheme::Light
+            }
+        }
+    }
 }
 
 /// Whether the app has ever been told what to do about starting at login. Only

@@ -8,6 +8,7 @@
  * belongs there.
  */
 
+import { THEME_KEY } from '@/platform/desktop'
 import type { SettingsStore } from './settings'
 
 /**
@@ -21,8 +22,6 @@ export type ResolvedTheme = 'light' | 'dark'
 
 /** Unasked, the app follows the OS rather than picking for the user. */
 export const DEFAULT_THEME: Theme = 'system'
-
-const THEME_KEY = 'theme'
 
 /**
  * The stored preference, or the default wherever the store is silent or holds

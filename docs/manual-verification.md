@@ -48,6 +48,16 @@ Everything else is checked against the release build.
 - [ ] **Quit** ends the process — the tray icon disappears and nothing is left running.
 - [ ] Launching the app a second time while it is running — from Spotlight, and again from the Finder — leaves exactly one tray icon and one process each time, and opens a capture window rather than a second app.
 
+## Opening a window
+
+The palette is the point of this section, and the moment to watch is the one the window arrives in — not the window afterwards. A window is painted the Theme it is going to keep before its webview has anything to show, so it should never be seen in the wrong one.
+
+- [ ] With the Theme set to **Dark**, **View Notes** puts a window on screen that is dark from the moment it appears — no white rectangle, no flash, no snap from light to dark.
+- [ ] The same for **Settings**, and for both windows with the Theme set to **Light**.
+- [ ] With the Theme on **Match the system** and macOS in dark mode, both windows arrive dark; with macOS in light mode, light.
+- [ ] Toggling the Theme with `Cmd+Shift+D`, then closing the window and opening it again, shows it in the palette that was toggled *to* — the Rust side reads the same preference the window does.
+- [ ] Changing the macOS appearance while the Theme is **Match the system** and a window is open repaints that window, and the next window opens in the new palette.
+
 ## Capture from the Tray Menu
 
 - [ ] **New Note** opens the capture window with the field focused — typing lands in it without clicking first.

@@ -10,6 +10,25 @@
       content="A menu-bar journal for the work you just did: one keystroke to capture a Note, and everything exportable as Markdown."
     />
     <meta name="color-scheme" content="light dark" />
+    <!--
+      The palette, before a single frame is painted. The app's own Theme is
+      applied in a React effect, which cannot happen until the bundle has loaded
+      and the settings have been read — so without this the window's first frame
+      is always the light one, and a dark app opens with a white blink.
+
+      `window.__THEME__` is set by the Rust side before this document is parsed;
+      outside Tauri there is nobody to set it, so the OS is asked instead.
+    -->
+    <script>
+      var theme =
+        window.__THEME__ ||
+        (window.matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'dark'
+          : 'light')
+      document.documentElement.classList.toggle('dark', theme === 'dark')
+      // So the page's own canvas is right too, before the stylesheet arrives.
+      document.documentElement.style.colorScheme = theme
+    </script>
   </head>
   <body>
     <div id="root"></div>
