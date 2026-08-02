@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   isThemeToggle,
   resolveTheme,
@@ -23,13 +23,25 @@ const DARK_CLASS = 'dark'
  */
 export default function ThemeProvider({
   settings,
+  onThemeSettled,
   children,
 }: {
   settings: AppSettings
+  /**
+   * Called once, when the palette on the document is the stored one rather
+   * than the default it started on — which is the first moment the window is
+   * worth showing. Either answer settles it: a store that cannot be read has
+   * still said everything it is going to say.
+   */
+  onThemeSettled?: () => void
   children: React.ReactNode
 }) {
   const [theme, setTheme] = useState<Theme>(DEFAULT_THEME)
   const [prefersDark, setPrefersDark] = useState(systemPrefersDark)
+  const [settled, setSettled] = useState(false)
+  // Said once and not again: the Theme changes for the rest of the run, and a
+  // window already on screen does not want showing a second time.
+  const announced = useRef(false)
 
   useEffect(() => {
     let current = true
@@ -44,6 +56,11 @@ export default function ThemeProvider({
       })
       .catch((error: unknown) => {
         console.error('could not read the Theme', error)
+      })
+      .finally(() => {
+        if (current) {
+          setSettled(true)
+        }
       })
 
     const changed = settings.onThemeChanged(setTheme).catch((error: unknown) => {
@@ -73,7 +90,12 @@ export default function ThemeProvider({
     // So that form controls and scrollbars the app does not style are painted
     // to match rather than staying stubbornly light.
     root.style.colorScheme = resolved
-  }, [resolved])
+
+    if (settled && !announced.current) {
+      announced.current = true
+      onThemeSettled?.()
+    }
+  }, [resolved, settled, onThemeSettled])
 
   const ask = useCallback(
     (next: Theme) => {

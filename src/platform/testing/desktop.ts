@@ -16,6 +16,8 @@ export interface FakeDesktop extends Desktop {
   loginItem: boolean
   /** Every export written, most recent last. */
   exported: Array<{ markdown: string; fileName: string }>
+  /** Whether the window has asked to be put on screen. */
+  revealed: boolean
 }
 
 export function fakeDesktop({
@@ -39,9 +41,13 @@ export function fakeDesktop({
     stored,
     loginItem: false,
     exported: [],
+    revealed: false,
 
     windowLabel: () => 'history',
     closeWindow: async () => {},
+    revealWindow: async () => {
+      desktop.revealed = true
+    },
     onWindowBlurred: async () => () => {},
     onCloseRequested: async () => () => {},
 

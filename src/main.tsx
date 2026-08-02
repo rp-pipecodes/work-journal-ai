@@ -14,6 +14,18 @@ import { createAppSettings, followDayStart } from './settings/app-settings.ts'
 const desktop = createTauriDesktop()
 const settings = createAppSettings(desktop)
 
+/**
+ * Puts the window on screen, now that the Theme it will keep is on the
+ * document. Asked for directly rather than a frame later: a hidden window's
+ * webview is not composited at all, so `requestAnimationFrame` there never
+ * runs and a window waiting for one would never appear.
+ */
+function reveal() {
+  void desktop.revealWindow().catch((error: unknown) => {
+    console.error('could not show the window', error)
+  })
+}
+
 // A promise rather than an awaited value: the database opens after the first
 // paint, and a Capture is typed into a window that is already on screen.
 const journal = createAppJournal({
@@ -31,7 +43,7 @@ createRoot(document.getElementById('root')!).render(
         The dark class is left on the document either way, so the fallback is
         painted to match whatever the window was already showing. */}
     <ErrorBoundary>
-      <ThemeProvider settings={settings}>
+      <ThemeProvider settings={settings} onThemeSettled={reveal}>
         <App
           windowLabel={desktop.windowLabel()}
           desktop={desktop}

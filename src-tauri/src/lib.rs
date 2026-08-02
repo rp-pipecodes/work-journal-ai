@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
+    utils::config::Color,
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -71,7 +72,8 @@ pub fn run() {
             dismiss_capture,
             hotkey_status,
             set_hotkey,
-            export_notes
+            export_notes,
+            reveal_window
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -204,21 +206,127 @@ fn show_on_demand_window(
     // Reaching the Tray Menu again with the window already open raises it
     // rather than building a second one.
     if let Some(window) = app.get_webview_window(label) {
-        window.show()?;
-        return window.set_focus();
+        return reveal(&window);
     }
 
+    // Built hidden: a window put on screen here is an empty rectangle for as
+    // long as its webview takes to boot, load the bundle and paint — a fifth of
+    // a second in which the app is a blank window that then blinks. It reveals
+    // itself instead, once it has something to show — see `reveal_window`.
     let window = WebviewWindowBuilder::new(app, label, WebviewUrl::default())
         .title(title)
         .inner_size(size.0, size.1)
         .min_inner_size(min_size.0, min_size.1)
         .center()
+        .visible(false)
+        .background_color(window_background(app))
         .build()?;
 
-    // A Dock-less app does not reliably receive focus when a window appears.
-    window.set_focus()?;
+    // A webview that never reports in — a bundle that fails to load, a frontend
+    // that throws before it can ask — must not cost the user the window
+    // entirely. A late white flash beats a menu item that does nothing.
+    let stranded = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(REVEAL_DEADLINE);
+        let _ = stranded.clone().run_on_main_thread(move || {
+            if !stranded.is_visible().unwrap_or(true) {
+                log::warn!("{} never reported itself painted", stranded.label());
+                let _ = reveal(&stranded);
+            }
+        });
+    });
 
     Ok(())
+}
+
+/// How long a window is given to paint before it is shown unpainted anyway.
+/// Generous on purpose: this is for a frontend that is never coming back, not
+/// for a slow one, and a dev server serving a view's modules for the first time
+/// has been seen to take over a second. Firing early would put the empty
+/// window back on screen, which is the whole thing this is here to avoid.
+const REVEAL_DEADLINE: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// What the window itself is painted while its webview has nothing to show —
+/// `--background` from `src/index.css`, in sRGB. Tauri's default is white,
+/// which in a dark app is a flash of the wrong colour on every open.
+const DARK_BACKGROUND: Color = Color(10, 10, 10, 255);
+const LIGHT_BACKGROUND: Color = Color(255, 255, 255, 255);
+
+/// Must match `THEME_KEY` in `src/settings/theme.ts`.
+const THEME_KEY: &str = "theme";
+
+/// The Theme resolved the way the frontend resolves it, far enough to pick a
+/// colour: the stored preference, or the OS where there is none. Read here
+/// rather than asked of the window, because the window needs its colour before
+/// it exists.
+fn window_background(app: &tauri::AppHandle) -> Color {
+    let stored = app
+        .store(SETTINGS_FILE)
+        .ok()
+        .and_then(|store| store.get(THEME_KEY))
+        .and_then(|value| value.as_str().map(str::to_string));
+
+    let dark = match stored.as_deref() {
+        Some("dark") => true,
+        Some("light") => false,
+        // `system`, or nothing said yet: whatever the OS is painting. Asked of
+        // the capture window, which is built before any of this and outlives
+        // every other window.
+        _ => app
+            .get_webview_window(CAPTURE_WINDOW)
+            .and_then(|window| window.theme().ok())
+            .is_some_and(|theme| theme == tauri::Theme::Dark),
+    };
+
+    if dark {
+        DARK_BACKGROUND
+    } else {
+        LIGHT_BACKGROUND
+    }
+}
+
+/// Puts a window on screen. A Dock-less app does not reliably receive focus
+/// when a window appears, so focus is asked for rather than assumed.
+fn reveal(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    window.show()?;
+    window.set_focus()
+}
+
+/// A window saying it has painted what it means to show, so it can be revealed.
+/// Only the on-demand windows reveal themselves: the capture window is shown
+/// and hidden by the Rust side, which also has to hand focus back to whatever
+/// the Capture interrupted — see
+/// docs/adr/0002-capture-window-is-hidden-never-closed.md.
+#[tauri::command]
+fn reveal_window(window: tauri::WebviewWindow) -> Result<(), String> {
+    if !reveals_itself(window.label()) {
+        return Ok(());
+    }
+
+    reveal(&window).map_err(|error| error.to_string())
+}
+
+fn reveals_itself(label: &str) -> bool {
+    label != CAPTURE_WINDOW
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn on_demand_windows_reveal_themselves() {
+        assert!(reveals_itself(HISTORY_WINDOW));
+        assert!(reveals_itself(SETTINGS_WINDOW));
+    }
+
+    /// Shown by the Rust side, together with the app itself and the focus it
+    /// hands back — a webview that could show it would put a Capture on screen
+    /// at the moment its own bundle finished loading.
+    #[test]
+    fn the_capture_window_does_not() {
+        assert!(!reveals_itself(CAPTURE_WINDOW));
+    }
 }
 
 /// Opens Settings, building the window if it is not already open. Created on
@@ -371,11 +479,25 @@ fn hide_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
 
     // Hiding the window leaves this app active, so the user would be left
     // typing into nothing. Hiding the app hands focus back to whatever was in
-    // front when the Capture began.
+    // front when the Capture began — but it takes every other window down with
+    // it, so it is only right when the Capture was all the app had on screen.
+    // Opening Settings during a Capture ends the Capture, and the window the
+    // user asked for must survive it.
     #[cfg(target_os = "macos")]
-    app.hide()?;
+    if !has_other_windows(app) {
+        app.hide()?;
+    }
 
     Ok(())
+}
+
+/// Whether anything besides the capture window is open. Counted rather than
+/// asked whether it is visible: a window built a moment ago and still painting
+/// is one the user has asked for and is about to see.
+fn has_other_windows(app: &tauri::AppHandle) -> bool {
+    app.webview_windows()
+        .keys()
+        .any(|label| label != CAPTURE_WINDOW)
 }
 
 /// The Tray Menu — the Entry Point that always works, and the one Settings

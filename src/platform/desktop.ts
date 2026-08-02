@@ -59,6 +59,15 @@ export interface Desktop {
   windowLabel(): string
   /** Closes the window the caller is in. */
   closeWindow(): Promise<void>
+  /**
+   * The window the caller is in has painted what it means to show, and can be
+   * put on screen. Windows are built hidden: one shown before its webview has
+   * painted is an empty white rectangle first and the app second.
+   *
+   * The capture window ignores this — it is shown and hidden by the Rust side,
+   * which also hands focus back to whatever the Capture interrupted.
+   */
+  revealWindow(): Promise<void>
   /** The window lost focus — for a Capture, a discard. */
   onWindowBlurred(handle: () => void): Promise<Unlisten>
   /**

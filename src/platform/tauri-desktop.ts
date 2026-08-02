@@ -36,6 +36,10 @@ export function createTauriDesktop(): Desktop {
 
     closeWindow: () => getCurrentWindow().close(),
 
+    // Asked of the Rust side rather than done here with `getCurrentWindow()`,
+    // so that showing a window and taking focus stay in the one place.
+    revealWindow: () => invoke('reveal_window'),
+
     // Clicking away is a discard, not a Capture left floating over the screen.
     onWindowBlurred: (handle) =>
       getCurrentWindow().onFocusChanged(({ payload: focused }) => {
