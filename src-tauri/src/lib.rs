@@ -6,7 +6,7 @@ use hotkey::HotkeyStatus;
 use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::TrayIconBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     webview::Color,
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
@@ -457,6 +457,24 @@ fn hide_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Become active without unhiding windows. Needed before the Tray Menu opens:
+/// an Accessory app that has never been active loses the menu to the activation
+/// that the click itself triggers.
+#[cfg(target_os = "macos")]
+fn activate_for_tray_menu() {
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+
+    unsafe {
+        let app: Retained<AnyObject> = msg_send![class!(NSApplication), sharedApplication];
+        let active: bool = msg_send![&*app, isActive];
+        if !active {
+            let _: bool = msg_send![&*app, activateIgnoringOtherApps: true];
+        }
+    }
+}
+
 /// The Tray Menu — the Entry Point that always works, and the one Settings
 /// points at when the Hotkey cannot be registered. Quit is here because without
 /// a Dock icon it is the only way out.
@@ -472,9 +490,27 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         &[&new_note, &view_notes, &settings, &separator, &quit],
     )?;
 
+    // tray-icon opens the menu from `mouseDown` via `performClick`. On an
+    // Accessory app that has never been active, that same click also activates
+    // the app, and the activation cancels the menu ~250ms later — first click
+    // after launch flashes open and shut. Open from `mouseUp` after becoming
+    // active, so the menu is only shown once activation has finished.
     let mut tray = TrayIconBuilder::with_id("tray")
         .menu(&menu)
-        .show_menu_on_left_click(true)
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            let TrayIconEvent::Click {
+                button: MouseButton::Left | MouseButton::Right,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            else {
+                return;
+            };
+            #[cfg(target_os = "macos")]
+            activate_for_tray_menu();
+            let _ = tray.with_inner_tray_icon(|inner| inner.show_menu());
+        })
         .on_menu_event(|app, event| match event.id().as_ref() {
             NEW_NOTE_MENU_ITEM => start_capture(app),
             VIEW_NOTES_MENU_ITEM => open_history(app),
@@ -504,7 +540,10 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         }
     }
 
-    tray.build(app)?;
+    let tray = tray.build(app)?;
+    // tray-icon defaults to opening on right-mouseDown too; same race. Both
+    // buttons go through the mouseUp handler above instead.
+    let _ = tray.with_inner_tray_icon(|inner| inner.set_show_menu_on_right_click(false));
 
     Ok(())
 }
