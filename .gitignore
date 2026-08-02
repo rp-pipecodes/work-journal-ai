@@ -24,6 +24,9 @@ dist-ssr
 *.sln
 *.sw?
 
+# Playwright MCP session logs and snapshots
+.playwright-mcp/
+
 # Tauri
 src-tauri/target
 src-tauri/gen
