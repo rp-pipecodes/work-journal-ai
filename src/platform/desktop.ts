@@ -28,6 +28,23 @@ export const SETTINGS_WINDOW = 'settings'
 /** Must match `SETTINGS_FILE` in `src-tauri/src/lib.rs`. */
 export const SETTINGS_FILE = 'settings.json'
 
+/** Must match `THEME_KEY` in `src-tauri/src/lib.rs`. */
+export const THEME_KEY = 'theme'
+
+/**
+ * Where a window is told its Resolved Theme, before its document is parsed and
+ * so before anything is painted — the Rust side works the palette out and sets
+ * this, because the store cannot be read in time to get the first frame right.
+ * Must match `ResolvedTheme::announcement` in `src-tauri/src/lib.rs`.
+ *
+ * Absent outside Tauri — a bare `vite dev` — where the OS is asked instead.
+ */
+declare global {
+  interface Window {
+    __THEME__?: 'light' | 'dark'
+  }
+}
+
 /** Must match `DATABASE_URL` in `src-tauri/src/lib.rs`. */
 export const DATABASE_URL = 'sqlite:work-journal.db'
 

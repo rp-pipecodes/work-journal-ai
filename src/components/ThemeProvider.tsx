@@ -30,6 +30,12 @@ export default function ThemeProvider({
 }) {
   const [theme, setTheme] = useState<Theme>(DEFAULT_THEME)
   const [prefersDark, setPrefersDark] = useState(systemPrefersDark)
+  // Until the stored preference has been read, the palette already on the
+  // document is better than the one this component would work out: `index.html`
+  // put it there from what the Rust side knew, and `DEFAULT_THEME` is only a
+  // guess standing in for an answer that is still on its way. Repainting from
+  // the guess is exactly the blink this is here to avoid.
+  const [known, setKnown] = useState(false)
 
   useEffect(() => {
     let current = true
@@ -45,11 +51,24 @@ export default function ThemeProvider({
       .catch((error: unknown) => {
         console.error('could not read the Theme', error)
       })
+      .finally(() => {
+        // Either way there is nothing further to wait for: a store that stayed
+        // silent has still had its say.
+        if (current) {
+          setKnown(true)
+        }
+      })
 
-    const changed = settings.onThemeChanged(setTheme).catch((error: unknown) => {
-      console.error('could not follow the Theme', error)
-      return null
-    })
+    const changed = settings
+      .onThemeChanged((announced) => {
+        // Another window's user has settled it, which is an answer too.
+        setTheme(announced)
+        setKnown(true)
+      })
+      .catch((error: unknown) => {
+        console.error('could not follow the Theme', error)
+        return null
+      })
 
     return () => {
       current = false
@@ -68,12 +87,15 @@ export default function ThemeProvider({
   const resolved = resolveTheme(theme, prefersDark)
 
   useEffect(() => {
+    if (!known) {
+      return
+    }
     const root = document.documentElement
     root.classList.toggle(DARK_CLASS, resolved === 'dark')
     // So that form controls and scrollbars the app does not style are painted
     // to match rather than staying stubbornly light.
     root.style.colorScheme = resolved
-  }, [resolved])
+  }, [resolved, known])
 
   const ask = useCallback(
     (next: Theme) => {
@@ -81,6 +103,9 @@ export default function ThemeProvider({
       // *other* windows find out, and a store that cannot be written must
       // still repaint the window whose user asked for it.
       setTheme(next)
+      // A Theme the user asked for outranks one still being read off the disk,
+      // so a toggle pressed in the first moments repaints rather than waiting.
+      setKnown(true)
       void settings.saveTheme(next).catch((error: unknown) => {
         console.error('could not remember the Theme', error)
       })
