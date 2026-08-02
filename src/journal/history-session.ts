@@ -63,7 +63,7 @@ export interface HistorySnapshot {
    * Whether a Search has taken the screen over — true from the keystroke that
    * reaches two characters until the term is cleared or the Filter moves, and
    * true whether or not the term matched anything. What Escape belongs to, and
-   * why Copy All is not on screen: the Digest is bound to the Filter, so it
+   * why Copy Digest is not on screen: the Digest is bound to the Filter, so it
    * must not be offered beside something that is not one.
    */
   searching: boolean

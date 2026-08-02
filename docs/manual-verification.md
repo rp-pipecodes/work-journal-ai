@@ -100,12 +100,12 @@ Everything else is checked against the release build.
 
 ## The Digest
 
-- [ ] **Copy All** on a single day puts one bullet per Note on the clipboard, oldest first, with no day heading and no times.
+- [ ] **Copy Digest** on a single day puts one bullet per Note on the clipboard, oldest first, with no day heading and no times.
 - [ ] Pasting into a plain-text editor and into a Markdown one both read correctly, with nothing to clean up.
-- [ ] **Copy All** over a range of days puts a heading above each day that has Notes, and none above the days that have none.
+- [ ] **Copy Digest** over a range of days puts a heading above each day that has Notes, and none above the days that have none.
 - [ ] The confirmation names the same number of Notes as there are bullets on the clipboard.
 - [ ] Copying twice in a row copies the same thing both times — the clipboard write is not lost after the first click.
-- [ ] **Copy All** on a range holding no Notes says so and leaves the clipboard as it was.
+- [ ] **Copy Digest** on a range holding no Notes says so and leaves the clipboard as it was.
 - [ ] Moving either end of the range clears the confirmation, and the next copy carries the new range.
 
 ## Settings

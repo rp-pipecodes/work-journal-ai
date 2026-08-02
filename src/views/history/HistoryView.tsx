@@ -513,7 +513,7 @@ function CopyDigest({
         {confirmation}
       </span>
       <Button variant="outline" size="sm" onClick={onCopy}>
-        Copy All
+        Copy Digest
       </Button>
     </div>
   )

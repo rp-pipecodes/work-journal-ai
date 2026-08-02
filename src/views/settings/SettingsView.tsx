@@ -27,8 +27,9 @@ import {
 } from '@/settings/settings'
 
 /**
- * The four things about the app the user gets to decide, and the way out of
- * the SQLite file. The window behind this view is created on demand and
+ * The five things about the app the user gets to decide: the Day Start, the
+ * Hotkey, the Theme, whether the app starts at login, and the way out of the
+ * SQLite file. The window behind this view is created on demand and
  * genuinely closed on dismiss, so the view loads once on mount and needs no
  * reset — see docs/adr/0002-capture-window-is-hidden-never-closed.md.
  */
