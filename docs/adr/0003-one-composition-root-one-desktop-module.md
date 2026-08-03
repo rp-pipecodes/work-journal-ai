@@ -8,7 +8,7 @@ Every name shared with the Rust side is declared in `src/platform/desktop.ts`: t
 
 ## Why
 
-Six files reached for the platform, and four strings were held across the Rust/TypeScript seam by comment alone, in four different files. The journal core was carefully injectable — a Clock, a SqlDriver, a Day Start — and then a module-level singleton wired it up where nothing could reach, so the seam stopped short at the view.
+Six files reached for the platform, and four strings were held across the Rust/TypeScript seam by comment alone, in four different files. The journal core was carefully injectable — a Clock and a SqlDriver — and then a module-level singleton wired it up where nothing could reach, so the seam stopped short at the view.
 
 Two adapters justify the seam: `plugin-sql` in the app, `openTestDatabase()` in the suite. There are three windows over one seam, so the leverage is real.
 
@@ -16,7 +16,6 @@ Two adapters justify the seam: `plugin-sql` in the app, `openTestDatabase()` in 
 
 - **A view is testable without a webview.** Everything it touches arrives as a prop.
 - **The Journal is handed down as a promise, not an awaited value.** The database opens after the first paint; a Capture is typed into a window that is already on screen.
-- **The Day Start is followed in one place.** `followDayStart()` reads the stored hour and then tracks the announcements, and the composition root hands the result to the Journal — so no adapter depends on another adapter. The Journal is not ready until that first read lands, so a Capture made during startup files under the stored Day Start rather than the default.
 - **The clipboard is the one platform call left in a view.** `copyToClipboard` is the webview's own API rather than Tauri's, and the webview only allows the write while a click is still granting user activation — which no await survives. It stays a direct import for that reason, and is handed to the History session as a collaborator like everything else.
 - **Adding a platform capability means widening `Desktop`.** That is the intended friction: the interface is the list of everything the app asks of the machine it runs on.
 - **The constants are still duplicated in Rust.** Nothing checks the two lists agree; they are one screen each rather than one screen total, and each carries a "must match" comment.

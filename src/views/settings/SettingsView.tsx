@@ -20,18 +20,14 @@ import {
   hotkeyForKeystroke,
   type HotkeyStatus,
 } from '@/settings/hotkey'
-import {
-  DAY_START_HOURS,
-  DEFAULT_SETTINGS,
-  formatDayStartHour,
-} from '@/settings/settings'
+import { DEFAULT_SETTINGS } from '@/settings/settings'
 
 /**
- * The five things about the app the user gets to decide: the Day Start, the
- * Hotkey, the Theme, whether the app starts at login, and the way out of the
- * SQLite file. The window behind this view is created on demand and
- * genuinely closed on dismiss, so the view loads once on mount and needs no
- * reset — see docs/adr/0002-capture-window-is-hidden-never-closed.md.
+ * The four things about the app the user gets to decide: the Hotkey, the
+ * Theme, whether the app starts at login, and the way out of the SQLite file.
+ * The window behind this view is created on demand and genuinely closed on
+ * dismiss, so the view loads once on mount and needs no reset — see
+ * docs/adr/0002-capture-window-is-hidden-never-closed.md.
  */
 export default function SettingsView({
   desktop,
@@ -42,7 +38,6 @@ export default function SettingsView({
   settings: AppSettings
   journal: Promise<Journal>
 }) {
-  const [dayStartHour, setDayStartHour] = useState(DEFAULT_SETTINGS.dayStartHour)
   const [startAtLogin, setStartAtLogin] = useState(DEFAULT_SETTINGS.startAtLogin)
   const [hotkey, setHotkey] = useState<HotkeyStatus | null>(null)
   // The reason the last remap was refused, if it was. Cleared by the next one.
@@ -65,13 +60,11 @@ export default function SettingsView({
 
     void (async () => {
       try {
-        const [stored, status, atLogin, answered] = await Promise.all([
-          settings.load(),
+        const [status, atLogin, answered] = await Promise.all([
           desktop.hotkeyStatus(),
           desktop.startsAtLogin(),
           settings.hasBeenAskedAboutStartAtLogin(),
         ])
-        setDayStartHour(stored.dayStartHour)
         setStartAtLogin(atLogin)
         setHotkey(status)
         setAsking(!answered)
@@ -105,13 +98,6 @@ export default function SettingsView({
     if (event.key === 'Escape' && !recording && !asking) {
       void desktop.closeWindow()
     }
-  }
-
-  function pickDayStart(hour: number) {
-    setDayStartHour(hour)
-    settings.saveDayStartHour(hour).catch((error: unknown) => {
-      console.error('could not save the Day Start', error)
-    })
   }
 
   function toggleStartAtLogin(next: boolean) {
@@ -178,30 +164,6 @@ export default function SettingsView({
       onKeyDown={onKeyDown}
       className="flex h-screen flex-col gap-6 overflow-y-auto bg-background px-6 py-5 outline-none"
     >
-      <Section
-        title="Day Start"
-        explanation="The hour at which one day gives way to the next, so work done after midnight files under the day it felt like."
-      >
-        <label className="flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground">A day begins at</span>
-          <select
-            value={dayStartHour}
-            onChange={(event) => pickDayStart(Number(event.target.value))}
-            className="rounded-md border border-border bg-transparent px-2 py-1 text-sm tabular-nums text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-          >
-            {DAY_START_HOURS.map((hour) => (
-              <option key={hour} value={hour}>
-                {formatDayStartHour(hour)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <Aside>
-          Changing this moves nothing already written down. A Note is filed once,
-          when it is captured, and stays where it was filed.
-        </Aside>
-      </Section>
-
       <Section
         title="Hotkey"
         explanation="The global combination that begins a Capture from anywhere."

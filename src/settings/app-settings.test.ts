@@ -1,44 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fakeDesktop } from '../platform/testing/desktop'
-import { DEFAULT_DAY_START_HOUR } from '../journal/journal'
-import { createAppSettings, followDayStart } from './app-settings'
+import { createAppSettings } from './app-settings'
 
 // The settings as a running window has them: the core's rules over the
 // desktop's store, plus the announcements that keep the other windows honest.
 
 afterEach(() => {
   vi.restoreAllMocks()
-})
-
-describe('the Day Start', () => {
-  it('reads back what was saved', async () => {
-    const settings = createAppSettings(fakeDesktop())
-
-    await settings.saveDayStartHour(6)
-
-    expect((await settings.load()).dayStartHour).toBe(6)
-  })
-
-  it('announces a new Day Start to the other windows', async () => {
-    const desktop = fakeDesktop()
-    const settings = createAppSettings(desktop)
-    const heard: number[] = []
-    await desktop.onDayStartChanged((hour) => heard.push(hour))
-
-    await settings.saveDayStartHour(6)
-
-    expect(heard).toEqual([6])
-  })
-
-  it('refuses an hour that is not a Day Start, and announces nothing', async () => {
-    const desktop = fakeDesktop()
-    const settings = createAppSettings(desktop)
-    const heard: number[] = []
-    await desktop.onDayStartChanged((hour) => heard.push(hour))
-
-    await expect(settings.saveDayStartHour(47)).rejects.toThrow()
-    expect(heard).toEqual([])
-  })
 })
 
 describe('the Theme', () => {
@@ -90,48 +58,3 @@ describe('start at login', () => {
     expect(await settings.hasBeenAskedAboutStartAtLogin()).toBe(false)
   })
 })
-
-describe('following the Day Start', () => {
-  it('is not ready until the stored hour is known', async () => {
-    const desktop = fakeDesktop({ stored: { dayStartHour: 6 } })
-
-    const dayStart = await followDayStart(createAppSettings(desktop))
-
-    expect(dayStart.hour()).toBe(6)
-  })
-
-  it('moves when another window changes it', async () => {
-    const desktop = fakeDesktop({ stored: { dayStartHour: 6 } })
-    const dayStart = await followDayStart(createAppSettings(desktop))
-
-    await desktop.announceDayStart(9)
-
-    expect(dayStart.hour()).toBe(9)
-  })
-
-  it('keeps an hour announced while the stored one was still being read', async () => {
-    const desktop = fakeDesktop({ stored: { dayStartHour: 6 } })
-    const following = followDayStart(createAppSettings(desktop))
-    // Announced before the read lands: the stored 6 is the older answer of the
-    // two, and must not overwrite it.
-    await desktop.announceDayStart(9)
-
-    expect((await following).hour()).toBe(9)
-  })
-
-  it('files under the default rather than failing when the settings cannot be read', async () => {
-    silenceErrors()
-    const desktop = fakeDesktop({
-      openSettingsStore: () => Promise.reject(new Error('no settings file')),
-    })
-
-    const dayStart = await followDayStart(createAppSettings(desktop))
-
-    expect(dayStart.hour()).toBe(DEFAULT_DAY_START_HOUR)
-  })
-})
-
-/** The failures under test are reported, not thrown; the suite is not noise. */
-function silenceErrors(): void {
-  vi.spyOn(console, 'error').mockImplementation(() => {})
-}

@@ -10,7 +10,7 @@ The vocabulary the app and its code use is defined in [CONTEXT.md](CONTEXT.md) a
 
 ## Status
 
-v1 is in place: Capture from every Entry Point, history over a Filter of Journal Days with the Nudge, editing, refiling and deletion, the Digest, and Settings — Day Start, Hotkey remap, Start at Login, and Export.
+v1 is in place: Capture from every Entry Point, history over a Filter of Journal Days with the Nudge, editing, refiling and deletion, the Digest, and Settings — Hotkey remap, Theme, Start at Login, and Export.
 
 ## Prerequisites
 

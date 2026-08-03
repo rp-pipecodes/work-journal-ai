@@ -39,16 +39,12 @@ _Avoid_: Menu bar, status item
 The instant a Note came into existence. Never changes, never editable — provenance, not filing.
 
 **Journal Day**:
-The single day a Note is filed under. Decided when the Note is captured, and thereafter the user's to change. Not recomputed from Captured At, so it never shifts under a timezone change or a Day Start change.
+The single day a Note is filed under. Decided when the Note is captured as the local calendar day of Captured At, and thereafter the user's to change. Not recomputed from Captured At, so it never shifts under a timezone change.
 _Avoid_: Date, day, created date
 
 **Edited At**:
 The instant a Note was last changed after capture — reworded or refiled. Nothing until then, so a Note still reading as it was typed claims nothing. It is what marks a corrected Note as corrected, so a reader knows the wording may not be the original.
 _Avoid_: Updated at, modified, revision
-
-**Day Start**:
-The hour at which one Journal Day gives way to the next. User-configurable, defaults to 04:00, so work done after midnight files under the day it felt like rather than the day the clock said.
-_Avoid_: Cutoff, rollover, midnight
 
 ## Reading back
 
@@ -80,7 +76,7 @@ Permanent removal of a Note. There is no trash, no archive, and no recovery — 
 ## Settings
 
 **Settings**:
-The five things about the app the user gets to decide: the Day Start, the Hotkey, the Theme, whether the app starts at login, and — as the one action rather than a setting — Export. Reached from the Tray Menu, and closed on dismiss rather than kept resident.
+The four things about the app the user gets to decide: the Hotkey, the Theme, whether the app starts at login, and — as the one action rather than a setting — Export. Reached from the Tray Menu, and closed on dismiss rather than kept resident.
 
 **Theme**:
 Whether the app paints itself light or dark. Three answers, not two: `light`, `dark`, and `system` — and `system` is the absence of a preference rather than a third palette, so an unasked user follows the OS. Settable from Settings, and toggled from any window with Cmd+Shift+D. One preference for the whole app, so a window that did not host the change still hears about it and repaints.

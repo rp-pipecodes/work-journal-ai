@@ -12,16 +12,6 @@ export interface Clock {
   now(): Date
 }
 
-/**
- * The Day Start as it stands right now. Asked afresh for every Capture rather
- * than fixed when the journal is built, so changing the setting takes effect on
- * the next Note without the running windows being rebuilt — and so it can only
- * ever reach a Note being written, never one already stored.
- */
-export interface DayStart {
-  hour(): number
-}
-
 /** The whole of the app's storage surface: a SQL string plus parameters. */
 export interface SqlDriver {
   execute(sql: string, params: unknown[]): Promise<unknown>
@@ -74,17 +64,6 @@ export type KeystrokeDecision = 'commit' | 'discard' | 'ignore'
 export type ArrivalDecision =
   | { kind: 'show' }
   | { kind: 'nudge'; journalDay: string }
-
-/**
- * The hour at which one Journal Day gives way to the next, until the user says
- * otherwise, so work done after midnight files under the day it felt like.
- */
-export const DEFAULT_DAY_START_HOUR = 4
-
-/** A Day Start that does not move: the app's default, and every test's. */
-export function fixedDayStart(hour: number): DayStart {
-  return { hour: () => hour }
-}
 
 export interface Journal {
   /**
@@ -237,11 +216,9 @@ const SELECT_ALL_NOTES_FOR_EXPORT = `
 export function createJournal({
   clock,
   driver,
-  dayStart = fixedDayStart(DEFAULT_DAY_START_HOUR),
 }: {
   clock: Clock
   driver: SqlDriver
-  dayStart?: DayStart
 }): Journal {
   return {
     async capture(body) {
@@ -256,9 +233,9 @@ export function createJournal({
         id: crypto.randomUUID(),
         body: body.trim(),
         capturedAt: capturedAt.toISOString(),
-        // Read now, for this Note only: a later change to the Day Start has
-        // nothing to say about a Journal Day already written down.
-        journalDay: journalDayFor(capturedAt, dayStart.hour()),
+        // Decided once, at capture, from the local calendar day of Captured At.
+        // Never recomputed — see docs/adr/0005-no-day-start.md.
+        journalDay: journalDayFor(capturedAt),
         editedAt: null,
       }
 
@@ -417,28 +394,15 @@ function formatDigestDay(journalDay: string): string {
 }
 
 /**
- * The Journal Day an instant falls under. Pure, and computed from local
- * calendar parts rather than by subtracting hours, so a day containing a DST
- * transition still resolves to exactly one day.
+ * The Journal Day an instant falls under: the local calendar day of Captured
+ * At, midnight boundary. Pure, and built from local calendar parts so a day
+ * containing a DST transition still resolves to exactly one day.
  */
-export function journalDayFor(instant: Date, dayStartHour: number): string {
-  // Anchored at noon so the arithmetic never lands on a local time that a DST
-  // transition skipped.
-  const day = new Date(
-    instant.getFullYear(),
-    instant.getMonth(),
-    instant.getDate(),
-    12,
-  )
-
-  if (instant.getHours() < dayStartHour) {
-    day.setDate(day.getDate() - 1)
-  }
-
+export function journalDayFor(instant: Date): string {
   return [
-    String(day.getFullYear()).padStart(4, '0'),
-    String(day.getMonth() + 1).padStart(2, '0'),
-    String(day.getDate()).padStart(2, '0'),
+    String(instant.getFullYear()).padStart(4, '0'),
+    String(instant.getMonth() + 1).padStart(2, '0'),
+    String(instant.getDate()).padStart(2, '0'),
   ].join('-')
 }
 

@@ -10,9 +10,7 @@ import {
   formatTimeOfDay,
   exportFileName,
   groupByJournalDay,
-  fixedDayStart,
   journalDayFor,
-  DEFAULT_DAY_START_HOUR,
   type Journal,
 } from './journal'
 import { fixedClock, migrationSql, openTestDatabase } from './testing/database'
@@ -45,29 +43,25 @@ function notesOn(journal: Journal, journalDay: string) {
 }
 
 describe('journalDayFor', () => {
-  it('files a Note captured before the Day Start under the previous day', () => {
-    expect(journalDayFor(local('2026-03-12T00:45:00'), 4)).toBe('2026-03-11')
+  it('is the local calendar day of the instant', () => {
+    expect(journalDayFor(local('2026-03-12T00:45:00'))).toBe('2026-03-12')
+    expect(journalDayFor(local('2026-03-12T09:30:00'))).toBe('2026-03-12')
+    expect(journalDayFor(local('2026-03-12T23:59:59'))).toBe('2026-03-12')
   })
 
-  it('puts 03:59 and 04:00 either side of the boundary', () => {
-    expect(journalDayFor(local('2026-03-12T03:59:59'), 4)).toBe('2026-03-11')
-    expect(journalDayFor(local('2026-03-12T04:00:00'), 4)).toBe('2026-03-12')
-  })
-
-  it('moves the boundary with a custom Day Start', () => {
-    expect(journalDayFor(local('2026-03-12T03:59:59'), 0)).toBe('2026-03-12')
-    expect(journalDayFor(local('2026-03-12T05:00:00'), 6)).toBe('2026-03-11')
+  it('puts either side of midnight on different days', () => {
+    expect(journalDayFor(local('2026-03-11T23:59:59'))).toBe('2026-03-11')
+    expect(journalDayFor(local('2026-03-12T00:00:00'))).toBe('2026-03-12')
   })
 
   it('resolves a day spanning a DST transition to exactly one day', () => {
     // Europe/Lisbon springs forward at 01:00 on 2026-03-29 — see vite.config.ts
     // for why the suite pins the timezone.
     const acrossTheTransition = [
-      '2026-03-29T04:00:00',
+      '2026-03-29T00:00:00',
       '2026-03-29T12:00:00',
       '2026-03-29T23:59:59',
-      '2026-03-30T03:00:00',
-    ].map((wallClock) => journalDayFor(local(wallClock), DEFAULT_DAY_START_HOUR))
+    ].map((wallClock) => journalDayFor(local(wallClock)))
 
     expect(new Set(acrossTheTransition)).toEqual(new Set(['2026-03-29']))
   })
@@ -140,14 +134,14 @@ describe('capture', () => {
     expect(captured?.capturedAt).toBe('2026-03-12T09:30:00.000Z')
   })
 
-  it('files a Note captured at 00:45 under the previous Journal Day', async () => {
+  it('files a Note captured after midnight under the local calendar day', async () => {
     const { journal } = await journalAt('2026-03-12T00:45:00')
 
     const captured = await journal.capture('still debugging the tray')
 
-    expect(captured?.journalDay).toBe('2026-03-11')
-    expect(await notesOn(journal, '2026-03-12')).toEqual([])
-    expect((await notesOn(journal, '2026-03-11')).length).toBe(1)
+    expect(captured?.journalDay).toBe('2026-03-12')
+    expect((await notesOn(journal, '2026-03-12')).length).toBe(1)
+    expect(await notesOn(journal, '2026-03-11')).toEqual([])
   })
 
   it('gives a fresh Note no Edited At', async () => {
@@ -811,63 +805,6 @@ describe('exportFileName', () => {
 
   it('is a plain file name, with nowhere to traverse to', () => {
     expect(exportFileName(local('2026-03-09T21:15:00'))).not.toMatch(/[/\\]/)
-  })
-})
-
-describe('the Day Start in force', () => {
-  it('files a Capture under the Day Start currently set', async () => {
-    const { driver, close } = await openTestDatabase()
-    openJournals.push(close)
-    const clock = fixedClock(local('2026-03-12T02:30:00'))
-    const journal = createJournal({
-      clock,
-      driver,
-      dayStart: fixedDayStart(0),
-    })
-
-    const captured = await journal.capture('up late, and it counts as today')
-
-    expect(captured?.journalDay).toBe('2026-03-12')
-  })
-
-  it('leaves every Note already filed exactly where it is', async () => {
-    const { driver, close } = await openTestDatabase()
-    openJournals.push(close)
-    const clock = fixedClock(local('2026-03-12T02:30:00'))
-    let hour = 4
-    const journal = createJournal({ clock, driver, dayStart: { hour: () => hour } })
-    const captured = await journal.capture('filed under the 11th')
-    expect(captured?.journalDay).toBe('2026-03-11')
-
-    // The Day Start changes; nothing recomputes.
-    hour = 0
-
-    expect(await notesOn(journal, '2026-03-11')).toHaveLength(1)
-    expect(await notesOn(journal, '2026-03-12')).toHaveLength(0)
-  })
-
-  it('reads the Day Start again for every Capture', async () => {
-    const { driver, close } = await openTestDatabase()
-    openJournals.push(close)
-    const clock = fixedClock(local('2026-03-12T02:30:00'))
-    let hour = 4
-    const journal = createJournal({ clock, driver, dayStart: { hour: () => hour } })
-
-    const before = await journal.capture('before the change')
-    hour = 0
-    const after = await journal.capture('after the change')
-
-    expect(before?.journalDay).toBe('2026-03-11')
-    expect(after?.journalDay).toBe('2026-03-12')
-  })
-
-  it('defaults to the Day Start the app ships with', async () => {
-    const { journal } = await journalAt('2026-03-12T02:30:00')
-
-    const captured = await journal.capture('the default still applies')
-
-    expect(DEFAULT_DAY_START_HOUR).toBe(4)
-    expect(captured?.journalDay).toBe('2026-03-11')
   })
 })
 

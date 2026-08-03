@@ -32,7 +32,6 @@ export function fakeDesktop({
   openSettingsStore?: () => Promise<SettingsStore>
 } = {}): FakeDesktop {
   const noteCaptured = subscribers<string>()
-  const dayStartChanged = subscribers<number>()
   const themeChanged = subscribers<Theme>()
 
   const desktop: FakeDesktop = {
@@ -71,8 +70,6 @@ export function fakeDesktop({
 
     announceCapturedNote: async (journalDay) => noteCaptured.announce(journalDay),
     onNoteCaptured: async (handle) => noteCaptured.add(handle),
-    announceDayStart: async (hour) => dayStartChanged.announce(hour),
-    onDayStartChanged: async (handle) => dayStartChanged.add(handle),
     announceTheme: async (theme) => themeChanged.announce(theme),
     onThemeChanged: async (handle) => themeChanged.add(handle),
 

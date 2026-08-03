@@ -15,7 +15,6 @@ import type { Theme } from '@/settings/theme'
 import {
   CAPTURE_SHOWN_EVENT,
   DATABASE_URL,
-  DAY_START_CHANGED_EVENT,
   NOTE_CAPTURED_EVENT,
   SETTINGS_FILE,
   THEME_CHANGED_EVENT,
@@ -91,12 +90,6 @@ export function createTauriDesktop(): Desktop {
     onNoteCaptured: (handle) =>
       listen<{ journalDay: string }>(NOTE_CAPTURED_EVENT, ({ payload }) =>
         handle(payload.journalDay),
-      ),
-
-    announceDayStart: (hour) => emit(DAY_START_CHANGED_EVENT, { hour }),
-    onDayStartChanged: (handle) =>
-      listen<{ hour: number }>(DAY_START_CHANGED_EVENT, ({ payload }) =>
-        handle(payload.hour),
       ),
 
     announceTheme: (theme) => emit(THEME_CHANGED_EVENT, { theme }),

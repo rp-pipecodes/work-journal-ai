@@ -6,7 +6,7 @@ import ErrorBoundary from './components/ErrorBoundary.tsx'
 import ThemeProvider from './components/ThemeProvider.tsx'
 import { createAppJournal } from './journal/app-journal.ts'
 import { createTauriDesktop } from './platform/tauri-desktop.ts'
-import { createAppSettings, followDayStart } from './settings/app-settings.ts'
+import { createAppSettings } from './settings/app-settings.ts'
 
 // The composition root: the one place that says what everything is made of.
 // Every window loads this same bundle, so all three are built here and the
@@ -16,10 +16,7 @@ const settings = createAppSettings(desktop)
 
 // A promise rather than an awaited value: the database opens after the first
 // paint, and a Capture is typed into a window that is already on screen.
-const journal = createAppJournal({
-  desktop,
-  dayStart: followDayStart(settings),
-})
+const journal = createAppJournal({ desktop })
 // A journal that cannot be opened is reported by whichever view asks for it.
 // This is only so that a window which never asks — Settings, unless the user
 // exports — does not leave the failure unhandled.

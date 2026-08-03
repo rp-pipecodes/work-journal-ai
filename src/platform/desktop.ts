@@ -52,17 +52,16 @@ export const DATABASE_URL = 'sqlite:work-journal.db'
 export const CAPTURE_SHOWN_EVENT = 'capture://shown'
 
 /**
- * The announcements the windows make to each other. These three are spoken
- * only in TypeScript, but they sit with the rest so that every event name in
- * the app is in one place.
+ * The announcements the windows make to each other. These two are spoken only
+ * in TypeScript, but they sit with the rest so that every event name in the app
+ * is in one place.
  *
  * Each exists because the windows are separate: one already on screen learns
- * of a Note, a Day Start or a Theme only by being told — it never polls, and
- * the capture window is never rebuilt, so it would otherwise spend the rest of
- * the run on whatever was true when it started.
+ * of a Note or a Theme only by being told — it never polls, and the capture
+ * window is never rebuilt, so it would otherwise spend the rest of the run on
+ * whatever was true when it started.
  */
 export const NOTE_CAPTURED_EVENT = 'note://captured'
-export const DAY_START_CHANGED_EVENT = 'settings://day-start'
 export const THEME_CHANGED_EVENT = 'settings://theme'
 
 /** Where an export ended up — the Rust side's `ExportedFile`. */
@@ -100,8 +99,6 @@ export interface Desktop {
 
   announceCapturedNote(journalDay: string): Promise<void>
   onNoteCaptured(handle: (journalDay: string) => void): Promise<Unlisten>
-  announceDayStart(hour: number): Promise<void>
-  onDayStartChanged(handle: (hour: number) => void): Promise<Unlisten>
   announceTheme(theme: Theme): Promise<void>
   onThemeChanged(handle: (theme: Theme) => void): Promise<Unlisten>
 

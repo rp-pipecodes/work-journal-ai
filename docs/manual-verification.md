@@ -18,7 +18,7 @@ open "src-tauri/target/release/bundle/macos/Work Journal.app"
 
 Three things are worth knowing before you begin.
 
-**Where the app keeps its state.** `~/Library/Application Support/com.pipecodes.work-journal` — `settings.json` holds the Day Start, the Hotkey and the Start at Login answer, and `work-journal.db` holds the Notes. Deleting the whole directory returns the app to a first run.
+**Where the app keeps its state.** `~/Library/Application Support/com.pipecodes.work-journal` — `settings.json` holds the Hotkey, the Theme and the Start at Login answer, and `work-journal.db` holds the Notes. Deleting the whole directory returns the app to a first run.
 
 ```bash
 rm -rf ~/Library/Application\ Support/com.pipecodes.work-journal
@@ -127,12 +127,9 @@ The palette is the point of this section, and the moment to watch is the one the
 - [ ] Answering **Start at login** adds it, and the app launches after a log out and back in.
 - [ ] The checkbox afterwards adds and removes the login item, and matches what System Settings shows when Settings is re-opened.
 
-## The Day Start
+## Capture after midnight
 
-- [ ] Changing the Day Start to 00:00 and capturing at, say, 01:00 files the Note under today rather than yesterday.
-- [ ] Notes captured before the change are still filed under exactly the days they were, in History.
-- [ ] The new Day Start applies to a Capture started from the Hotkey without the app being restarted (the capture window is never rebuilt).
-- [ ] The Day Start survives quitting and relaunching the app.
+- [ ] Capturing at, say, 01:00 files the Note under today's local calendar day, not yesterday.
 
 ## The Hotkey, remapped
 
