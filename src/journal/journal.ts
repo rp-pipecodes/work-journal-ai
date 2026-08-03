@@ -490,6 +490,83 @@ export function filterForRange(oneEnd: string, otherEnd: string): Filter {
 }
 
 /**
+ * A named civil-time range relative to today. One-shot: the clock is read when
+ * the Preset is chosen, and the result is an ordinary Filter — nothing sticky,
+ * nothing rolling. Week starts Monday. "This" units run from the unit start
+ * through today; "last" units are the full prior calendar unit.
+ */
+export type FilterPreset =
+  | 'today'
+  | 'yesterday'
+  | 'this-week'
+  | 'last-week'
+  | 'this-month'
+  | 'last-month'
+
+export function filterForPreset(preset: FilterPreset, today: string): Filter {
+  switch (preset) {
+    case 'today':
+      return filterForJournalDay(today)
+    case 'yesterday':
+      return filterForJournalDay(shiftDay(today, -1))
+    case 'this-week':
+      return { from: startOfWeek(today), to: today }
+    case 'last-week': {
+      const thisMonday = startOfWeek(today)
+      const lastMonday = shiftDay(thisMonday, -7)
+      return { from: lastMonday, to: shiftDay(lastMonday, 6) }
+    }
+    case 'this-month':
+      return { from: startOfMonth(today), to: today }
+    case 'last-month': {
+      const [year, month] = parts(today)
+      const prior = month === 1 ? [year - 1, 12] : [year, month - 1]
+      const from = dayLabel(prior[0], prior[1], 1)
+      const to = dayLabel(prior[0], prior[1], daysInMonth(prior[0], prior[1]))
+      return { from, to }
+    }
+  }
+}
+
+/** Calendar arithmetic on a `YYYY-MM-DD` label, not an instant. */
+function parts(journalDay: string): [number, number, number] {
+  const [year, month, day] = journalDay.split('-').map(Number)
+  return [year, month, day]
+}
+
+function dayLabel(year: number, month: number, day: number): string {
+  return [
+    String(year).padStart(4, '0'),
+    String(month).padStart(2, '0'),
+    String(day).padStart(2, '0'),
+  ].join('-')
+}
+
+function shiftDay(journalDay: string, days: number): string {
+  const [year, month, day] = parts(journalDay)
+  // Local Date so month overflow and leap days land on the civil calendar.
+  return journalDayFor(new Date(year, month - 1, day + days))
+}
+
+function startOfWeek(journalDay: string): string {
+  const [year, month, day] = parts(journalDay)
+  const date = new Date(year, month - 1, day)
+  // JS Sunday=0 … Saturday=6 → days since Monday.
+  const sinceMonday = (date.getDay() + 6) % 7
+  return shiftDay(journalDay, -sinceMonday)
+}
+
+function startOfMonth(journalDay: string): string {
+  const [year, month] = parts(journalDay)
+  return dayLabel(year, month, 1)
+}
+
+function daysInMonth(year: number, month: number): number {
+  // Day 0 of the next month is the last day of this one.
+  return new Date(year, month, 0).getDate()
+}
+
+/**
  * A newly captured Note against the Filter on screen. A Note filed under a day
  * in view belongs in the list; one filed outside it must not move the list
  * under a reader, so it becomes a nudge naming the day that gained content —

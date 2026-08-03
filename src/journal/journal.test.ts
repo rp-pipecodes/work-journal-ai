@@ -5,6 +5,7 @@ import {
   decideKeystroke,
   describeCopiedDigest,
   filterForJournalDay,
+  filterForPreset,
   filterForRange,
   formatJournalDay,
   formatTimeOfDay,
@@ -868,6 +869,110 @@ describe('filterForJournalDay', () => {
     expect(filterForJournalDay('2026-03-13')).toEqual({
       from: '2026-03-13',
       to: '2026-03-13',
+    })
+  })
+})
+
+describe('filterForPreset', () => {
+  // Anchors are civil calendar days. 2026-08-05 is a Wednesday.
+  const wednesday = '2026-08-05'
+
+  it('today is the day itself', () => {
+    expect(filterForPreset('today', wednesday)).toEqual({
+      from: '2026-08-05',
+      to: '2026-08-05',
+    })
+  })
+
+  it('yesterday is the calendar day before today', () => {
+    expect(filterForPreset('yesterday', wednesday)).toEqual({
+      from: '2026-08-04',
+      to: '2026-08-04',
+    })
+  })
+
+  it('yesterday crosses a month boundary', () => {
+    expect(filterForPreset('yesterday', '2026-08-01')).toEqual({
+      from: '2026-07-31',
+      to: '2026-07-31',
+    })
+  })
+
+  it('this week runs Monday through today', () => {
+    expect(filterForPreset('this-week', wednesday)).toEqual({
+      from: '2026-08-03',
+      to: '2026-08-05',
+    })
+  })
+
+  it('this week on a Monday is just today', () => {
+    expect(filterForPreset('this-week', '2026-08-03')).toEqual({
+      from: '2026-08-03',
+      to: '2026-08-03',
+    })
+  })
+
+  it('this week on a Sunday still starts the prior Monday', () => {
+    // 2026-08-09 is a Sunday; the week began 2026-08-03.
+    expect(filterForPreset('this-week', '2026-08-09')).toEqual({
+      from: '2026-08-03',
+      to: '2026-08-09',
+    })
+  })
+
+  it('last week is the full prior Monday–Sunday', () => {
+    expect(filterForPreset('last-week', wednesday)).toEqual({
+      from: '2026-07-27',
+      to: '2026-08-02',
+    })
+  })
+
+  it('last week from a Monday is the week that just ended', () => {
+    expect(filterForPreset('last-week', '2026-08-03')).toEqual({
+      from: '2026-07-27',
+      to: '2026-08-02',
+    })
+  })
+
+  it('this month runs the first of the month through today', () => {
+    expect(filterForPreset('this-month', wednesday)).toEqual({
+      from: '2026-08-01',
+      to: '2026-08-05',
+    })
+  })
+
+  it('this month on the first is just today', () => {
+    expect(filterForPreset('this-month', '2026-08-01')).toEqual({
+      from: '2026-08-01',
+      to: '2026-08-01',
+    })
+  })
+
+  it('last month is the full prior calendar month', () => {
+    expect(filterForPreset('last-month', wednesday)).toEqual({
+      from: '2026-07-01',
+      to: '2026-07-31',
+    })
+  })
+
+  it('last month from January is the prior December', () => {
+    expect(filterForPreset('last-month', '2026-01-15')).toEqual({
+      from: '2025-12-01',
+      to: '2025-12-31',
+    })
+  })
+
+  it('last month handles February in a non-leap year', () => {
+    expect(filterForPreset('last-month', '2026-03-10')).toEqual({
+      from: '2026-02-01',
+      to: '2026-02-28',
+    })
+  })
+
+  it('last month handles February in a leap year', () => {
+    expect(filterForPreset('last-month', '2024-03-10')).toEqual({
+      from: '2024-02-01',
+      to: '2024-02-29',
     })
   })
 })

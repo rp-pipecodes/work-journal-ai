@@ -51,6 +51,10 @@ _Avoid_: Updated at, modified, revision
 **Filter**:
 The range of Journal Days currently being viewed. Opens on the most recent Occupied Day and only changes when the user changes it — never on its own, even as new Notes arrive.
 
+**Preset**:
+A named civil-time range that sets the Filter once and is forgotten: Today, Yesterday, This week, Last week, This month, Last month. One select, snaps back to a neutral label; the day pickers remain the source of truth. Week starts Monday. "This" units run from the unit start through today; "last" units are the full prior calendar unit. Yesterday is the calendar day before today, not the previous Occupied Day. An empty range is shown empty. Clock is read only when a Preset is chosen.
+_Avoid_: Quick range, date chip, relative filter, rolling window
+
 **Search**:
 A way of moving the Filter, never of narrowing it: the Notes anywhere in the journal whose Body contains what the reader typed, each labelled with the day it is filed under. Answering one takes History to that day in full, so what is on screen is always a Filter and nothing else.
 _Avoid_: Query, find, filter by text

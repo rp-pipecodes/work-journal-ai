@@ -18,10 +18,13 @@ import {
 import {
   decideKeystroke,
   filterForJournalDay,
+  filterForPreset,
   filterForRange,
   formatJournalDay,
   formatTimeOfDay,
+  journalDayFor,
   type Filter,
+  type FilterPreset,
   type Journal,
   type Note,
 } from '@/journal/journal'
@@ -131,6 +134,14 @@ export default function HistoryView({
     void session.moveTo(filterForRange(from, to))
   }
 
+  /**
+   * A one-shot named range. The clock is read here and only here; the select
+   * snaps back, so the pickers stay the source of truth for what is on screen.
+   */
+  function applyPreset(preset: FilterPreset) {
+    void session.moveTo(filterForPreset(preset, journalDayFor(new Date())))
+  }
+
   return (
     <div
       ref={page}
@@ -141,6 +152,7 @@ export default function HistoryView({
       {filter !== null && (
         <header className="flex shrink-0 items-center gap-3 overflow-hidden px-6 py-4 text-xs text-muted-foreground">
           <Range filter={filter} onPick={pick} />
+          <Preset onChoose={applyPreset} />
           <SearchField
             term={term}
             onType={(typed) => void session.search(typed)}
@@ -461,6 +473,44 @@ function Range({
         onChange={(to) => onPick(filter.from, to)}
       />
     </>
+  )
+}
+
+/**
+ * Named ranges that set the Filter once and are forgotten. Controlled on the
+ * empty value so every choice snaps back to the neutral label; the pickers
+ * remain what shows the range on screen.
+ */
+const PRESET_OPTIONS: ReadonlyArray<{ value: FilterPreset; label: string }> = [
+  { value: 'today', label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: 'this-week', label: 'This week' },
+  { value: 'last-week', label: 'Last week' },
+  { value: 'this-month', label: 'This month' },
+  { value: 'last-month', label: 'Last month' },
+]
+
+function Preset({ onChoose }: { onChoose: (preset: FilterPreset) => void }) {
+  return (
+    <label className="flex shrink-0 items-center gap-1.5">
+      <span className="sr-only">Preset</span>
+      <select
+        value=""
+        onChange={(event) => {
+          const value = event.target.value
+          if (value === '') return
+          onChoose(value as FilterPreset)
+        }}
+        className="rounded-md border border-border bg-transparent px-1.5 py-0.5 text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+      >
+        <option value="">Preset</option>
+        {PRESET_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }
 
