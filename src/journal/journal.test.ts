@@ -8,6 +8,7 @@ import {
   filterForPreset,
   filterForRange,
   formatJournalDay,
+  formatProject,
   formatTimeOfDay,
   exportFileName,
   groupByJournalDay,
@@ -76,6 +77,11 @@ describe('decideKeystroke', () => {
   it('ignores Enter on empty or whitespace-only text', () => {
     expect(decideKeystroke('Enter', '')).toBe('ignore')
     expect(decideKeystroke('Enter', '   \t ')).toBe('ignore')
+  })
+
+  it('ignores Enter on a bare Project Marker', () => {
+    expect(decideKeystroke('Enter', '#habic')).toBe('ignore')
+    expect(decideKeystroke('Enter', '#habic   ')).toBe('ignore')
   })
 
   it('discards on Escape, whatever has been typed', () => {
@@ -160,6 +166,85 @@ describe('capture', () => {
     const second = await journal.capture('the same words')
 
     expect(first?.id).not.toBe(second?.id)
+  })
+
+  it('files a leading Project Marker under that Project and keeps only what follows as Body', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    const captured = await journal.capture('#habic shipped auth')
+
+    expect(captured).toMatchObject({
+      project: 'habic',
+      body: 'shipped auth',
+      editedAt: null,
+    })
+    const [stored] = await notesOn(journal, '2026-03-12')
+    expect(stored).toMatchObject({ project: 'habic', body: 'shipped auth' })
+  })
+
+  it('stores Project identity lowercase', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    const captured = await journal.capture('#HaBiC shipped auth')
+
+    expect(captured?.project).toBe('habic')
+  })
+
+  it('leaves a Capture without a leading marker Unfiled', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    const captured = await journal.capture('shipped auth')
+
+    expect(captured?.project).toBeNull()
+    expect(captured?.body).toBe('shipped auth')
+  })
+
+  it('commits nothing for a bare Project Marker', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    expect(await journal.capture('#habic')).toBeNull()
+    expect(await journal.capture('#habic   ')).toBeNull()
+    expect(await notesOn(journal, '2026-03-12')).toEqual([])
+  })
+
+  it('treats mid-line or malformed # as plain Body, not a Project', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    for (const text of ['shipped #habic', '##x', '# habic', '#habic! no']) {
+      const captured = await journal.capture(text)
+      expect(captured).toMatchObject({ project: null, body: text })
+    }
+  })
+
+  it('accepts letters, digits, underscore and hyphen in a Project name', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    const captured = await journal.capture('#work_journal-ai2 done')
+
+    expect(captured).toMatchObject({
+      project: 'work_journal-ai2',
+      body: 'done',
+    })
+  })
+
+  it('reads a Note stored without a Project as Unfiled', async () => {
+    // Rows that predate the project column (or were captured without a marker)
+    // carry NULL — the Unfiled state, not a missing field.
+    const { driver, close } = await openTestDatabase()
+    openJournals.push(close)
+    await driver.execute(
+      `INSERT INTO notes (id, body, project, captured_at, journal_day, edited_at)
+       VALUES (?, ?, NULL, ?, ?, NULL)`,
+      ['legacy', 'from before projects', '2026-03-12T09:30:00.000Z', '2026-03-12'],
+    )
+    const journal = createJournal({
+      clock: fixedClock('2026-03-12T09:30:00'),
+      driver,
+    })
+
+    const [stored] = await notesOn(journal, '2026-03-12')
+
+    expect(stored.project).toBeNull()
   })
 })
 
@@ -410,6 +495,16 @@ describe('formatTimeOfDay', () => {
     // 09:05 UTC is 09:05 in Europe/Lisbon on that date — see vite.config.ts.
     // Written 09:05 or 09:05 AM depending on the reader's locale.
     expect(formatTimeOfDay('2026-03-13T09:05:00.000Z')).toMatch(/\b09.05\b/)
+  })
+})
+
+describe('formatProject', () => {
+  it('reads a named Project as a #name prefix', () => {
+    expect(formatProject('habic')).toBe('#habic')
+  })
+
+  it('reads the absence of a Project as Unfiled', () => {
+    expect(formatProject(null)).toBe('Unfiled')
   })
 })
 

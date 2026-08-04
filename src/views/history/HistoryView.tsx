@@ -21,6 +21,7 @@ import {
   filterForPreset,
   filterForRange,
   formatJournalDay,
+  formatProject,
   formatTimeOfDay,
   journalDayFor,
   type Filter,
@@ -288,6 +289,9 @@ function NoteLine({
             onClick={onEdit}
             className="flex-1 cursor-text rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           >
+            <span className="mr-2 shrink-0 font-mono text-xs text-muted-foreground">
+              {formatProject(note.project)}
+            </span>
             {note.body}
             {note.editedAt !== null && (
               // Provenance for the reader: the wording is not necessarily the
@@ -358,6 +362,9 @@ function ResultLine({ note, onShow }: { note: Note; onShow: () => void }) {
         onClick={onShow}
         className="flex w-full gap-3 rounded-md px-2 py-1 text-left text-sm outline-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/30"
       >
+        <span className="shrink-0 font-mono text-xs text-muted-foreground">
+          {formatProject(note.project)}
+        </span>
         <span className="flex-1">{note.body}</span>
         <span className="shrink-0 pt-px text-xs text-muted-foreground">
           {formatJournalDay(note.journalDay)}

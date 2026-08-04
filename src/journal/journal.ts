@@ -22,6 +22,11 @@ export interface Note {
   id: string
   /** A single line, never empty or whitespace-only. */
   body: string
+  /**
+   * Optional Project the Note is filed under. Null is Unfiled. Identity is
+   * case-insensitive and stored lowercase.
+   */
+  project: string | null
   /** UTC ISO-8601. Provenance, not filing — never changes. */
   capturedAt: string
   /** `YYYY-MM-DD`. Decided at capture and never recomputed. */
@@ -68,9 +73,10 @@ export type ArrivalDecision =
 export interface Journal {
   /**
    * Commits one Note, or nothing at all — a Capture never ends in a partial or
-   * empty Note. Returns null when there was nothing to commit.
+   * empty Note. A leading Project Marker is consumed into Project + Body.
+   * Returns null when there was nothing to commit.
    */
-  capture(body: string): Promise<Note | null>
+  capture(text: string): Promise<Note | null>
   /**
    * Rewords a Note, so the journal reads correctly later. Captured At is
    * untouched — provenance survives every correction — and the Note is marked
@@ -135,19 +141,20 @@ export interface Journal {
 interface NoteRow {
   id: string
   body: string
+  project: string | null
   captured_at: string
   journal_day: string
   edited_at: string | null
 }
 
 const INSERT_NOTE = `
-  INSERT INTO notes (id, body, captured_at, journal_day, edited_at)
-  VALUES (?, ?, ?, ?, NULL)
+  INSERT INTO notes (id, body, project, captured_at, journal_day, edited_at)
+  VALUES (?, ?, ?, ?, ?, NULL)
 `
 
 /** Every read returns a whole Note; only the predicate and the order differ. */
 const SELECT_NOTES = `
-  SELECT id, body, captured_at, journal_day, edited_at
+  SELECT id, body, project, captured_at, journal_day, edited_at
   FROM notes
 `
 
@@ -221,17 +228,19 @@ export function createJournal({
   driver: SqlDriver
 }): Journal {
   return {
-    async capture(body) {
-      assertOneLine(body)
+    async capture(text) {
+      assertOneLine(text)
 
-      if (isBlank(body)) {
+      const parsed = parseCapture(text)
+      if (parsed === null) {
         return null
       }
 
       const capturedAt = clock.now()
       const note: Note = {
         id: crypto.randomUUID(),
-        body: body.trim(),
+        body: parsed.body,
+        project: parsed.project,
         capturedAt: capturedAt.toISOString(),
         // Decided once, at capture, from the local calendar day of Captured At.
         // Never recomputed — see docs/adr/0005-no-day-start.md.
@@ -242,6 +251,7 @@ export function createJournal({
       await driver.execute(INSERT_NOTE, [
         note.id,
         note.body,
+        note.project,
         note.capturedAt,
         note.journalDay,
       ])
@@ -473,6 +483,14 @@ export function formatTimeOfDay(capturedAt: string): string {
   }).format(new Date(capturedAt))
 }
 
+/**
+ * A Note's Project as it reads on screen: `#name`, or Unfiled when there is
+ * none. The filing label History shows next to every Body.
+ */
+export function formatProject(project: string | null): string {
+  return project === null ? 'Unfiled' : `#${project}`
+}
+
 /** One Journal Day as a Filter: a range whose ends are equal. */
 export function filterForJournalDay(journalDay: string): Filter {
   return { from: journalDay, to: journalDay }
@@ -590,12 +608,13 @@ export function decideArrival(
  * repeated interaction, kept out of the view so it is testable without
  * rendering anything.
  */
-export function decideKeystroke(key: string, body: string): KeystrokeDecision {
+export function decideKeystroke(key: string, text: string): KeystrokeDecision {
   if (key === 'Escape') {
     return 'discard'
   }
   if (key === 'Enter') {
-    return isBlank(body) ? 'ignore' : 'commit'
+    // A bare Project Marker is nothing to commit, same as blank input.
+    return parseCapture(text) === null ? 'ignore' : 'commit'
   }
   return 'ignore'
 }
@@ -639,6 +658,32 @@ function isBlank(body: string): boolean {
   return body.trim() === ''
 }
 
+/**
+ * A Capture as Project + Body. A leading `#name` Project Marker is consumed:
+ * Project is set lowercase, Body is whatever follows. A bare marker, or blank
+ * input, is nothing to commit. Mid-line or malformed `#` stays plain Body.
+ */
+function parseCapture(
+  text: string,
+): { project: string | null; body: string } | null {
+  const trimmed = text.trim()
+  if (trimmed === '') {
+    return null
+  }
+
+  const marker = /^#([A-Za-z0-9_-]+)(?:\s+(.*))?$/.exec(trimmed)
+  if (marker === null) {
+    return { project: null, body: trimmed }
+  }
+
+  const body = (marker[2] ?? '').trim()
+  if (body === '') {
+    return null
+  }
+
+  return { project: marker[1].toLowerCase(), body }
+}
+
 /** The Body invariant, held in one place: a Note is a remark, not a document. */
 function assertOneLine(body: string): void {
   if (/[\n\r]/.test(body)) {
@@ -650,6 +695,7 @@ function toNote(row: NoteRow): Note {
   return {
     id: row.id,
     body: row.body,
+    project: row.project,
     capturedAt: row.captured_at,
     journalDay: row.journal_day,
     editedAt: row.edited_at,

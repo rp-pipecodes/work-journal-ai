@@ -116,12 +116,20 @@ pub fn run() {
 /// The schema lives in `.sql` files rather than Rust string literals so the
 /// test suite can build its database from the very same files.
 fn migrations() -> Vec<Migration> {
-    vec![Migration {
-        version: 1,
-        description: "create notes",
-        sql: include_str!("../migrations/0001_create_notes.sql"),
-        kind: MigrationKind::Up,
-    }]
+    vec![
+        Migration {
+            version: 1,
+            description: "create notes",
+            sql: include_str!("../migrations/0001_create_notes.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 2,
+            description: "notes project",
+            sql: include_str!("../migrations/0002_notes_project.sql"),
+            kind: MigrationKind::Up,
+        },
+    ]
 }
 
 fn build_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
