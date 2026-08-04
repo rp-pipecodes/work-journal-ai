@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  applyPrediction,
   decideKeystroke,
+  markerPrefix,
   type Journal,
   type KeystrokeDecision,
 } from '@/journal/journal'
@@ -10,6 +12,10 @@ import type { Desktop } from '@/platform/desktop'
  * One line, one keystroke. The window behind this view is created at startup
  * and only ever shown and hidden, so the view resets itself every time the
  * Capture begins rather than relying on a fresh React tree.
+ *
+ * While a Project Marker is open, Predictions drawn from Projects already on
+ * Notes sit under the field. Choosing one fills the marker; typing a new name
+ * and committing still works with no list required.
  */
 export default function CaptureView({
   desktop,
@@ -25,17 +31,29 @@ export default function CaptureView({
   // second thing on screen: the message invites another Enter, and one that
   // changed nothing would read as the silence it replaced.
   const [refusals, setRefusals] = useState(0)
+  // Offered names for the open marker; empty when the marker is closed is
+  // derived below so the effect that loads them never has to clear on close.
+  const [offered, setOffered] = useState<string[]>([])
+  const [highlight, setHighlight] = useState(0)
   const field = useRef<HTMLInputElement>(null)
+  const prefix = markerPrefix(body)
+  const predictions = prefix === null ? [] : offered
 
   const begin = useCallback(() => {
     setBody('')
     setRefusals(0)
+    setOffered([])
+    setHighlight(0)
+    void desktop.fitCapture(0)
     field.current?.focus()
-  }, [])
+  }, [desktop])
 
   const dismiss = useCallback(async () => {
     setBody('')
     setRefusals(0)
+    setOffered([])
+    setHighlight(0)
+    void desktop.fitCapture(0)
     await desktop.dismissCapture()
   }, [desktop])
 
@@ -71,6 +89,24 @@ export default function CaptureView({
     [desktop, journal, dismiss],
   )
 
+  const choosePrediction = useCallback(
+    (name: string) => {
+      const next = applyPrediction(name)
+      setBody(next)
+      setOffered([])
+      setHighlight(0)
+      void desktop.fitCapture(0)
+      // After the fill, the cursor sits ready for the Body.
+      requestAnimationFrame(() => {
+        const input = field.current
+        if (input === null) return
+        input.focus()
+        input.setSelectionRange(next.length, next.length)
+      })
+    },
+    [desktop],
+  )
+
   useEffect(() => {
     // The page behind the window has to give way to the rounded corners drawn
     // below; only this window's document is marked, since the bundle is shared.
@@ -91,7 +127,55 @@ export default function CaptureView({
     }
   }, [desktop, begin, dismiss])
 
+  useEffect(() => {
+    if (prefix === null) {
+      void desktop.fitCapture(0)
+      return
+    }
+
+    let cancelled = false
+
+    void (async () => {
+      const names = await (await journal).projectPredictions(prefix)
+      if (cancelled) return
+      setOffered(names)
+      setHighlight(0)
+      void desktop.fitCapture(names.length)
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [prefix, journal, desktop])
+
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (predictions.length > 0 && prefix !== null) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setHighlight((index) => (index + 1) % predictions.length)
+        return
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setHighlight(
+          (index) => (index - 1 + predictions.length) % predictions.length,
+        )
+        return
+      }
+      if (event.key === 'Tab') {
+        event.preventDefault()
+        choosePrediction(predictions[highlight] ?? predictions[0])
+        return
+      }
+      // Enter on a bare marker fills the Prediction rather than committing
+      // nothing; once a Body is typed, prefix is null and commit runs as usual.
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        choosePrediction(predictions[highlight] ?? predictions[0])
+        return
+      }
+    }
+
     void act(decideKeystroke(event.key, body))
   }
 
@@ -105,7 +189,8 @@ export default function CaptureView({
 
   return (
     // The corners are rounded here rather than on the field: the field all but
-    // fills the window, so this is the shape the user sees.
+    // fills the window, so this is the shape the user sees. Predictions sit
+    // under the field when a marker is open; the window grows to fit them.
     <div className="flex h-screen flex-col overflow-hidden rounded-2xl border border-border bg-background">
       <input
         ref={field}
@@ -116,16 +201,49 @@ export default function CaptureView({
         aria-label="What did you just do?"
         placeholder="What did you just do?"
         aria-describedby={refusals > 0 ? PROBLEM_ID : undefined}
+        aria-autocomplete="list"
+        aria-controls={predictions.length > 0 ? PREDICTIONS_ID : undefined}
+        aria-expanded={predictions.length > 0}
         autoComplete="off"
         spellCheck={false}
         // The ring is drawn inside: the field all but fills the window, and an
         // outset one would be clipped by the window's own edge.
-        className="min-h-0 w-full flex-1 rounded-2xl bg-transparent px-5 text-lg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
+        className="h-16 w-full shrink-0 rounded-2xl bg-transparent px-5 text-lg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
       />
+      {predictions.length > 0 && (
+        <ul
+          id={PREDICTIONS_ID}
+          role="listbox"
+          aria-label="Project Predictions"
+          className="flex flex-col border-t border-border"
+        >
+          {predictions.map((name, index) => (
+            <li key={name} role="option" aria-selected={index === highlight}>
+              <button
+                type="button"
+                // mousedown: click would blur the field first and risk a
+                // window-blur discard before the choice lands.
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  choosePrediction(name)
+                }}
+                className={
+                  index === highlight
+                    ? 'flex h-8 w-full items-center px-5 text-left text-sm bg-muted'
+                    : 'flex h-8 w-full items-center px-5 text-left text-sm hover:bg-muted/60'
+                }
+              >
+                <span className="font-mono text-muted-foreground">#</span>
+                {name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {/*
-        Under the field rather than in place of it: the window does not resize,
-        so the line takes its room from the field — the Body the user is being
-        told about has to stay in sight and stay editable.
+        Under the field rather than in place of it: the window does not resize
+        for refusals, so the line takes its room from the field — the Body the
+        user is being told about has to stay in sight and stay editable.
 
         Keyed by the count so each refusal is a new node: a repeated one is then
         announced again rather than passing as the same message still sitting
@@ -146,6 +264,7 @@ export default function CaptureView({
 }
 
 const PROBLEM_ID = 'capture-problem'
+const PREDICTIONS_ID = 'capture-predictions'
 
 /**
  * What a refused Capture says, in the app's voice rather than the error's. Names

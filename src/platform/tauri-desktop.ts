@@ -6,6 +6,7 @@
 
 import { invoke } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
+import { LogicalSize } from '@tauri-apps/api/dpi'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import Database from '@tauri-apps/plugin-sql'
@@ -13,7 +14,10 @@ import { load } from '@tauri-apps/plugin-store'
 import type { HotkeyStatus } from '@/settings/hotkey'
 import type { Theme } from '@/settings/theme'
 import {
+  CAPTURE_FIELD_HEIGHT,
+  CAPTURE_PREDICTION_ROW,
   CAPTURE_SHOWN_EVENT,
+  CAPTURE_WIDTH,
   DATABASE_URL,
   NOTE_CAPTURED_EVENT,
   SETTINGS_FILE,
@@ -83,6 +87,16 @@ export function createTauriDesktop(): Desktop {
     },
 
     dismissCapture: () => invoke('dismiss_capture'),
+
+    // Built at 560×64 in Rust; each Prediction adds a row under the field.
+    fitCapture: (predictionCount) =>
+      getCurrentWindow().setSize(
+        new LogicalSize(
+          CAPTURE_WIDTH,
+          CAPTURE_FIELD_HEIGHT + predictionCount * CAPTURE_PREDICTION_ROW,
+        ),
+      ),
+
     onCaptureShown: (handle) => listen(CAPTURE_SHOWN_EVENT, () => handle()),
 
     announceCapturedNote: (journalDay) =>

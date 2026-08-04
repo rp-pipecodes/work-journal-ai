@@ -66,6 +66,7 @@ export function fakeDesktop({
       })),
 
     dismissCapture: async () => {},
+    fitCapture: async () => {},
     onCaptureShown: async () => () => {},
 
     announceCapturedNote: async (journalDay) => noteCaptured.announce(journalDay),

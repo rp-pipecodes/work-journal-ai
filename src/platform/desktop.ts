@@ -52,6 +52,15 @@ export const DATABASE_URL = 'sqlite:work-journal.db'
 export const CAPTURE_SHOWN_EVENT = 'capture://shown'
 
 /**
+ * Capture window geometry. Width and resting height must match `.inner_size`
+ * in `build_capture_window` (`src-tauri/src/lib.rs`). Row height must match
+ * the Prediction button (`h-8`) in `CaptureView`.
+ */
+export const CAPTURE_WIDTH = 560
+export const CAPTURE_FIELD_HEIGHT = 64
+export const CAPTURE_PREDICTION_ROW = 32
+
+/**
  * The announcements the windows make to each other. These two are spoken only
  * in TypeScript, but they sit with the rest so that every event name in the app
  * is in one place.
@@ -94,6 +103,12 @@ export interface Desktop {
    * hand focus back to the application the Capture interrupted.
    */
   dismissCapture(): Promise<void>
+  /**
+   * Fits the Capture window to the field plus any Predictions underneath.
+   * Zero Predictions is the resting height — must match the size built in
+   * `build_capture_window` on the Rust side.
+   */
+  fitCapture(predictionCount: number): Promise<void>
   /** A Capture is beginning: the window has just been shown. */
   onCaptureShown(handle: () => void): Promise<Unlisten>
 

@@ -136,6 +136,13 @@ export interface Journal {
    * ignores the Filter entirely.
    */
   exportAll(): Promise<Digest>
+  /**
+   * Project names currently on Notes, matched by case-insensitive prefix.
+   * Distinct and sorted — there is no registry, so a name with no remaining
+   * Notes is gone. What Capture offers as Predictions while the user types
+   * after `#`.
+   */
+  projectPredictions(prefix: string): Promise<string[]>
 }
 
 interface NoteRow {
@@ -218,6 +225,19 @@ const SELECT_NOTES_FOR_DIGEST = `
 const SELECT_ALL_NOTES_FOR_EXPORT = `
   ${SELECT_NOTES}
   ${IN_DIGEST_ORDER}
+`
+
+/**
+ * Distinct Projects still on Notes. Prefix is matched case-insensitively;
+ * Projects are already stored lowercase, so the LIKE is enough. Sorted so the
+ * list is stable for Capture Predictions.
+ */
+const SELECT_PROJECT_PREDICTIONS = `
+  SELECT DISTINCT project
+  FROM notes
+  WHERE project IS NOT NULL
+    AND project LIKE ? ESCAPE '\\'
+  ORDER BY project ASC
 `
 
 export function createJournal({
@@ -344,6 +364,14 @@ export function createJournal({
       // An export always spans whatever the journal holds, so every day is
       // named — a file with unlabelled bullets is not a journal.
       return renderDigest(rows.map(toNote), true)
+    },
+
+    async projectPredictions(prefix) {
+      const rows = await driver.select<{ project: string }>(
+        SELECT_PROJECT_PREDICTIONS,
+        [`${escapeForLike(prefix.toLowerCase())}%`],
+      )
+      return rows.map((row) => row.project)
     },
   }
 }
@@ -617,6 +645,24 @@ export function decideKeystroke(key: string, text: string): KeystrokeDecision {
     return parseCapture(text) === null ? 'ignore' : 'commit'
   }
   return 'ignore'
+}
+
+/**
+ * The prefix of an open Project Marker being typed at the start of Capture.
+ * Null once a Body has begun or there is no leading marker — Predictions only
+ * surface while the marker itself is still being written.
+ */
+export function markerPrefix(text: string): string | null {
+  const open = /^#([A-Za-z0-9_-]*)$/.exec(text)
+  return open === null ? null : open[1]
+}
+
+/**
+ * Choosing a Prediction: fill the open marker with `#name` and a trailing
+ * space so the Body can follow. The user can still edit before commit.
+ */
+export function applyPrediction(name: string): string {
+  return `#${name} `
 }
 
 /**

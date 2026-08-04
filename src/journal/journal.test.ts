@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   createJournal,
+  applyPrediction,
   decideArrival,
   decideKeystroke,
   describeCopiedDigest,
@@ -13,6 +14,7 @@ import {
   exportFileName,
   groupByJournalDay,
   journalDayFor,
+  markerPrefix,
   type Journal,
 } from './journal'
 import { fixedClock, migrationSql, openTestDatabase } from './testing/database'
@@ -245,6 +247,77 @@ describe('capture', () => {
     const [stored] = await notesOn(journal, '2026-03-12')
 
     expect(stored.project).toBeNull()
+  })
+})
+
+describe('markerPrefix', () => {
+  it('is empty after a lone #', () => {
+    expect(markerPrefix('#')).toBe('')
+  })
+
+  it('is the characters typed after # while the marker is still open', () => {
+    expect(markerPrefix('#h')).toBe('h')
+    expect(markerPrefix('#HaBi')).toBe('HaBi')
+    expect(markerPrefix('#work_journal-ai2')).toBe('work_journal-ai2')
+  })
+
+  it('is nothing once a Body has begun, or when there is no leading marker', () => {
+    expect(markerPrefix('#habic ')).toBeNull()
+    expect(markerPrefix('#habic shipped')).toBeNull()
+    expect(markerPrefix('shipped')).toBeNull()
+    expect(markerPrefix('')).toBeNull()
+    expect(markerPrefix(' #habic')).toBeNull()
+    expect(markerPrefix('##x')).toBeNull()
+    expect(markerPrefix('# habic')).toBeNull()
+  })
+})
+
+describe('applyPrediction', () => {
+  it('fills the open marker with the chosen name and a trailing space', () => {
+    expect(applyPrediction('habic')).toBe('#habic ')
+  })
+})
+
+describe('projectPredictions', () => {
+  it('returns nothing when no Projects exist yet', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    await journal.capture('unfiled thought')
+
+    expect(await journal.projectPredictions('')).toEqual([])
+    expect(await journal.projectPredictions('h')).toEqual([])
+  })
+
+  it('offers distinct Projects currently on Notes', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    await journal.capture('#habic shipped auth')
+    await journal.capture('#work done')
+    await journal.capture('#habic again')
+
+    expect(await journal.projectPredictions('')).toEqual(['habic', 'work'])
+  })
+
+  it('narrows by case-insensitive prefix', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    await journal.capture('#habic shipped')
+    await journal.capture('#help docs')
+    await journal.capture('#work done')
+
+    expect(await journal.projectPredictions('h')).toEqual(['habic', 'help'])
+    expect(await journal.projectPredictions('Ha')).toEqual(['habic'])
+    expect(await journal.projectPredictions('z')).toEqual([])
+  })
+
+  it('drops a Project once no Notes remain under it', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    const only = await journal.capture('#habic shipped')
+    await journal.capture('#work done')
+    await journal.delete(only!.id)
+
+    expect(await journal.projectPredictions('')).toEqual(['work'])
   })
 })
 
