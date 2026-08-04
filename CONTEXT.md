@@ -5,7 +5,7 @@ A personal, local-first log of short work notes captured throughout the day, so 
 ## Language
 
 **Note**:
-A single dated line of text the user wrote about their work. The unit of everything — there is no smaller or larger record. Always has a Body from the moment it exists.
+A single dated line of text the user wrote about their work. The unit of everything — there is no smaller or larger record. Always has a Body from the moment it exists. May be filed under one Project; may be Unfiled.
 _Avoid_: Entry, log, item, memo
 
 **Body**:
@@ -13,11 +13,27 @@ The text content of a Note: a single line, no line breaks. Editable forever. One
 _Avoid_: Content, text, transcript
 
 **Capture**:
-The act of creating a Note. Ends in either one committed Note or nothing at all — never in a partial or empty one.
+The act of creating a Note. Ends in either one committed Note or nothing at all — never in a partial or empty one. May begin with a Project Marker; the marker is consumed at the boundary and never becomes part of the Body.
 _Avoid_: Entry, input, quick add
 
 **Draft**:
 Nothing. Text typed during a Capture but not committed does not exist — abandoning a Capture discards it, and the next Capture starts empty.
+
+**Project**:
+An optional named stream of work a Note is filed under. At most one per Note. First-class filing — parallel to Journal Day (when) rather than markup inside the Body (what was said). Identity is case-insensitive and stored lowercase; the name is a non-empty run of letters, digits, `_`, or `-`. Exists only as a value on Notes — no registry, so a name with no remaining Notes is gone.
+_Avoid_: Tag, label, category, context, hashtag
+
+**Project Marker**:
+The `#name` prefix typed at the start of a Capture to name the Project. Consumed when the Note is committed: Project is set, Body is whatever follows. A bare marker with no Body fails Capture like any empty Body. Mid-line or malformed `#` is plain Body text, not a marker.
+_Avoid_: Hashtag, tag prefix
+
+**Unfiled**:
+A Note with no Project. A real state and a real Filter value — not the same as “any project.”
+_Avoid_: None, null project, untagged
+
+**Prediction**:
+A Project name offered during Capture from Projects already on Notes, matched by prefix as the user types after `#`. Choosing one or typing a new name both work; a new name becomes a Project on commit.
+_Avoid_: Autocomplete, suggestion chip, typeahead
 
 ## Getting in
 
@@ -43,35 +59,35 @@ The single day a Note is filed under. Decided when the Note is captured as the l
 _Avoid_: Date, day, created date
 
 **Edited At**:
-The instant a Note was last changed after capture — reworded or refiled. Nothing until then, so a Note still reading as it was typed claims nothing. It is what marks a corrected Note as corrected, so a reader knows the wording may not be the original.
+The instant a Note was last changed after capture — reworded, refiled to another Journal Day, or assigned a different Project (including clearing it). Nothing until then, so a Note still reading as it was typed claims nothing. It is what marks a corrected Note as corrected, so a reader knows the wording or filing may not be the original.
 _Avoid_: Updated at, modified, revision
 
 ## Reading back
 
 **Filter**:
-The range of Journal Days currently being viewed. Opens on the most recent Occupied Day and only changes when the user changes it — never on its own, even as new Notes arrive.
+What is currently being viewed: a range of Journal Days, plus an optional Project constraint (a named Project, Unfiled, or Any). Opens on the most recent Occupied Day with Project = Any, and only changes when the user changes it — never on its own, even as new Notes arrive. Day range and Project constraint are independent axes; both must match for a Note to appear.
 
 **Preset**:
-A named civil-time range that sets the Filter once and is forgotten: Today, Yesterday, This week, Last week, This month, Last month. One select, snaps back to a neutral label; the day pickers remain the source of truth. Week starts Monday. "This" units run from the unit start through today; "last" units are the full prior calendar unit. Yesterday is the calendar day before today, not the previous Occupied Day. An empty range is shown empty. Clock is read only when a Preset is chosen.
+A named civil-time range that sets the day axis of the Filter once and is forgotten: Today, Yesterday, This week, Last week, This month, Last month. One select, snaps back to a neutral label; the day pickers remain the source of truth. Does not touch the Project constraint. Week starts Monday. "This" units run from the unit start through today; "last" units are the full prior calendar unit. Yesterday is the calendar day before today, not the previous Occupied Day. An empty range is shown empty. Clock is read only when a Preset is chosen.
 _Avoid_: Quick range, date chip, relative filter, rolling window
 
 **Search**:
-A way of moving the Filter, never of narrowing it: the Notes anywhere in the journal whose Body contains what the reader typed, each labelled with the day it is filed under. Answering one takes History to that day in full, so what is on screen is always a Filter and nothing else.
+A way of moving the day axis of the Filter, never of narrowing it: the Notes anywhere in the journal whose Body contains what the reader typed, each labelled with the day it is filed under. Body only — not Project names. Answering one takes History to that day in full; the Project constraint is left as it was. What is on screen is always a Filter and nothing else.
 _Avoid_: Query, find, filter by text
 
 **Nudge**:
-What a Note captured for a day outside the current Filter leaves behind: an unobtrusive line saying that day now has content, which the user can act on to move the Filter there, or dismiss. The reason a Filter can hold still without hiding new Notes.
+What a Note captured for a day outside the current Filter leaves behind: an unobtrusive line saying that day now has content, which the user can act on to move the Filter there, or dismiss. The reason a Filter can hold still without hiding new Notes. A Project mismatch alone does not Nudge — only Journal Day does.
 _Avoid_: Notification, toast, badge, alert
 
 **Occupied Day**:
 A Journal Day that has at least one Note. What "the previous day" means in practice — the most recent Occupied Day, not yesterday's date, so a Monday morning shows Friday rather than an empty Sunday.
 
 **Digest**:
-The Markdown rendering of every Note in the current Filter, oldest first, grouped under day headings when the Filter spans more than one day. The journal's only output — written to be pasted into a standup or an LLM prompt.
+The Markdown rendering of every Note in the current Filter, oldest first, grouped under day headings when the Filter spans more than one day. When the Project constraint is a single named Project, bullets are Body only. When it is Any or Unfiled, a Note that has a Project is rendered with a `#name` prefix on the bullet so mixed paste still carries filing. The journal's only output — written to be pasted into a standup or an LLM prompt.
 _Avoid_: Export, report, summary, copy-all text
 
 **Export**:
-Every Note in the journal written to a Markdown file, each appearing exactly once, under a heading for the day it is filed under. The way out of the SQLite file, so nothing captured here is locked in — which is why it ignores the Filter entirely, and why it is a core operation rather than a convenience.
+Every Note in the journal written to a Markdown file, each appearing exactly once, under a heading for the day it is filed under — still day-grouped, never regrouped by Project. Notes that have a Project render with a `#name` prefix on the bullet. The way out of the SQLite file, so nothing captured here is locked in — which is why it ignores the Filter entirely, and why it is a core operation rather than a convenience.
 _Avoid_: Backup, dump, save as
 
 **Deletion**:

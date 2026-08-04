@@ -1,0 +1,3 @@
+# Project is a first-class filing dimension
+
+A Note may be filed under at most one optional Project, stored beside Journal Day — not as markup left in the Body. The `#name` Project Marker is consumed at Capture; Body is only what remains. Projects have no registry: they exist only as distinct values on Notes, so predictions and pickers are `DISTINCT` over current Notes, and a name with nothing left under it is gone. Rejected: tags-in-body (Filter and rename become text surgery) and multi-project notes (a second singular filing dimension stays coherent with Journal Day; multi-value is tags under another name).
