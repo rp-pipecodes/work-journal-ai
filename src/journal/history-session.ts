@@ -118,6 +118,7 @@ export interface HistorySession {
   dismissNudge(): void
   editBody(id: string, body: string): Promise<void>
   refile(id: string, journalDay: string): Promise<void>
+  editProject(id: string, project: string | null): Promise<void>
   delete(id: string): Promise<void>
   /**
    * The whole Filter on the clipboard. Deliberately not async: the webview only
@@ -361,6 +362,10 @@ export function createHistorySession({
     refile: (id, journalDay) =>
       correct('That Note could not be refiled.', (core) =>
         core.refile(id, journalDay),
+      ),
+    editProject: (id, project) =>
+      correct("That Note's Project could not be changed.", (core) =>
+        core.editProject(id, project),
       ),
     delete: (id) =>
       correct('That Note could not be deleted.', (core) => core.delete(id)),

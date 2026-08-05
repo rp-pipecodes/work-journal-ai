@@ -229,6 +229,17 @@ describe('correcting a Note', () => {
     expect(bodiesOf(session.snapshot())).toEqual(['Friday, reworded'])
   })
 
+  it('shows the Note under its new Project', async () => {
+    const { session, notes } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'Friday' },
+    ])
+
+    await session.open()
+    await session.editProject(notes[0].id, 'habic')
+
+    expect(projectsOf(session.snapshot())).toEqual(['habic'])
+  })
+
   it('drops a Note refiled out of the Filter from the list', async () => {
     const { session, notes } = await sessionOver([
       { at: '2026-03-13T10:00:00', body: 'Friday' },
@@ -281,6 +292,11 @@ describe('correcting a Note', () => {
 
     await session.editBody(notes[0].id, '   ')
     expect(session.snapshot().problem).toBe('That Note could not be reworded.')
+
+    await session.editProject(notes[0].id, 'not a project!')
+    expect(session.snapshot().problem).toBe(
+      "That Note's Project could not be changed.",
+    )
   })
 
   it('stops saying so once a correction works', async () => {
@@ -656,6 +672,16 @@ function bodiesOf(snapshot: HistorySnapshot): string[] {
   }
   return snapshot.history.days.flatMap((day) =>
     day.notes.map((note) => note.body),
+  )
+}
+
+/** The Projects on screen, in the order the list shows them. */
+function projectsOf(snapshot: HistorySnapshot): Array<string | null> {
+  if (snapshot.history.state !== 'notes') {
+    throw new Error(`History is ${snapshot.history.state}, not notes`)
+  }
+  return snapshot.history.days.flatMap((day) =>
+    day.notes.map((note) => note.project),
   )
 }
 

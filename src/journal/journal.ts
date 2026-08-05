@@ -91,6 +91,13 @@ export interface Journal {
    */
   refile(id: string, journalDay: string): Promise<Note>
   /**
+   * Files a Note under a different Project, or clears it to Unfiled. Captured
+   * At, Body and Journal Day are untouched — Project is filing, not wording.
+   * Null is Unfiled. A name is stored lowercase; the same Project is not an
+   * edit.
+   */
+  editProject(id: string, project: string | null): Promise<Note>
+  /**
    * Removes a Note permanently. There is no trash, no archive and no
    * `deleted_at` — the row is gone, and with it every Filter and Digest it
    * appeared in.
@@ -171,8 +178,8 @@ const SELECT_NOTE = `
 `
 
 /**
- * Body and Journal Day are the two changeable columns, and both mark the Note
- * as edited; `captured_at` is never in an UPDATE anywhere in the app.
+ * Body, Journal Day and Project are the changeable columns, and each marks the
+ * Note as edited; `captured_at` is never in an UPDATE anywhere in the app.
  */
 const UPDATE_BODY = `
   UPDATE notes SET body = ?, edited_at = ? WHERE id = ?
@@ -180,6 +187,10 @@ const UPDATE_BODY = `
 
 const UPDATE_JOURNAL_DAY = `
   UPDATE notes SET journal_day = ?, edited_at = ? WHERE id = ?
+`
+
+const UPDATE_PROJECT = `
+  UPDATE notes SET project = ?, edited_at = ? WHERE id = ?
 `
 
 const DELETE_NOTE = `
@@ -314,6 +325,20 @@ export function createJournal({
       await driver.execute(UPDATE_JOURNAL_DAY, [journalDay, editedAt, id])
 
       return { ...note, journalDay, editedAt }
+    },
+
+    async editProject(id, project) {
+      const next = normalizeProject(project)
+      const note = await read(driver, id)
+
+      if (next === note.project) {
+        return note
+      }
+
+      const editedAt = clock.now().toISOString()
+      await driver.execute(UPDATE_PROJECT, [next, editedAt, id])
+
+      return { ...note, project: next, editedAt }
     },
 
     async delete(id) {
@@ -688,6 +713,25 @@ async function read(driver: SqlDriver, id: string): Promise<Note> {
  */
 function isJournalDay(journalDay: string): boolean {
   return /^[2-9]\d{3}-\d{2}-\d{2}$/.test(journalDay)
+}
+
+/**
+ * A Project name as the journal stores it, or Unfiled. Null is Unfiled. A
+ * string is trimmed and lowercased; only letters, digits, `_` and `-` are
+ * allowed, and it must not be empty — the same rule Capture's marker uses, so
+ * a name typed in History is one Capture could have written.
+ */
+function normalizeProject(project: string | null): string | null {
+  if (project === null) {
+    return null
+  }
+
+  const name = project.trim().toLowerCase()
+  if (name === '' || !/^[a-z0-9_-]+$/.test(name)) {
+    throw new Error(`Not a Project: ${project}.`)
+  }
+
+  return name
 }
 
 /**

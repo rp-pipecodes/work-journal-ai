@@ -473,6 +473,127 @@ describe('refile', () => {
   })
 })
 
+describe('editProject', () => {
+  it('assigns a Project to an Unfiled Note without touching Body or Journal Day', async () => {
+    const { journal, clock } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('shipped auth')
+    clock.set(local('2026-03-12T17:00:00'))
+
+    const edited = await journal.editProject(captured!.id, 'habic')
+
+    expect(edited).toMatchObject({
+      project: 'habic',
+      body: 'shipped auth',
+      journalDay: '2026-03-12',
+      capturedAt: captured!.capturedAt,
+      editedAt: '2026-03-12T17:00:00.000Z',
+    })
+    const [stored] = await notesOn(journal, '2026-03-12')
+    expect(stored).toMatchObject({ project: 'habic', body: 'shipped auth' })
+  })
+
+  it('moves a Note from one Project to another', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('#habic shipped auth')
+
+    const edited = await journal.editProject(captured!.id, 'work')
+
+    expect(edited.project).toBe('work')
+  })
+
+  it('clears Project back to Unfiled', async () => {
+    const { journal, clock } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('#habic shipped auth')
+    clock.set(local('2026-03-12T17:00:00'))
+
+    const edited = await journal.editProject(captured!.id, null)
+
+    expect(edited.project).toBeNull()
+    expect(edited.editedAt).toBe('2026-03-12T17:00:00.000Z')
+  })
+
+  it('stores Project identity lowercase', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('unfiled')
+
+    const edited = await journal.editProject(captured!.id, 'HaBiC')
+
+    expect(edited.project).toBe('habic')
+  })
+
+  it('accepts letters, digits, underscore and hyphen', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('unfiled')
+
+    const edited = await journal.editProject(captured!.id, 'work_journal-ai2')
+
+    expect(edited.project).toBe('work_journal-ai2')
+  })
+
+  it('does not mark a Note edited when the Project has not changed', async () => {
+    const { journal, clock } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('#habic already filed')
+    clock.set(local('2026-03-12T17:00:00'))
+
+    const same = await journal.editProject(captured!.id, 'habic')
+    const sameCase = await journal.editProject(captured!.id, 'HaBiC')
+    const stillUnfiled = await journal.editProject(
+      (await journal.capture('still unfiled'))!.id,
+      null,
+    )
+
+    expect(same.editedAt).toBeNull()
+    expect(sameCase.editedAt).toBeNull()
+    expect(stillUnfiled.editedAt).toBeNull()
+  })
+
+  it('refuses a Project name the journal cannot store', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('somewhere')
+
+    for (const name of ['habic!', 'ha bic', '#habic', '', '  ']) {
+      await expect(journal.editProject(captured!.id, name)).rejects.toThrow(
+        /project/i,
+      )
+    }
+
+    const [stored] = await notesOn(journal, '2026-03-12')
+    expect(stored.project).toBeNull()
+  })
+
+  it('refuses to edit a Note that is not there', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    await expect(journal.editProject('nobody', 'habic')).rejects.toThrow(
+      /no such note/i,
+    )
+  })
+
+  it('drops a Project from Predictions once no Notes remain under it', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    const only = await journal.capture('#habic shipped')
+    await journal.capture('#work done')
+
+    await journal.editProject(only!.id, 'work')
+
+    expect(await journal.projectPredictions('')).toEqual(['work'])
+  })
+})
+
+describe('editBody leaves Project alone', () => {
+  it('does not re-parse a Project Marker from the Body', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('plain body')
+
+    const edited = await journal.editBody(captured!.id, '#habic looks like a marker')
+
+    expect(edited).toMatchObject({
+      project: null,
+      body: '#habic looks like a marker',
+    })
+  })
+})
+
 describe('delete', () => {
   it('leaves no trace in any Filter, nor in what a Digest reads', async () => {
     const { journal, clock } = await journalAt('2026-03-12T09:30:00')

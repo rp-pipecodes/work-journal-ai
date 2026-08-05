@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -123,6 +123,10 @@ export default function HistoryView({
     void session.refile(note.id, journalDay)
   }
 
+  function editProject(note: Note, project: string | null) {
+    void session.editProject(note.id, project)
+  }
+
   /** The one irreversible operation, and the only one that is confirmed. */
   function confirmDelete(note: Note) {
     setDeleting(null)
@@ -209,11 +213,13 @@ export default function HistoryView({
                   <NoteLine
                     key={note.id}
                     note={note}
+                    journal={journal}
                     editing={editing === note.id}
                     onEdit={() => setEditing(note.id)}
                     onCommit={(body) => commitEdit(note, body)}
                     onAbandon={() => setEditing(null)}
                     onRefile={(journalDay) => refile(note, journalDay)}
+                    onEditProject={(project) => editProject(note, project)}
                     onDelete={() => setDeleting(note)}
                   />
                 ))}
@@ -253,25 +259,29 @@ function Problem({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * One Note as it reads now, and the three ways to correct it. The actions stay
- * out of the way until the row is hovered or something in it has focus, so a
- * list being read back is a list of Notes rather than a list of controls.
+ * One Note as it reads now, and the ways to correct it. The actions stay out
+ * of the way until the row is hovered or something in it has focus, so a list
+ * being read back is a list of Notes rather than a list of controls.
  */
 function NoteLine({
   note,
+  journal,
   editing,
   onEdit,
   onCommit,
   onAbandon,
   onRefile,
+  onEditProject,
   onDelete,
 }: {
   note: Note
+  journal: Promise<Journal>
   editing: boolean
   onEdit: () => void
   onCommit: (body: string) => void
   onAbandon: () => void
   onRefile: (journalDay: string) => void
+  onEditProject: (project: string | null) => void
   onDelete: () => void
 }) {
   return (
@@ -324,6 +334,15 @@ function NoteLine({
           */}
           <div className="absolute inset-y-1 right-2 flex items-center rounded-md bg-background opacity-0 transition-opacity pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
             <div className="flex h-full items-center gap-1 rounded-md bg-muted/40 pl-3">
+              <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                <span className="sr-only">Project</span>
+                <ProjectField
+                  value={note.project}
+                  journal={journal}
+                  onPick={onEditProject}
+                  label={`File "${note.body}" under a Project`}
+                />
+              </label>
               <label className="flex items-center gap-1 text-xs text-muted-foreground">
                 <span className="sr-only">File under</span>
                 <DayField
@@ -649,6 +668,98 @@ function DayField({
       aria-label={label}
       className="rounded-md border border-border bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
     />
+  )
+}
+
+/**
+ * A Note's Project being set, changed or cleared. Explicit — not the Body —
+ * so wording and filing stay separate. Offers Projects currently on Notes via
+ * a datalist, and accepts a new name; emptying the field clears to Unfiled.
+ * Settles on blur or Enter, like a Journal Day.
+ */
+function ProjectField({
+  value,
+  journal,
+  onPick,
+  label,
+}: {
+  value: string | null
+  journal: Promise<Journal>
+  onPick: (project: string | null) => void
+  label?: string
+}) {
+  const shown = value ?? ''
+  const [typed, setTyped] = useState(shown)
+  const [settled, setSettled] = useState(shown)
+  const [projects, setProjects] = useState<string[]>([])
+  // Escape sets this before blur so commit does not fire the abandoned value.
+  const abandon = useRef(false)
+  const listId = useId()
+
+  if (shown !== settled) {
+    setSettled(shown)
+    setTyped(shown)
+  }
+
+  function commit() {
+    if (abandon.current) {
+      abandon.current = false
+      setTyped(shown)
+      return
+    }
+
+    // A leading # is the display form; filing takes the bare name.
+    const name = typed.trim().replace(/^#/, '')
+    const project = name === '' ? null : name
+    if (
+      project === value ||
+      (project !== null && project.toLowerCase() === value)
+    ) {
+      setTyped(shown)
+      return
+    }
+
+    onPick(project)
+    setTyped(shown)
+  }
+
+  return (
+    <>
+      <input
+        type="text"
+        value={typed}
+        list={listId}
+        spellCheck={false}
+        autoComplete="off"
+        placeholder="Unfiled"
+        onChange={(event) => setTyped(event.target.value)}
+        onFocus={() => {
+          void (async () => {
+            setProjects(await (await journal).projectPredictions(''))
+          })()
+        }}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            commit()
+          }
+          if (event.key === 'Escape') {
+            // Abandon the edit; keep the window open.
+            event.stopPropagation()
+            abandon.current = true
+            setTyped(shown)
+            event.currentTarget.blur()
+          }
+        }}
+        aria-label={label}
+        className="w-24 rounded-md border border-border bg-transparent px-1.5 py-0.5 font-mono text-xs text-foreground outline-none placeholder:font-sans placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+      />
+      <datalist id={listId}>
+        {projects.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
+    </>
   )
 }
 

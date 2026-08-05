@@ -103,6 +103,8 @@ The palette is the point of this section, and the moment to watch is the one the
 - [ ] The time shown against an edited Note is unchanged — Captured At never moves.
 - [ ] Changing a Note's day moves it out of the current range when the new day is outside it, and under the right heading when it is inside.
 - [ ] A refiled Note keeps its original time and is marked **edited**.
+- [ ] Changing a Note's Project (assign, switch, or clear to Unfiled) leaves Body and day alone, marks the Note **edited**, and does not re-parse markers from the Body.
+- [ ] The Project field lists Projects currently on Notes and accepts a new name; after the last Note leaves a Project, that name is gone from the picker.
 - [ ] **Delete** opens a confirmation naming the Note; **Cancel** leaves the Note there.
 - [ ] Confirming removes the Note from the list, and it is still gone after quitting and relaunching the app.
 - [ ] Deleting the last Note of the most recent Occupied Day makes **View Notes** open on the previous Occupied Day next time.
