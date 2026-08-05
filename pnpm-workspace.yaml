@@ -1,0 +1,9 @@
+# pnpm reads its settings here rather than from a "pnpm" field in package.json,
+# which pnpm 11 ignores outright.
+#
+# The two overrides together move shadcn's buried @modelcontextprotocol/sdk off
+# the @hono/node-server carrying GHSA-frvp-7c67-39w9 — bumping the SDK alone
+# leaves a resolution that still satisfies its widened range. See ae0c543.
+overrides:
+  '@modelcontextprotocol/sdk': ^1.30.0
+  '@hono/node-server': ^2.0.12
