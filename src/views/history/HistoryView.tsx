@@ -166,8 +166,14 @@ export default function HistoryView({
       onKeyDown={onKeyDown}
       className="flex h-screen flex-col bg-background outline-none"
     >
+      {/*
+        The header wraps rather than clips: the Filter's controls, the Search
+        field and the Digest are each the whole of something the reader needs,
+        so a narrow window gets a second row instead of a row with its end cut
+        off. Nothing up here is optional enough to hide.
+      */}
       {filter !== null && (
-        <header className="flex shrink-0 items-center gap-3 overflow-hidden px-6 py-4 text-xs text-muted-foreground">
+        <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-6 py-4 text-xs text-muted-foreground">
           <Range filter={filter} onPick={pick} />
           <Preset onChoose={applyPreset} />
           <ProjectConstraintField
@@ -637,8 +643,10 @@ function SearchField({
 }) {
   return (
     // The one control that gives way when the window is narrow: the Filter and
-    // the Digest are fixed things, a field is just as usable half as wide.
-    <label className="flex min-w-0 flex-1 items-center gap-1.5">
+    // the Digest are fixed things, a field is just as usable half as wide. It
+    // gives way down to a readable width and then takes a row of its own,
+    // rather than shrinking until nothing can be typed into it.
+    <label className="flex min-w-0 flex-1 basis-40 items-center gap-1.5">
       <span className="sr-only">Search</span>
       <input
         type="search"
