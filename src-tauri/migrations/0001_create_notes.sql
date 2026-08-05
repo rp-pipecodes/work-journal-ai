@@ -8,8 +8,8 @@ CREATE TABLE notes (
     body TEXT NOT NULL CHECK (length(trim(body)) > 0),
     -- The instant the Note came into existence: UTC ISO-8601, never updated.
     captured_at TEXT NOT NULL,
-    -- YYYY-MM-DD. Decided at capture as the local calendar day of Captured At,
-    -- and never recomputed, so it survives a timezone change.
+    -- YYYY-MM-DD. Decided at capture from Captured At and the Day Start, and
+    -- never recomputed, so it survives a timezone or Day Start change.
     journal_day TEXT NOT NULL,
     -- Null until the Body or the Journal Day is changed after capture.
     edited_at TEXT
