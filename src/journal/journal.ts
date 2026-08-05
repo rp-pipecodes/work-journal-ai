@@ -37,13 +37,47 @@ export interface Note {
 
 /**
  * The range of Journal Days currently being viewed, inclusive at both ends. A
- * single day is a range whose ends are equal.
+ * single day is a range whose ends are equal. One of the Filter's two axes,
+ * and the only one Presets, Search and Nudges ever move.
  */
-export interface Filter {
+export interface DayRange {
   /** `YYYY-MM-DD`, the oldest day in view. */
   from: string
   /** `YYYY-MM-DD`, the newest day in view. */
   to: string
+}
+
+/**
+ * The Filter's other axis: one named Project, Unfiled, or no constraint at
+ * all — see docs/adr/0008-project-narrows-filter.md.
+ */
+export type ProjectConstraint =
+  | { kind: 'any' }
+  | { kind: 'unfiled' }
+  | { kind: 'named'; name: string }
+
+/** No constraint: every Note in the day range, filed or not. */
+export const ANY_PROJECT: ProjectConstraint = { kind: 'any' }
+
+/** Only Notes with no Project — a real value, not the absence of one. */
+export const UNFILED: ProjectConstraint = { kind: 'unfiled' }
+
+/**
+ * What is currently being viewed: a range of Journal Days and a Project
+ * constraint. The two axes are independent and both must match for a Note to
+ * appear. The constraint is optional in the type and absent means Any, so a
+ * day range on its own is already a Filter.
+ */
+export interface Filter extends DayRange {
+  project?: ProjectConstraint
+}
+
+/**
+ * The Project axis of a Filter, whether or not it was written down: absent is
+ * Any, so a bare day range narrows nothing.
+ */
+export function constraintOf(filter: Filter): ProjectConstraint {
+  return filter.project ?? ANY_PROJECT
 }
 
 /**
@@ -104,15 +138,17 @@ export interface Journal {
    */
   delete(id: string): Promise<void>
   /**
-   * The Filter a reader starts from: the most recent Occupied Day, which is
-   * the greatest Journal Day present and not yesterday's date — so a Monday
+   * The days a reader starts from: the most recent Occupied Day, which is the
+   * greatest Journal Day present and not yesterday's date — so a Monday
    * resolves to Friday when the weekend is empty, however long the gap. Null
-   * when there are no Notes at all, rather than an arbitrary date.
+   * when there are no Notes at all, rather than an arbitrary date. Only the
+   * day axis: History opens on Any, which is nothing to decide.
    */
-  defaultFilter(): Promise<Filter | null>
+  defaultRange(): Promise<DayRange | null>
   /**
    * The Notes in a Filter, newest first — the order someone reading back at
-   * standup wants, and the reverse of a Digest's.
+   * standup wants, and the reverse of a Digest's. Both axes are predicates:
+   * a Note has to fall in the day range and satisfy the Project constraint.
    */
   notesForFilter(filter: Filter): Promise<Note[]>
   /**
@@ -131,6 +167,11 @@ export interface Journal {
    * The Filter as Markdown to paste elsewhere. Oldest first — the reverse of
    * what the list shows, because scanning wants recency and narrative wants
    * chronology.
+   *
+   * Under a single named Project the bullets are Body only: the Project is
+   * already what the whole Digest is about. Under Any or Unfiled a Note that
+   * has a Project keeps a `#name` prefix, so a mixed paste still says which
+   * stream each line came from.
    */
   digest(filter: Filter): Promise<Digest>
   /**
@@ -140,7 +181,8 @@ export interface Journal {
    *
    * An Export is rendered exactly as a Digest is, and so has the same shape,
    * but it is not one: a Digest is bound to the Filter on screen and an Export
-   * ignores the Filter entirely.
+   * ignores the Filter entirely. It is never about one Project, so a Note with
+   * one always keeps its `#name` prefix.
    */
   exportAll(): Promise<Digest>
   /**
@@ -150,6 +192,13 @@ export interface Journal {
    * after `#`.
    */
   projectPredictions(prefix: string): Promise<string[]>
+  /**
+   * Every Project currently on a Note, sorted. The same absence of a registry
+   * as Predictions — a name with nothing left under it is gone — but a
+   * different question: what History can narrow the Filter to, asked with no
+   * prefix and nobody typing.
+   */
+  projectsInUse(): Promise<string[]>
 }
 
 interface NoteRow {
@@ -204,11 +253,55 @@ const SELECT_MOST_RECENT_OCCUPIED_DAY = `
   LIMIT 1
 `
 
-const SELECT_NOTES_FOR_FILTER = `
-  ${SELECT_NOTES}
-  WHERE journal_day BETWEEN ? AND ?
-  ORDER BY journal_day DESC, captured_at DESC, id DESC
-`
+/** Reverse chronological: the order a reader scanning back wants. */
+const IN_LIST_ORDER = `ORDER BY journal_day DESC, captured_at DESC, id DESC`
+
+/** Chronological: the order Markdown reads in, whatever is being rendered. */
+const IN_DIGEST_ORDER = `ORDER BY journal_day ASC, captured_at ASC, id ASC`
+
+/**
+ * Both axes of a Filter as one read: the day range, the Project constraint,
+ * and whichever order the caller reads in. The list and the Digest are the
+ * same rows reversed, so they are the same predicate too.
+ */
+function selectNotesForFilter(filter: Filter, order: string): Query {
+  const project = projectPredicate(filter)
+  return {
+    sql: `
+      ${SELECT_NOTES}
+      WHERE journal_day BETWEEN ? AND ?${project.sql}
+      ${order}
+    `,
+    params: [filter.from, filter.to, ...project.params],
+  }
+}
+
+/** A statement and the parameters that go with it, kept together. */
+interface Query {
+  sql: string
+  params: unknown[]
+}
+
+/**
+ * The Project axis as SQL. Any adds nothing at all — the Filter is then the
+ * day range and nothing else — and the other two are a single predicate, so
+ * both axes are one read rather than a list filtered afterwards.
+ */
+function projectPredicate(filter: Filter): Query {
+  const constraint = constraintOf(filter)
+
+  switch (constraint.kind) {
+    case 'any':
+      return { sql: '', params: [] }
+    case 'unfiled':
+      return { sql: ' AND project IS NULL', params: [] }
+    case 'named':
+      // Identity is case-insensitive and every Project is stored lowercase, so
+      // a normalized name is an equality test — and a name that is not one at
+      // all fails here rather than quietly matching nothing.
+      return { sql: ' AND project = ?', params: [projectName(constraint.name)] }
+  }
+}
 
 /**
  * The same order as a Filter's list, over the whole journal and predicated on
@@ -219,23 +312,21 @@ const SELECT_NOTES_FOR_FILTER = `
 const SELECT_NOTES_MATCHING = `
   ${SELECT_NOTES}
   WHERE body LIKE ? ESCAPE '\\'
-  ORDER BY journal_day DESC, captured_at DESC, id DESC
-`
-
-/** Chronological: the order Markdown reads in, whatever is being rendered. */
-const IN_DIGEST_ORDER = `ORDER BY journal_day ASC, captured_at ASC, id ASC`
-
-/** The same rows as a Filter's, in the order a Digest reads in. */
-const SELECT_NOTES_FOR_DIGEST = `
-  ${SELECT_NOTES}
-  WHERE journal_day BETWEEN ? AND ?
-  ${IN_DIGEST_ORDER}
+  ${IN_LIST_ORDER}
 `
 
 /** The same rows again with no predicate at all: the whole journal. */
 const SELECT_ALL_NOTES_FOR_EXPORT = `
   ${SELECT_NOTES}
   ${IN_DIGEST_ORDER}
+`
+
+/** Every Project still on a Note: the Filter's Project axis, enumerated. */
+const SELECT_PROJECTS_IN_USE = `
+  SELECT DISTINCT project
+  FROM notes
+  WHERE project IS NOT NULL
+  ORDER BY project ASC
 `
 
 /**
@@ -346,7 +437,7 @@ export function createJournal({
       await driver.execute(DELETE_NOTE, [id])
     },
 
-    async defaultFilter() {
+    async defaultRange() {
       const [row] = await driver.select<{ journal_day: string }>(
         SELECT_MOST_RECENT_OCCUPIED_DAY,
         [],
@@ -356,14 +447,12 @@ export function createJournal({
         return null
       }
 
-      return filterForJournalDay(row.journal_day)
+      return rangeForJournalDay(row.journal_day)
     },
 
     async notesForFilter(filter) {
-      const rows = await driver.select<NoteRow>(SELECT_NOTES_FOR_FILTER, [
-        filter.from,
-        filter.to,
-      ])
+      const query = selectNotesForFilter(filter, IN_LIST_ORDER)
+      const rows = await driver.select<NoteRow>(query.sql, query.params)
       return rows.map(toNote)
     },
 
@@ -375,26 +464,41 @@ export function createJournal({
     },
 
     async digest(filter) {
-      const rows = await driver.select<NoteRow>(SELECT_NOTES_FOR_DIGEST, [
-        filter.from,
-        filter.to,
-      ])
-      // A single day is the common case and pastes without ceremony; any wider
-      // Filter says which day each bullet belongs to.
-      return renderDigest(rows.map(toNote), filter.from !== filter.to)
+      const query = selectNotesForFilter(filter, IN_DIGEST_ORDER)
+      const rows = await driver.select<NoteRow>(query.sql, query.params)
+      return renderDigest(rows.map(toNote), {
+        // A single day is the common case and pastes without ceremony; any
+        // wider Filter says which day each bullet belongs to.
+        headings: filter.from !== filter.to,
+        // Under one named Project every bullet would carry the same prefix,
+        // which says nothing the reader does not already know.
+        projectPrefixes: constraintOf(filter).kind !== 'named',
+      })
     },
 
     async exportAll() {
       const rows = await driver.select<NoteRow>(SELECT_ALL_NOTES_FOR_EXPORT, [])
       // An export always spans whatever the journal holds, so every day is
-      // named — a file with unlabelled bullets is not a journal.
-      return renderDigest(rows.map(toNote), true)
+      // named — a file with unlabelled bullets is not a journal — and it is
+      // never about one Project, so filing is written on the bullet.
+      return renderDigest(rows.map(toNote), {
+        headings: true,
+        projectPrefixes: true,
+      })
     },
 
     async projectPredictions(prefix) {
       const rows = await driver.select<{ project: string }>(
         SELECT_PROJECT_PREDICTIONS,
         [`${escapeForLike(prefix.toLowerCase())}%`],
+      )
+      return rows.map((row) => row.project)
+    },
+
+    async projectsInUse() {
+      const rows = await driver.select<{ project: string }>(
+        SELECT_PROJECTS_IN_USE,
+        [],
       )
       return rows.map((row) => row.project)
     },
@@ -406,18 +510,24 @@ export function createJournal({
  * Digest is meant to paste into a standup thread or an LLM prompt with no
  * cleanup, so it carries nothing the app knows and the reader does not need.
  *
- * Headings are the caller's decision rather than the Notes': what is being
- * rendered decides whether a bullet needs to say which day it belongs to. Days
- * with no Notes are simply absent either way.
+ * Headings and Project prefixes are the caller's decision rather than the
+ * Notes': what is being rendered decides whether a bullet needs to say which
+ * day it belongs to, and whether the reader already knows which Project it
+ * came from. Days with no Notes are simply absent either way.
  *
  * `notes` must already be in Digest order, which is what the core's read does.
  */
-function renderDigest(notes: Note[], headings: boolean): Digest {
+function renderDigest(
+  notes: Note[],
+  { headings, projectPrefixes }: { headings: boolean; projectPrefixes: boolean },
+): Digest {
   const days = groupByJournalDay(notes)
 
   const markdown = days
     .map((day) => {
-      const bullets = day.notes.map((note) => `- ${note.body}`).join('\n')
+      const bullets = day.notes
+        .map((note) => `- ${bulletPrefix(note, projectPrefixes)}${note.body}`)
+        .join('\n')
       return headings
         ? `## ${formatDigestDay(day.journalDay)}\n${bullets}`
         : bullets
@@ -425,6 +535,15 @@ function renderDigest(notes: Note[], headings: boolean): Digest {
     .join('\n\n')
 
   return { markdown, noteCount: notes.length }
+}
+
+/**
+ * What a bullet says before the Body: `#name ` when the Note has a Project and
+ * the rendering is not already about one, and nothing otherwise. An Unfiled
+ * Note is never labelled — a bullet with no marker is one nobody filed.
+ */
+function bulletPrefix(note: Note, projectPrefixes: boolean): string {
+  return projectPrefixes && note.project !== null ? `#${note.project} ` : ''
 }
 
 /**
@@ -544,17 +663,35 @@ export function formatProject(project: string | null): string {
   return project === null ? 'Unfiled' : `#${project}`
 }
 
-/** One Journal Day as a Filter: a range whose ends are equal. */
-export function filterForJournalDay(journalDay: string): Filter {
+/**
+ * A Project constraint as the value of a picker, and back. `#` cannot occur in
+ * a Project name, so a Project called `any` or `unfiled` is still its own
+ * choice rather than one of the two constants.
+ */
+export function projectChoice(constraint: ProjectConstraint): string {
+  return constraint.kind === 'named' ? `#${constraint.name}` : constraint.kind
+}
+
+/** And back: the value a picker reports, as the constraint it stands for. */
+export function projectConstraintFor(choice: string): ProjectConstraint {
+  if (choice === 'unfiled') return UNFILED
+  if (choice.startsWith('#')) {
+    return { kind: 'named', name: projectName(choice.slice(1)) }
+  }
+  return ANY_PROJECT
+}
+
+/** One Journal Day as a day range: a range whose ends are equal. */
+export function rangeForJournalDay(journalDay: string): DayRange {
   return { from: journalDay, to: journalDay }
 }
 
 /**
- * A range of Journal Days as a Filter, whichever end the reader picked first.
- * A Filter always reads oldest end first, so the two ends of a picker cannot
- * put the core in a state that selects nothing.
+ * A range of Journal Days, whichever end the reader picked first. A range
+ * always reads oldest end first, so the two ends of a picker cannot put the
+ * core in a state that selects nothing.
  */
-export function filterForRange(oneEnd: string, otherEnd: string): Filter {
+export function rangeForDays(oneEnd: string, otherEnd: string): DayRange {
   return oneEnd <= otherEnd
     ? { from: oneEnd, to: otherEnd }
     : { from: otherEnd, to: oneEnd }
@@ -562,8 +699,9 @@ export function filterForRange(oneEnd: string, otherEnd: string): Filter {
 
 /**
  * A named civil-time range relative to today. One-shot: the clock is read when
- * the Preset is chosen, and the result is an ordinary Filter — nothing sticky,
- * nothing rolling. Week starts Monday. "This" units run from the unit start
+ * the Preset is chosen, and the result is an ordinary day range — nothing
+ * sticky, nothing rolling, and nothing about the Project axis, which a Preset
+ * never touches. Week starts Monday. "This" units run from the unit start
  * through today; "last" units are the full prior calendar unit.
  */
 export type FilterPreset =
@@ -574,12 +712,12 @@ export type FilterPreset =
   | 'this-month'
   | 'last-month'
 
-export function filterForPreset(preset: FilterPreset, today: string): Filter {
+export function rangeForPreset(preset: FilterPreset, today: string): DayRange {
   switch (preset) {
     case 'today':
-      return filterForJournalDay(today)
+      return rangeForJournalDay(today)
     case 'yesterday':
-      return filterForJournalDay(shiftDay(today, -1))
+      return rangeForJournalDay(shiftDay(today, -1))
     case 'this-week':
       return { from: startOfWeek(today), to: today }
     case 'last-week': {
@@ -638,19 +776,23 @@ function daysInMonth(year: number, month: number): number {
 }
 
 /**
- * A newly captured Note against the Filter on screen. A Note filed under a day
+ * A newly captured Note against the days on screen. A Note filed under a day
  * in view belongs in the list; one filed outside it must not move the list
  * under a reader, so it becomes a nudge naming the day that gained content —
  * moving the Filter there stays the reader's decision.
  *
- * `YYYY-MM-DD` compares as a string in calendar order, which is why the Filter
- * is a pair of them.
+ * The day axis and nothing else: a Note the Project constraint excludes is
+ * simply not in the list, because a mismatch there is too ordinary to announce
+ * — see docs/adr/0008-project-narrows-filter.md.
+ *
+ * `YYYY-MM-DD` compares as a string in calendar order, which is why a range is
+ * a pair of them.
  */
 export function decideArrival(
-  filter: Filter,
+  range: DayRange,
   journalDay: string,
 ): ArrivalDecision {
-  if (journalDay >= filter.from && journalDay <= filter.to) {
+  if (journalDay >= range.from && journalDay <= range.to) {
     return { kind: 'show' }
   }
   return { kind: 'nudge', journalDay }
@@ -722,10 +864,11 @@ function isJournalDay(journalDay: string): boolean {
  * a name typed in History is one Capture could have written.
  */
 function normalizeProject(project: string | null): string | null {
-  if (project === null) {
-    return null
-  }
+  return project === null ? null : projectName(project)
+}
 
+/** The same rule for a name that is definitely one: a Project, or an error. */
+function projectName(project: string): string {
   const name = project.trim().toLowerCase()
   if (name === '' || !/^[a-z0-9_-]+$/.test(name)) {
     throw new Error(`Not a Project: ${project}.`)

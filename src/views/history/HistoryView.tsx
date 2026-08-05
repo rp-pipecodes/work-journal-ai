@@ -16,17 +16,21 @@ import {
   type HistorySnapshot,
 } from '@/journal/history-session'
 import {
+  constraintOf,
   decideKeystroke,
-  filterForJournalDay,
-  filterForPreset,
-  filterForRange,
   formatJournalDay,
   formatProject,
   formatTimeOfDay,
   journalDayFor,
+  projectChoice,
+  projectConstraintFor,
+  rangeForDays,
+  rangeForJournalDay,
+  rangeForPreset,
   type Filter,
   type FilterPreset,
   type Journal,
+  type ProjectConstraint,
   type Note,
 } from '@/journal/journal'
 import { copyToClipboard } from '@/lib/clipboard'
@@ -57,8 +61,16 @@ export default function HistoryView({
       onChange: setSnapshot,
     }),
   )
-  const { filter, history, term, searching, nudgedDay, confirmation, problem } =
-    snapshot
+  const {
+    filter,
+    projects,
+    history,
+    term,
+    searching,
+    nudgedDay,
+    confirmation,
+    problem,
+  } = snapshot
 
   // The one Note being reworded, and the one waiting on a confirmed deletion.
   // Both are single, and both are about this screen rather than the session: a
@@ -136,7 +148,7 @@ export default function HistoryView({
   /** A cleared date input is a half-picked range, not a Filter over nothing. */
   function pick(from: string, to: string) {
     if (from === '' || to === '') return
-    void session.moveTo(filterForRange(from, to))
+    void session.moveTo(rangeForDays(from, to))
   }
 
   /**
@@ -144,7 +156,7 @@ export default function HistoryView({
    * snaps back, so the pickers stay the source of truth for what is on screen.
    */
   function applyPreset(preset: FilterPreset) {
-    void session.moveTo(filterForPreset(preset, journalDayFor(new Date())))
+    void session.moveTo(rangeForPreset(preset, journalDayFor(new Date())))
   }
 
   return (
@@ -158,6 +170,11 @@ export default function HistoryView({
         <header className="flex shrink-0 items-center gap-3 overflow-hidden px-6 py-4 text-xs text-muted-foreground">
           <Range filter={filter} onPick={pick} />
           <Preset onChoose={applyPreset} />
+          <ProjectConstraintField
+            constraint={constraintOf(filter)}
+            projects={projects}
+            onNarrow={(constraint) => void session.narrowTo(constraint)}
+          />
           <SearchField
             term={term}
             onType={(typed) => void session.search(typed)}
@@ -184,7 +201,7 @@ export default function HistoryView({
           <Centred>The journal could not be read.</Centred>
         )}
         {history.state === 'notes' && history.days.length === 0 && (
-          <Centred>No Notes in these days.</Centred>
+          <Centred>{nothingHere(filter)}</Centred>
         )}
         {history.state === 'results' && history.notes.length === 0 && (
           <Centred>No Notes say “{history.term}”.</Centred>
@@ -196,7 +213,7 @@ export default function HistoryView({
                 key={note.id}
                 note={note}
                 onShow={() =>
-                  void session.moveTo(filterForJournalDay(note.journalDay))
+                  void session.moveTo(rangeForJournalDay(note.journalDay))
                 }
               />
             ))}
@@ -231,7 +248,7 @@ export default function HistoryView({
       {nudgedDay !== null && (
         <Nudge
           journalDay={nudgedDay}
-          onShow={() => void session.moveTo(filterForJournalDay(nudgedDay))}
+          onShow={() => void session.moveTo(rangeForJournalDay(nudgedDay))}
           onDismiss={() => session.dismissNudge()}
         />
       )}
@@ -243,6 +260,25 @@ export default function HistoryView({
       />
     </div>
   )
+}
+
+/**
+ * An empty list, and which axis emptied it. The day range is what a reader
+ * moved last unless they have also narrowed to a Project, and a message
+ * naming one axis reads as though the other were not there.
+ */
+function nothingHere(filter: Filter | null): string {
+  if (filter === null) return 'No Notes in these days.'
+
+  const constraint = constraintOf(filter)
+  switch (constraint.kind) {
+    case 'any':
+      return 'No Notes in these days.'
+    case 'unfiled':
+      return 'No Unfiled Notes in these days.'
+    case 'named':
+      return `No Notes under #${constraint.name} in these days.`
+  }
 }
 
 /**
@@ -533,6 +569,51 @@ function Preset({ onChoose }: { onChoose: (preset: FilterPreset) => void }) {
         {PRESET_OPTIONS.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
+/**
+ * The Filter's other axis: every Project, none of them, or one. Sticky, unlike
+ * a Preset — it is the narrow the reader is reading under, so it stays until
+ * they say otherwise and no Note arriving can move it.
+ *
+ * The Project on screen is offered even when the list does not hold it, which
+ * happens the moment its last Note is deleted or refiled: a picker that
+ * silently stopped showing what it is narrowed to would be lying about the
+ * empty list underneath it.
+ */
+function ProjectConstraintField({
+  constraint,
+  projects,
+  onNarrow,
+}: {
+  constraint: ProjectConstraint
+  projects: string[]
+  onNarrow: (constraint: ProjectConstraint) => void
+}) {
+  const chosen = projectChoice(constraint)
+  const named =
+    constraint.kind === 'named' && !projects.includes(constraint.name)
+      ? [constraint.name, ...projects]
+      : projects
+
+  return (
+    <label className="flex shrink-0 items-center gap-1.5">
+      <span className="sr-only">Project</span>
+      <select
+        value={chosen}
+        onChange={(event) => onNarrow(projectConstraintFor(event.target.value))}
+        className="max-w-32 rounded-md border border-border bg-transparent px-1.5 py-0.5 text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+      >
+        <option value="any">Any Project</option>
+        <option value="unfiled">Unfiled</option>
+        {named.map((name) => (
+          <option key={name} value={`#${name}`}>
+            #{name}
           </option>
         ))}
       </select>

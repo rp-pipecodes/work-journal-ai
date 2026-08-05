@@ -16,14 +16,17 @@
  */
 
 import {
+  ANY_PROJECT,
   decideArrival,
   describeCopiedDigest,
   groupByJournalDay,
+  type DayRange,
   type Digest,
   type Filter,
   type Journal,
   type JournalDayGroup,
   type Note,
+  type ProjectConstraint,
 } from './journal'
 
 /**
@@ -54,8 +57,18 @@ export const SEARCH_MIN_TERM_LENGTH = 2
 
 /** Everything a history window renders, and the only thing it renders. */
 export interface HistorySnapshot {
-  /** Null until the first read lands, and whenever there are no Notes at all. */
+  /**
+   * Both axes of what is being viewed. Null until the first read lands, and
+   * whenever there are no Notes at all — the Project constraint outlives it
+   * either way, so narrowing an empty journal still holds.
+   */
   filter: Filter | null
+  /**
+   * Every Project currently on a Note, for the constraint picker to offer.
+   * Journal-wide rather than Filter-wide: a picker that only listed what is
+   * already in view would be a picker that cannot be used to leave it.
+   */
+  projects: string[]
   history: HistoryState
   /** What the reader has typed into the search field, and what it shows. */
   term: string
@@ -85,6 +98,7 @@ export interface HistorySnapshot {
 /** Where every session starts: nothing asked yet, so nothing to show. */
 export const openingSnapshot: HistorySnapshot = {
   filter: null,
+  projects: [],
   history: { state: 'loading' },
   term: '',
   searching: false,
@@ -99,11 +113,19 @@ export interface HistorySession {
   /** The first read: the most recent Occupied Day, or nothing to open on. */
   open(): Promise<void>
   /**
-   * Every move of the Filter, and one of the two ways a Nudge is cleared. Also
-   * how a Search ends: answering a result and answering a Nudge are both this,
-   * so both inherit everything a move already does.
+   * Every move of the Filter's day axis, and one of the two ways a Nudge is
+   * cleared. Also how a Search ends: answering a result and answering a Nudge
+   * are both this, so both inherit everything a move already does. The Project
+   * constraint is not a day and is left exactly as the reader set it.
    */
-  moveTo(filter: Filter): Promise<void>
+  moveTo(range: DayRange): Promise<void>
+  /**
+   * The other axis, on its own: the same days, narrowed to one Project, to
+   * Unfiled, or to nothing at all. Sticks for the session — nothing but the
+   * reader ever changes it — and takes the screen back to the Filter, since
+   * that is what it is about.
+   */
+  narrowTo(project: ProjectConstraint): Promise<void>
   /**
    * The term as it now reads, after every keystroke. Nothing is asked of the
    * journal until it has stood still for `SEARCH_DEBOUNCE_MS` and is at least
@@ -146,6 +168,9 @@ export function createHistorySession({
   // Reads can overlap — a Nudge acted on while a range change is still in
   // flight — and only the newest one may reach the view.
   let latestRead = 0
+  // The Project axis, held for the session. History opens on Any, and only the
+  // reader ever moves it — a Preset, a Search or an arrival moves days.
+  let project: ProjectConstraint = ANY_PROJECT
   // The Filter as Markdown, kept ready for a copy. Read from the core with the
   // list, so what gets copied is never the list on screen.
   let digest: Digest | null = null
@@ -169,14 +194,19 @@ export function createHistorySession({
     try {
       const core = await journal
       // The list and the Digest are the same Notes in opposite orders, and both
-      // are asked of the core.
-      const [notes, rendered] = await Promise.all([
+      // are asked of the core; the Projects on offer come with them, so the
+      // picker names a stream the moment its first Note exists.
+      const [notes, rendered, projects] = await Promise.all([
         core.notesForFilter(filter),
         core.digest(filter),
+        core.projectsInUse(),
       ])
       if (latestRead !== ticket) return
       digest = rendered
-      show({ history: { state: 'notes', days: groupByJournalDay(notes) } })
+      show({
+        projects,
+        history: { state: 'notes', days: groupByJournalDay(notes) },
+      })
     } catch (error) {
       giveUp(error, ticket)
     }
@@ -190,7 +220,7 @@ export function createHistorySession({
       const core = await journal
       // The Filter opens on the most recent Occupied Day, whenever that was;
       // with no Notes at all there is no day to open on.
-      opening = await core.defaultFilter()
+      opening = await core.defaultRange()
       if (latestRead !== ticket) return
     } catch (error) {
       giveUp(error, ticket)
@@ -204,11 +234,12 @@ export function createHistorySession({
     await moveTo(opening)
   }
 
-  async function moveTo(filter: Filter): Promise<void> {
+  async function moveTo(range: DayRange): Promise<void> {
     // Answering a result or a Nudge ends the Search: the day it named is what
     // the reader asked to see. The term stays in the field, so asking again
     // costs no retyping.
     abandonWaitingTerm()
+    const filter: Filter = { ...range, project }
     show({
       filter,
       searching: false,
@@ -218,6 +249,25 @@ export function createHistorySession({
       confirmation: null,
       problem: null,
     })
+    await read(filter)
+  }
+
+  /**
+   * The Project axis moved, and only it. The days hold still, so a Nudge about
+   * one of them is still unanswered and stays up; the Search ends, because what
+   * this asks for is the Filter and a Search is not one.
+   */
+  async function narrowTo(constraint: ProjectConstraint): Promise<void> {
+    project = constraint
+    abandonWaitingTerm()
+
+    // No Filter yet — an empty journal — so there is no list to narrow. The
+    // constraint is held all the same, and the Filter that eventually opens
+    // is already narrowed by it.
+    if (snapshot.filter === null) return
+
+    const filter: Filter = { ...snapshot.filter, project }
+    show({ filter, searching: false, confirmation: null, problem: null })
     await read(filter)
   }
 
@@ -325,6 +375,7 @@ export function createHistorySession({
     snapshot: () => snapshot,
     open,
     moveTo,
+    narrowTo,
     search,
 
     async noteArrived(journalDay) {

@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  ANY_PROJECT,
   createJournal,
   applyPrediction,
   decideArrival,
   decideKeystroke,
   describeCopiedDigest,
-  filterForJournalDay,
-  filterForPreset,
-  filterForRange,
+  rangeForJournalDay,
+  rangeForPreset,
+  rangeForDays,
   formatJournalDay,
   formatProject,
   formatTimeOfDay,
@@ -15,7 +16,11 @@ import {
   groupByJournalDay,
   journalDayFor,
   markerPrefix,
+  projectChoice,
+  projectConstraintFor,
+  UNFILED,
   type Journal,
+  type ProjectConstraint,
 } from './journal'
 import { fixedClock, migrationSql, openTestDatabase } from './testing/database'
 
@@ -43,7 +48,7 @@ async function journalAt(instant: string) {
  * this is `notesForFilter` and nothing more: newest first, like the list.
  */
 function notesOn(journal: Journal, journalDay: string) {
-  return journal.notesForFilter(filterForJournalDay(journalDay))
+  return journal.notesForFilter(rangeForJournalDay(journalDay))
 }
 
 describe('journalDayFor', () => {
@@ -318,6 +323,38 @@ describe('projectPredictions', () => {
     await journal.delete(only!.id)
 
     expect(await journal.projectPredictions('')).toEqual(['work'])
+  })
+})
+
+describe('projectsInUse', () => {
+  it('is empty while every Note is Unfiled', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    await journal.capture('unfiled thought')
+
+    expect(await journal.projectsInUse()).toEqual([])
+  })
+
+  it('names each Project once, sorted, whatever day its Notes are on', async () => {
+    const { journal, clock } = await journalAt('2026-03-12T09:30:00')
+
+    await journal.capture('#work done')
+    await journal.capture('#habic shipped auth')
+    clock.set(local('2026-03-16T09:30:00'))
+    await journal.capture('#habic again')
+    await journal.capture('unfiled thought')
+
+    expect(await journal.projectsInUse()).toEqual(['habic', 'work'])
+  })
+
+  it('drops a Project once no Notes remain under it', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+
+    const only = await journal.capture('#habic shipped')
+    await journal.capture('#work done')
+    await journal.delete(only!.id)
+
+    expect(await journal.projectsInUse()).toEqual(['work'])
   })
 })
 
@@ -626,7 +663,7 @@ describe('delete', () => {
 
     await journal.delete(friday!.id)
 
-    expect(await journal.defaultFilter()).toEqual({
+    expect(await journal.defaultRange()).toEqual({
       from: '2026-03-11',
       to: '2026-03-11',
     })
@@ -702,7 +739,7 @@ describe('formatProject', () => {
   })
 })
 
-describe('defaultFilter', () => {
+describe('defaultRange', () => {
   it('opens on the most recent Occupied Day', async () => {
     const { journal, clock } = await journalAt('2026-03-11T09:00:00')
 
@@ -710,7 +747,7 @@ describe('defaultFilter', () => {
     clock.set(local('2026-03-13T09:00:00'))
     await journal.capture('friday')
 
-    expect(await journal.defaultFilter()).toEqual({
+    expect(await journal.defaultRange()).toEqual({
       from: '2026-03-13',
       to: '2026-03-13',
     })
@@ -723,7 +760,7 @@ describe('defaultFilter', () => {
     // The weekend is empty, and it is now Monday morning.
     clock.set(local('2026-03-16T09:00:00'))
 
-    expect(await journal.defaultFilter()).toEqual({
+    expect(await journal.defaultRange()).toEqual({
       from: '2026-03-13',
       to: '2026-03-13',
     })
@@ -735,7 +772,7 @@ describe('defaultFilter', () => {
     await journal.capture('last day before leave')
     clock.set(local('2026-03-16T09:00:00'))
 
-    expect(await journal.defaultFilter()).toEqual({
+    expect(await journal.defaultRange()).toEqual({
       from: '2026-02-27',
       to: '2026-02-27',
     })
@@ -744,7 +781,7 @@ describe('defaultFilter', () => {
   it('resolves to nothing on an empty database rather than an arbitrary date', async () => {
     const { journal } = await journalAt('2026-03-16T09:00:00')
 
-    expect(await journal.defaultFilter()).toBeNull()
+    expect(await journal.defaultRange()).toBeNull()
   })
 })
 
@@ -822,6 +859,85 @@ describe('notesForFilter', () => {
     })
 
     expect(notes.map((note) => note.body)).toEqual(['wednesday'])
+  })
+})
+
+describe('notesForFilter narrowed to a Project', () => {
+  /** A day with one Note under each of two Projects, and one Unfiled. */
+  async function mixedDay() {
+    const { journal, clock } = await journalAt('2026-03-13T09:00:00')
+    await journal.capture('#api rate limits')
+    clock.set(local('2026-03-13T10:00:00'))
+    await journal.capture('#billing invoices')
+    clock.set(local('2026-03-13T11:00:00'))
+    await journal.capture('read the postmortem')
+    return { journal, clock }
+  }
+
+  const friday = { from: '2026-03-13', to: '2026-03-13' }
+
+  it('shows every Note whatever its Project when the constraint is Any', async () => {
+    const { journal } = await mixedDay()
+
+    for (const filter of [friday, { ...friday, project: ANY_PROJECT }]) {
+      expect(
+        (await journal.notesForFilter(filter)).map((note) => note.body),
+      ).toEqual(['read the postmortem', 'invoices', 'rate limits'])
+    }
+  })
+
+  it('shows only the named Project', async () => {
+    const { journal } = await mixedDay()
+
+    const notes = await journal.notesForFilter({
+      ...friday,
+      project: { kind: 'named', name: 'api' },
+    })
+
+    expect(notes.map((note) => note.body)).toEqual(['rate limits'])
+  })
+
+  it('names a Project case-insensitively, as identity is', async () => {
+    const { journal } = await mixedDay()
+
+    const notes = await journal.notesForFilter({
+      ...friday,
+      project: { kind: 'named', name: 'API' },
+    })
+
+    expect(notes.map((note) => note.body)).toEqual(['rate limits'])
+  })
+
+  it('shows only Notes with no Project at all under Unfiled', async () => {
+    const { journal } = await mixedDay()
+
+    const notes = await journal.notesForFilter({ ...friday, project: UNFILED })
+
+    expect(notes.map((note) => note.body)).toEqual(['read the postmortem'])
+  })
+
+  it('needs both axes: a Project outside the day range is not in the Filter', async () => {
+    const { journal, clock } = await mixedDay()
+    clock.set(local('2026-03-16T09:00:00'))
+    await journal.capture('#api the retry storm')
+
+    const notes = await journal.notesForFilter({
+      ...friday,
+      project: { kind: 'named', name: 'api' },
+    })
+
+    expect(notes.map((note) => note.body)).toEqual(['rate limits'])
+  })
+
+  it('is empty rather than unnarrowed when the Project has nothing in range', async () => {
+    const { journal } = await mixedDay()
+
+    expect(
+      await journal.notesForFilter({
+        ...friday,
+        project: { kind: 'named', name: 'infra' },
+      }),
+    ).toEqual([])
   })
 })
 
@@ -1012,6 +1128,72 @@ describe('digest', () => {
   })
 })
 
+describe('digest of a Filter narrowed by Project', () => {
+  async function mixedDay() {
+    const { journal, clock } = await journalAt('2026-03-13T09:00:00')
+    await journal.capture('#api rate limits')
+    clock.set(local('2026-03-13T10:00:00'))
+    await journal.capture('read the postmortem')
+    clock.set(local('2026-03-13T11:00:00'))
+    await journal.capture('#api the retry storm')
+    return journal
+  }
+
+  const friday = { from: '2026-03-13', to: '2026-03-13' }
+
+  it('is Body only under a single named Project, which every bullet shares', async () => {
+    const journal = await mixedDay()
+
+    const digest = await journal.digest({
+      ...friday,
+      project: { kind: 'named', name: 'api' },
+    })
+
+    expect(digest.markdown).toBe('- rate limits\n- the retry storm')
+  })
+
+  it('prefixes a filed Note with its Project under Any, and leaves Unfiled bare', async () => {
+    const journal = await mixedDay()
+
+    const digest = await journal.digest(friday)
+
+    expect(digest.markdown).toBe(
+      [
+        '- #api rate limits',
+        '- read the postmortem',
+        '- #api the retry storm',
+      ].join('\n'),
+    )
+  })
+
+  it('renders Unfiled Notes with no prefix under Unfiled', async () => {
+    const journal = await mixedDay()
+
+    const digest = await journal.digest({ ...friday, project: UNFILED })
+
+    expect(digest.markdown).toBe('- read the postmortem')
+  })
+
+  it('keeps the prefix under the day headings of a wider Filter', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+    await journal.capture('#api rate limits')
+    clock.set(local('2026-03-13T09:00:00'))
+    await journal.capture('read the postmortem')
+
+    const digest = await journal.digest({ from: '2026-03-11', to: '2026-03-13' })
+
+    expect(digest.markdown).toBe(
+      [
+        '## Wed 11 Mar',
+        '- #api rate limits',
+        '',
+        '## Fri 13 Mar',
+        '- read the postmortem',
+      ].join('\n'),
+    )
+  })
+})
+
 describe('exportAll', () => {
   it('includes every Note in the database exactly once', async () => {
     const { journal, clock } = await journalAt('2026-03-11T09:00:00')
@@ -1086,6 +1268,63 @@ describe('exportAll', () => {
   })
 })
 
+describe('exportAll and Projects', () => {
+  it('writes a Project on the bullet, and groups by day rather than by Project', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+    await journal.capture('#api rate limits')
+    clock.set(local('2026-03-11T15:00:00'))
+    await journal.capture('read the postmortem')
+    clock.set(local('2026-03-13T09:00:00'))
+    await journal.capture('#billing invoices')
+
+    const exported = await journal.exportAll()
+
+    expect(exported.markdown).toBe(
+      [
+        '## Wed 11 Mar',
+        '- #api rate limits',
+        '- read the postmortem',
+        '',
+        '## Fri 13 Mar',
+        '- #billing invoices',
+      ].join('\n'),
+    )
+  })
+})
+
+describe('projectChoice and projectConstraintFor', () => {
+  it('round-trips each constraint through the value of a picker', () => {
+    const constraints: ProjectConstraint[] = [
+      ANY_PROJECT,
+      UNFILED,
+      { kind: 'named', name: 'api' },
+    ]
+
+    for (const constraint of constraints) {
+      expect(projectConstraintFor(projectChoice(constraint))).toEqual(constraint)
+    }
+  })
+
+  it('keeps a Project named after one of the constants distinct from it', () => {
+    expect(projectChoice({ kind: 'named', name: 'unfiled' })).toBe('#unfiled')
+    expect(projectConstraintFor('#unfiled')).toEqual({
+      kind: 'named',
+      name: 'unfiled',
+    })
+    expect(projectConstraintFor('#any')).toEqual({ kind: 'named', name: 'any' })
+  })
+
+  it('reads a named choice as the Project it identifies', () => {
+    expect(projectConstraintFor('#API')).toEqual({ kind: 'named', name: 'api' })
+  })
+
+  it('refuses a choice that names nothing a Project could be called', () => {
+    expect(() => projectConstraintFor('#not a project')).toThrow(
+      'Not a Project',
+    )
+  })
+})
+
 describe('exportFileName', () => {
   it('names the file after the journal and the day it was taken', () => {
     expect(exportFileName(local('2026-03-09T21:15:00'))).toBe(
@@ -1130,72 +1369,72 @@ describe('describeCopiedDigest', () => {
   })
 })
 
-describe('filterForRange', () => {
+describe('rangeForDays', () => {
   it('reads a range oldest-end first', () => {
-    expect(filterForRange('2026-03-09', '2026-03-13')).toEqual({
+    expect(rangeForDays('2026-03-09', '2026-03-13')).toEqual({
       from: '2026-03-09',
       to: '2026-03-13',
     })
   })
 
   it('orders the ends whichever way round they were picked', () => {
-    expect(filterForRange('2026-03-13', '2026-03-09')).toEqual({
+    expect(rangeForDays('2026-03-13', '2026-03-09')).toEqual({
       from: '2026-03-09',
       to: '2026-03-13',
     })
   })
 
   it('makes a single day out of two equal ends', () => {
-    expect(filterForRange('2026-03-13', '2026-03-13')).toEqual({
+    expect(rangeForDays('2026-03-13', '2026-03-13')).toEqual({
       from: '2026-03-13',
       to: '2026-03-13',
     })
   })
 })
 
-describe('filterForJournalDay', () => {
+describe('rangeForJournalDay', () => {
   it('reads one day as a range whose ends are equal', () => {
-    expect(filterForJournalDay('2026-03-13')).toEqual({
+    expect(rangeForJournalDay('2026-03-13')).toEqual({
       from: '2026-03-13',
       to: '2026-03-13',
     })
   })
 })
 
-describe('filterForPreset', () => {
+describe('rangeForPreset', () => {
   // Anchors are civil calendar days. 2026-08-05 is a Wednesday.
   const wednesday = '2026-08-05'
 
   it('today is the day itself', () => {
-    expect(filterForPreset('today', wednesday)).toEqual({
+    expect(rangeForPreset('today', wednesday)).toEqual({
       from: '2026-08-05',
       to: '2026-08-05',
     })
   })
 
   it('yesterday is the calendar day before today', () => {
-    expect(filterForPreset('yesterday', wednesday)).toEqual({
+    expect(rangeForPreset('yesterday', wednesday)).toEqual({
       from: '2026-08-04',
       to: '2026-08-04',
     })
   })
 
   it('yesterday crosses a month boundary', () => {
-    expect(filterForPreset('yesterday', '2026-08-01')).toEqual({
+    expect(rangeForPreset('yesterday', '2026-08-01')).toEqual({
       from: '2026-07-31',
       to: '2026-07-31',
     })
   })
 
   it('this week runs Monday through today', () => {
-    expect(filterForPreset('this-week', wednesday)).toEqual({
+    expect(rangeForPreset('this-week', wednesday)).toEqual({
       from: '2026-08-03',
       to: '2026-08-05',
     })
   })
 
   it('this week on a Monday is just today', () => {
-    expect(filterForPreset('this-week', '2026-08-03')).toEqual({
+    expect(rangeForPreset('this-week', '2026-08-03')).toEqual({
       from: '2026-08-03',
       to: '2026-08-03',
     })
@@ -1203,63 +1442,63 @@ describe('filterForPreset', () => {
 
   it('this week on a Sunday still starts the prior Monday', () => {
     // 2026-08-09 is a Sunday; the week began 2026-08-03.
-    expect(filterForPreset('this-week', '2026-08-09')).toEqual({
+    expect(rangeForPreset('this-week', '2026-08-09')).toEqual({
       from: '2026-08-03',
       to: '2026-08-09',
     })
   })
 
   it('last week is the full prior Monday–Sunday', () => {
-    expect(filterForPreset('last-week', wednesday)).toEqual({
+    expect(rangeForPreset('last-week', wednesday)).toEqual({
       from: '2026-07-27',
       to: '2026-08-02',
     })
   })
 
   it('last week from a Monday is the week that just ended', () => {
-    expect(filterForPreset('last-week', '2026-08-03')).toEqual({
+    expect(rangeForPreset('last-week', '2026-08-03')).toEqual({
       from: '2026-07-27',
       to: '2026-08-02',
     })
   })
 
   it('this month runs the first of the month through today', () => {
-    expect(filterForPreset('this-month', wednesday)).toEqual({
+    expect(rangeForPreset('this-month', wednesday)).toEqual({
       from: '2026-08-01',
       to: '2026-08-05',
     })
   })
 
   it('this month on the first is just today', () => {
-    expect(filterForPreset('this-month', '2026-08-01')).toEqual({
+    expect(rangeForPreset('this-month', '2026-08-01')).toEqual({
       from: '2026-08-01',
       to: '2026-08-01',
     })
   })
 
   it('last month is the full prior calendar month', () => {
-    expect(filterForPreset('last-month', wednesday)).toEqual({
+    expect(rangeForPreset('last-month', wednesday)).toEqual({
       from: '2026-07-01',
       to: '2026-07-31',
     })
   })
 
   it('last month from January is the prior December', () => {
-    expect(filterForPreset('last-month', '2026-01-15')).toEqual({
+    expect(rangeForPreset('last-month', '2026-01-15')).toEqual({
       from: '2025-12-01',
       to: '2025-12-31',
     })
   })
 
   it('last month handles February in a non-leap year', () => {
-    expect(filterForPreset('last-month', '2026-03-10')).toEqual({
+    expect(rangeForPreset('last-month', '2026-03-10')).toEqual({
       from: '2026-02-01',
       to: '2026-02-28',
     })
   })
 
   it('last month handles February in a leap year', () => {
-    expect(filterForPreset('last-month', '2024-03-10')).toEqual({
+    expect(rangeForPreset('last-month', '2024-03-10')).toEqual({
       from: '2024-02-01',
       to: '2024-02-29',
     })

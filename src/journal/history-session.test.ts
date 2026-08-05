@@ -5,9 +5,12 @@ import {
   type HistorySnapshot,
 } from './history-session'
 import {
+  ANY_PROJECT,
   createJournal,
-  filterForJournalDay,
-  filterForRange,
+  rangeForDays,
+  rangeForJournalDay,
+  UNFILED,
+  type Filter,
   type Journal,
   type Note,
 } from './journal'
@@ -15,6 +18,11 @@ import { fixedClock, openTestDatabase } from './testing/database'
 
 // Every test drives a session over a real database through its verbs and
 // asserts on the snapshot a view would render. Nothing here renders anything.
+
+/** One day in view under no Project constraint: where History opens. */
+function anyProjectOn(journalDay: string): Filter {
+  return { ...rangeForJournalDay(journalDay), project: ANY_PROJECT }
+}
 
 const openDatabases: Array<() => void> = []
 
@@ -34,7 +42,7 @@ describe('opening', () => {
 
     await session.open()
 
-    expect(session.snapshot().filter).toEqual(filterForJournalDay('2026-03-13'))
+    expect(session.snapshot().filter).toEqual(anyProjectOn('2026-03-13'))
     expect(bodiesOf(session.snapshot())).toEqual(['Friday'])
   })
 
@@ -52,7 +60,7 @@ describe('opening', () => {
     const { session } = await sessionOver([], {
       journal: (core) => ({
         ...core,
-        defaultFilter: () => Promise.reject(new Error('no database')),
+        defaultRange: () => Promise.reject(new Error('no database')),
       }),
     })
 
@@ -82,7 +90,7 @@ describe('moving the Filter', () => {
     ])
 
     await session.open()
-    await session.moveTo(filterForRange('2026-03-09', '2026-03-10'))
+    await session.moveTo(rangeForDays('2026-03-09', '2026-03-10'))
 
     expect(bodiesOf(session.snapshot())).toEqual(['Tuesday', 'Monday'])
   })
@@ -103,7 +111,7 @@ describe('moving the Filter', () => {
     )
 
     await session.open()
-    await session.moveTo(filterForJournalDay('2026-03-09'))
+    await session.moveTo(rangeForJournalDay('2026-03-09'))
 
     expect(session.snapshot().history).toEqual({ state: 'unreadable' })
   })
@@ -120,7 +128,7 @@ describe('moving the Filter', () => {
     expect(session.snapshot().nudgedDay).toBe('2026-03-16')
     expect(session.snapshot().confirmation).not.toBeNull()
 
-    await session.moveTo(filterForJournalDay('2026-03-16'))
+    await session.moveTo(rangeForJournalDay('2026-03-16'))
 
     expect(session.snapshot().nudgedDay).toBeNull()
     expect(session.snapshot().confirmation).toBeNull()
@@ -151,14 +159,185 @@ describe('moving the Filter', () => {
 
     // Monday is asked for first and answers last: the reader acted on a Nudge
     // back to Friday while it was still in flight.
-    const stale = session.moveTo(filterForJournalDay('2026-03-09'))
-    const fresh = session.moveTo(filterForJournalDay('2026-03-13'))
+    const stale = session.moveTo(rangeForJournalDay('2026-03-09'))
+    const fresh = session.moveTo(rangeForJournalDay('2026-03-13'))
     slow.release('2026-03-13')
     await fresh
     slow.release('2026-03-09')
     await stale
 
     expect(bodiesOf(session.snapshot())).toEqual(['Friday'])
+  })
+})
+
+describe('narrowing the Filter by Project', () => {
+  /** One Friday under two Projects, plus something Unfiled. */
+  function friday() {
+    return sessionOver([
+      { at: '2026-03-13T10:00:00', body: '#api rate limits' },
+      { at: '2026-03-13T11:00:00', body: 'read the postmortem' },
+      { at: '2026-03-13T12:00:00', body: '#billing invoices' },
+    ])
+  }
+
+  it('opens on Any, showing the day exactly as it did before', async () => {
+    const { session } = await friday()
+
+    await session.open()
+
+    expect(session.snapshot().filter?.project).toEqual(ANY_PROJECT)
+    expect(bodiesOf(session.snapshot())).toEqual([
+      'invoices',
+      'read the postmortem',
+      'rate limits',
+    ])
+  })
+
+  it('offers every Project on a Note, whatever the Filter shows', async () => {
+    const { session } = await friday()
+
+    await session.open()
+
+    expect(session.snapshot().projects).toEqual(['api', 'billing'])
+  })
+
+  it('shows one Project without moving the days', async () => {
+    const { session } = await friday()
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'api' })
+
+    expect(bodiesOf(session.snapshot())).toEqual(['rate limits'])
+    expect(session.snapshot().filter).toEqual({
+      from: '2026-03-13',
+      to: '2026-03-13',
+      project: { kind: 'named', name: 'api' },
+    })
+  })
+
+  it('shows only Unfiled Notes under Unfiled', async () => {
+    const { session } = await friday()
+
+    await session.open()
+    await session.narrowTo(UNFILED)
+
+    expect(bodiesOf(session.snapshot())).toEqual(['read the postmortem'])
+  })
+
+  it('shows an empty day rather than falling back to Any', async () => {
+    const { session } = await friday()
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'infra' })
+
+    expect(bodiesOf(session.snapshot())).toEqual([])
+  })
+
+  it('copies the Digest of the narrowed Filter, Bodies only', async () => {
+    const { session, clipboard } = await friday()
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'api' })
+    session.copy()
+    await settle()
+
+    expect(clipboard.written).toEqual(['- rate limits'])
+    expect(session.snapshot().confirmation).toBe('Copied 1 Note.')
+  })
+
+  it('holds the constraint while the day axis moves', async () => {
+    const { session } = await sessionOver([
+      { at: '2026-03-09T10:00:00', body: '#api the retry storm' },
+      { at: '2026-03-09T11:00:00', body: 'Monday, unfiled' },
+      { at: '2026-03-13T10:00:00', body: '#api rate limits' },
+    ])
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'api' })
+    await session.moveTo(rangeForDays('2026-03-09', '2026-03-13'))
+
+    expect(session.snapshot().filter?.project).toEqual({
+      kind: 'named',
+      name: 'api',
+    })
+    expect(bodiesOf(session.snapshot())).toEqual([
+      'rate limits',
+      'the retry storm',
+    ])
+  })
+
+  it('holds the constraint while a Note arrives', async () => {
+    const { session, capture } = await friday()
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'api' })
+    await capture('2026-03-13T13:00:00', '#billing another invoice')
+    await session.noteArrived('2026-03-13')
+
+    expect(session.snapshot().filter?.project).toEqual({
+      kind: 'named',
+      name: 'api',
+    })
+    expect(bodiesOf(session.snapshot())).toEqual(['rate limits'])
+  })
+
+  it('does not nudge for a Note the constraint excludes but the days hold', async () => {
+    const { session, capture } = await friday()
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'api' })
+    await capture('2026-03-13T13:00:00', '#billing another invoice')
+    await session.noteArrived('2026-03-13')
+
+    expect(session.snapshot().nudgedDay).toBeNull()
+  })
+
+  it('still nudges for a Note outside the day range, Project or not', async () => {
+    const { session, capture } = await friday()
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'api' })
+    await capture('2026-03-16T10:00:00', '#api Monday')
+    await session.noteArrived('2026-03-16')
+
+    expect(session.snapshot().nudgedDay).toBe('2026-03-16')
+  })
+
+  it('searches the whole journal regardless of the constraint, and keeps it', async () => {
+    const { session } = await friday()
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'api' })
+    await session.search('invoices')
+
+    // A Search is Body-only over every Note: the narrow is not a filter on it.
+    expect(resultsOf(session.snapshot())).toEqual(['invoices'])
+    expect(session.snapshot().filter?.project).toEqual({
+      kind: 'named',
+      name: 'api',
+    })
+  })
+
+  it('gives the narrowed list back when a Search ends', async () => {
+    const { session } = await friday()
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'api' })
+    await session.search('invoices')
+    await session.search('')
+
+    expect(bodiesOf(session.snapshot())).toEqual(['rate limits'])
+  })
+
+  it('narrows a Search off the screen, back to the Filter', async () => {
+    const { session } = await friday()
+
+    await session.open()
+    await session.search('invoices')
+    await session.narrowTo({ kind: 'named', name: 'api' })
+
+    expect(session.snapshot().searching).toBe(false)
+    expect(bodiesOf(session.snapshot())).toEqual(['rate limits'])
   })
 })
 
@@ -185,7 +364,7 @@ describe('a Note arriving while History is open', () => {
     await capture('2026-03-16T10:00:00', 'Monday')
     await session.noteArrived('2026-03-16')
 
-    expect(session.snapshot().filter).toEqual(filterForJournalDay('2026-03-13'))
+    expect(session.snapshot().filter).toEqual(anyProjectOn('2026-03-13'))
     expect(bodiesOf(session.snapshot())).toEqual(['Friday'])
     expect(session.snapshot().nudgedDay).toBe('2026-03-16')
   })
@@ -199,7 +378,7 @@ describe('a Note arriving while History is open', () => {
     await capture('2026-03-13T10:00:00', 'The first one')
     await session.noteArrived('2026-03-13')
 
-    expect(session.snapshot().filter).toEqual(filterForJournalDay('2026-03-13'))
+    expect(session.snapshot().filter).toEqual(anyProjectOn('2026-03-13'))
     expect(bodiesOf(session.snapshot())).toEqual(['The first one'])
   })
 
@@ -320,7 +499,7 @@ describe('correcting a Note', () => {
 
     await session.open()
     await session.delete('no-such-note')
-    await session.moveTo(filterForJournalDay('2026-03-09'))
+    await session.moveTo(rangeForJournalDay('2026-03-09'))
 
     expect(session.snapshot().problem).toBeNull()
   })
@@ -342,7 +521,7 @@ describe('searching the journal', () => {
       'planned the migration',
     ])
     // The Filter is where it was: a Search is a way in, not a narrowing.
-    expect(session.snapshot().filter).toEqual(filterForJournalDay('2026-03-13'))
+    expect(session.snapshot().filter).toEqual(anyProjectOn('2026-03-13'))
   })
 
   it('asks nothing of the journal for a term of one character', async () => {
@@ -473,9 +652,9 @@ describe('searching the journal', () => {
 
     await session.open()
     await session.search('migration')
-    await session.moveTo(filterForJournalDay('2026-03-09'))
+    await session.moveTo(rangeForJournalDay('2026-03-09'))
 
-    expect(session.snapshot().filter).toEqual(filterForJournalDay('2026-03-09'))
+    expect(session.snapshot().filter).toEqual(anyProjectOn('2026-03-09'))
     expect(bodiesOf(session.snapshot())).toEqual([
       'and the rest of Monday',
       'planned the migration',
@@ -509,7 +688,7 @@ describe('searching the journal', () => {
     await session.search('migration')
     await capture('2026-03-16T10:00:00', 'Monday')
     await session.noteArrived('2026-03-16')
-    await session.moveTo(filterForJournalDay('2026-03-16'))
+    await session.moveTo(rangeForJournalDay('2026-03-16'))
 
     expect(bodiesOf(session.snapshot())).toEqual(['Monday'])
     expect(session.snapshot().nudgedDay).toBeNull()
@@ -565,7 +744,7 @@ describe('copying the Digest', () => {
     ])
 
     await session.open()
-    await session.moveTo(filterForJournalDay('2026-03-09'))
+    await session.moveTo(rangeForJournalDay('2026-03-09'))
     session.copy()
     await settle()
 

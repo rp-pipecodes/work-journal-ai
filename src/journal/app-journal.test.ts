@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { fakeDesktop } from '../platform/testing/desktop'
 import { createAppJournal } from './app-journal'
-import { filterForJournalDay } from './journal'
+import { rangeForJournalDay } from './journal'
 import { fixedClock, openTestDatabase } from './testing/database'
 
 // The wiring the running app uses, driven over a real database: the core and
@@ -23,7 +23,7 @@ describe('the app journal', () => {
 
     expect(note?.body).toBe('Shipped the thing')
     expect(
-      await journal.notesForFilter(filterForJournalDay(note!.journalDay)),
+      await journal.notesForFilter(rangeForJournalDay(note!.journalDay)),
     ).toHaveLength(1)
   })
 
