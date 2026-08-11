@@ -2,7 +2,12 @@ import type { SqlDriver } from '../../journal/journal'
 import type { HotkeyStatus } from '../../settings/hotkey'
 import type { SettingsStore } from '../../settings/settings'
 import type { Theme } from '../../settings/theme'
-import type { Desktop, ExportedFile, Unlisten } from '../desktop'
+import type {
+  AppIdentity,
+  Desktop,
+  ExportedFile,
+  Unlisten,
+} from '../desktop'
 
 /**
  * The desktop a test runs on: the same surface, in memory. Announcements are
@@ -22,12 +27,14 @@ export function fakeDesktop({
   driver,
   stored = {},
   hotkey = { state: 'registered', hotkey: 'Cmd+Shift+J' },
+  appIdentity = { version: 'test', isDevelopment: true },
   openSettingsStore,
 }: {
   /** Only the tests that reach the journal need one. */
   driver?: SqlDriver
   stored?: Record<string, unknown>
   hotkey?: HotkeyStatus
+  appIdentity?: AppIdentity
   /** Overridden by the tests about a settings file that cannot be read. */
   openSettingsStore?: () => Promise<SettingsStore>
 } = {}): FakeDesktop {
@@ -40,6 +47,7 @@ export function fakeDesktop({
     exported: [],
 
     windowLabel: () => 'history',
+    appIdentity: async () => appIdentity,
     closeWindow: async () => {},
     onWindowBlurred: async () => () => {},
     onCloseRequested: async () => () => {},

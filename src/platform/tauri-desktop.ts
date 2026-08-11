@@ -1,9 +1,12 @@
+/// <reference types="vite/client" />
+
 /**
  * The desktop as Tauri provides it. This is the only file in the app that
  * imports `@tauri-apps/*`: everything else is handed a `Desktop` and cannot
  * tell what is underneath it.
  */
 
+import { getVersion } from '@tauri-apps/api/app'
 import { invoke } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
 import { LogicalSize } from '@tauri-apps/api/dpi'
@@ -34,6 +37,14 @@ export function createTauriDesktop(): Desktop {
         return getCurrentWindow().label
       } catch {
         return ''
+      }
+    },
+
+    async appIdentity() {
+      return {
+        version: await getVersion(),
+        // `tauri dev` serves Vite's dev bundle; `tauri build` uses production.
+        isDevelopment: import.meta.env.DEV,
       }
     },
 

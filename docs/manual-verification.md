@@ -128,6 +128,8 @@ The palette is the point of this section, and the moment to watch is the one the
 - [ ] Closing the window without answering counts as **Not now** — the app is not added to the login items, and the question is not asked again either.
 - [ ] Answering **Start at login** adds it, and the app launches after a log out and back in.
 - [ ] The checkbox afterwards adds and removes the login item, and matches what System Settings shows when Settings is re-opened.
+- [ ] Settings shows the exact configured Tauri application version centered at the bottom.
+- [ ] A development build shows a **Dev** label beside that version; a release build shows the version without it.
 
 ## Capture after midnight
 

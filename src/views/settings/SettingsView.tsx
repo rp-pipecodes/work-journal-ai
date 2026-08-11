@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useTheme } from '@/components/theme-context'
 import { exportFileName, type Journal } from '@/journal/journal'
-import type { Desktop } from '@/platform/desktop'
+import type { AppIdentity, Desktop } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
 import { describeTheme, isTheme, THEME_CHOICES } from '@/settings/theme'
 import {
@@ -45,6 +45,7 @@ export default function SettingsView({
   const [recording, setRecording] = useState(false)
   const [exported, setExported] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [appIdentity, setAppIdentity] = useState<AppIdentity | null>(null)
   // The first-run question, asked once and never again — whichever way it is
   // answered. False until the store has been asked whether it was answered.
   const [asking, setAsking] = useState(false)
@@ -52,6 +53,12 @@ export default function SettingsView({
   // window can change the Theme too, and a second copy would drift from it.
   const { theme, resolved, setTheme } = useTheme()
   const page = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    void desktop.appIdentity().then(setAppIdentity, (error: unknown) => {
+      console.error('could not read the app identity', error)
+    })
+  }, [desktop])
 
   useEffect(() => {
     // A Dock-less app does not reliably hand focus to a new window, and Escape
@@ -255,6 +262,20 @@ export default function SettingsView({
           </span>
         </div>
       </Section>
+
+      {appIdentity !== null && (
+        <footer
+          aria-label="Application version"
+          className="mt-auto flex items-center justify-center gap-2 text-xs text-muted-foreground"
+        >
+          <span>{appIdentity.version}</span>
+          {appIdentity.isDevelopment && (
+            <span className="rounded-full border border-border px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide">
+              Dev
+            </span>
+          )}
+        </footer>
+      )}
 
       <FirstRunQuestion open={asking} onAnswer={answerStartAtLogin} />
     </div>

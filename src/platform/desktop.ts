@@ -79,9 +79,16 @@ export interface ExportedFile {
   fileName: string
 }
 
+export interface AppIdentity {
+  version: string
+  isDevelopment: boolean
+}
+
 export interface Desktop {
   /** Which window this bundle is running in; empty outside the desktop app. */
   windowLabel(): string
+  /** The configured app version and whether this bundle is a development build. */
+  appIdentity(): Promise<AppIdentity>
   /** Closes the window the caller is in. */
   closeWindow(): Promise<void>
   /** The window lost focus — for a Capture, a discard. */
