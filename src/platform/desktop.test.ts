@@ -3,8 +3,8 @@ import { fakeDesktop } from './testing/desktop'
 
 describe('Desktop app identity', () => {
   for (const [build, appIdentity] of [
-    ['release', { version: '0.4.0', isDevelopment: false }],
-    ['development', { version: '0.4.0', isDevelopment: true }],
+    ['release', { version: '0.4.1', isDevelopment: false }],
+    ['development', { version: '0.4.1', isDevelopment: true }],
   ] as const) {
     it(`exposes the configured version for a ${build} build`, async () => {
       const desktop = fakeDesktop({ appIdentity })
