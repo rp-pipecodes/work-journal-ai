@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -270,9 +271,7 @@ export default function SettingsView({
         >
           <span>{appIdentity.version}</span>
           {appIdentity.isDevelopment && (
-            <span className="rounded-full border border-border px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide">
-              Dev
-            </span>
+            <Badge variant="outline">Dev</Badge>
           )}
         </footer>
       )}
