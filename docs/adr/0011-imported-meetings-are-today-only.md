@@ -1,0 +1,3 @@
+# Imported meetings are today-only, never backfilled
+
+Import covers the current day and nothing else: meetings become Notes as they end, plus a catch-up on wake or launch for anything from *today* that was missed. Never yesterday, never a historical backfill — including the first time the feature is enabled. Rejected: an unbounded catch-up, which on a Monday would import all of the previous week and bury a journal whose whole value is a short honest record of what was actually done; and today-only with no wake catch-up, which loses a meeting forever whenever the lid closes before it ends, since nothing would ever look back for it.

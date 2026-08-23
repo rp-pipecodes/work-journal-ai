@@ -5,7 +5,7 @@ A personal, local-first log of short work notes captured throughout the day, so 
 ## Language
 
 **Note**:
-A single dated line of text the user wrote about their work. The unit of everything — there is no smaller or larger record. Always has a Body from the moment it exists. May be filed under one Project; may be Unfiled.
+A single dated line of text about the user's work. The unit of everything — there is no smaller or larger record. Always has a Body from the moment it exists. May be filed under one Project; may be Unfiled. Comes into existence one of exactly two ways: a Capture or an Import.
 _Avoid_: Entry, log, item, memo
 
 **Body**:
@@ -13,8 +13,19 @@ The text content of a Note: a single line, no line breaks. Editable forever. One
 _Avoid_: Content, text, transcript
 
 **Capture**:
-The act of creating a Note. Ends in either one committed Note or nothing at all — never in a partial or empty one. May begin with a Project Marker; the marker is consumed at the boundary and never becomes part of the Body.
+The act of writing a Note by hand. Ends in either one committed Note or nothing at all — never in a partial or empty one. May begin with a Project Marker; the marker is consumed at the boundary and never becomes part of the Body.
 _Avoid_: Entry, input, quick add
+
+**Captured Note**:
+A Note the user typed. What the journal is for, and the only kind that counts as having journalled — a day of Imported Notes and no Captured Notes is a day nothing was said about.
+
+**Import**:
+The act of turning a meeting on the user's calendar into a Note, without being asked. The second and only other origin of a Note. Unlike a Capture it has no author present, so what it produces is always distinguishable from what was typed.
+_Avoid_: Sync, ingest, intake
+
+**Imported Note**:
+A Note made by an Import. Its Body is the calendar event's title, verbatim, and its Captured At is when the meeting began. Always Unfiled — the calendars it comes from carry no Project meaning, so there is nothing to file it under. Ordinary in every other respect — editable, refilable and deletable like any Note. Declined and all-day events never become one.
+_Avoid_: Meeting note, event, calendar entry
 
 **Draft**:
 Nothing. Text typed during a Capture but not committed does not exist — abandoning a Capture discards it, and the next Capture starts empty.
@@ -52,10 +63,10 @@ _Avoid_: Menu bar, status item
 ## Time
 
 **Captured At**:
-The instant a Note came into existence. Never changes, never editable — provenance, not filing.
+The instant the Note is about — when a Captured Note was typed, or when an Imported Note's meeting began. Never changes, never editable — provenance, not filing. Not the instant the Note was stored, which for an Import can be hours later and would sort a whole day wrongly.
 
 **Journal Day**:
-The single day a Note is filed under. Decided when the Note is captured as the local calendar day of Captured At, and thereafter the user's to change. Not recomputed from Captured At, so it never shifts under a timezone change.
+The single day a Note is filed under. Decided when the Note comes into existence as the local calendar day of Captured At, and thereafter the user's to change. Not recomputed from Captured At, so it never shifts under a timezone change.
 _Avoid_: Date, day, created date
 
 **Edited At**:
@@ -91,7 +102,7 @@ Every Note in the journal written to a Markdown file, each appearing exactly onc
 _Avoid_: Backup, dump, save as
 
 **Deletion**:
-Permanent removal of a Note. There is no trash, no archive, and no recovery — a deleted Note is gone.
+Permanent removal of a Note. There is no trash, no archive, and no recovery — a deleted Note is gone. Deleting an Imported Note also refuses its meeting: that meeting is never imported again.
 
 ## Settings
 
