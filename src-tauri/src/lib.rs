@@ -18,6 +18,7 @@ use tauri_plugin_store::StoreExt;
 const TRAY_ICON: &[u8] = include_bytes!("../icons/tray-icon.png");
 
 const NEW_NOTE_MENU_ITEM: &str = "new-note";
+
 const VIEW_NOTES_MENU_ITEM: &str = "view-notes";
 const SETTINGS_MENU_ITEM: &str = "settings";
 const QUIT_MENU_ITEM: &str = "quit";
@@ -52,6 +53,10 @@ const CAPTURE_SHOWN_EVENT: &str = "capture://shown";
 /// Relative, so plugin-sql resolves it inside the app's data directory and the
 /// journal survives a restart of the app and of the machine.
 const DATABASE_URL: &str = "sqlite:work-journal.db";
+
+/// The New Note item of the Tray Menu, held so that remapping the Hotkey can
+/// update the combination shown beside it.
+struct NewNoteMenuItem(MenuItem<tauri::Wry>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -384,6 +389,15 @@ fn register_hotkey(app: &tauri::AppHandle) {
     app.manage(Mutex::new(status));
 }
 
+/// The Hotkey as the Tray Menu should show it: the combination if it is
+/// registered, and nothing at all if it is not.
+fn live_hotkey(app: &tauri::AppHandle) -> Option<String> {
+    match &*app.state::<Mutex<HotkeyStatus>>().lock().ok()? {
+        HotkeyStatus::Registered { hotkey } => Some(hotkey.clone()),
+        HotkeyStatus::Unavailable { .. } => None,
+    }
+}
+
 /// The Hotkey remembered from a previous run, or the one the app ships with.
 fn stored_hotkey(app: &tauri::AppHandle) -> String {
     app.store(SETTINGS_FILE)
@@ -419,6 +433,15 @@ fn set_hotkey(
     store.save().map_err(|error| error.to_string())?;
 
     *current = next.clone();
+    // The Tray Menu shows the Hotkey; a remap that left it showing the old
+    // combination would be worse than showing none.
+    if let Err(error) = app
+        .state::<NewNoteMenuItem>()
+        .0
+        .set_accelerator(Some(next.hotkey()))
+    {
+        log::warn!("the Tray Menu kept the old Hotkey: {error}");
+    }
 
     Ok(next)
 }
@@ -487,7 +510,18 @@ fn activate_for_tray_menu() {
 /// points at when the Hotkey cannot be registered. Quit is here because without
 /// a Dock icon it is the only way out.
 fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let new_note = MenuItem::with_id(app, NEW_NOTE_MENU_ITEM, "New Note", true, None::<&str>)?;
+    // The Hotkey is spelled out next to New Note so the Tray Menu teaches the
+    // faster Entry Point. Only when it is actually live: an accelerator beside
+    // a combination the OS refused would promise a keystroke that does nothing.
+    let new_note = MenuItem::with_id(
+        app,
+        NEW_NOTE_MENU_ITEM,
+        "New Note",
+        true,
+        live_hotkey(app).as_deref(),
+    )?;
+    // Kept so a remap can move the accelerator with it.
+    app.manage(NewNoteMenuItem(new_note.clone()));
     let view_notes =
         MenuItem::with_id(app, VIEW_NOTES_MENU_ITEM, "View Notes", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, SETTINGS_MENU_ITEM, "Settings", true, None::<&str>)?;
