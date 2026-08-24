@@ -19,10 +19,9 @@ import type { CalendarEvent } from '@/journal/journal'
 import type { HotkeyStatus } from '@/settings/hotkey'
 import type { Theme } from '@/settings/theme'
 import {
-  CAPTURE_FIELD_HEIGHT,
-  CAPTURE_PREDICTION_ROW,
   CAPTURE_SHOWN_EVENT,
   CAPTURE_WIDTH,
+  captureWindowHeight,
   COPY_YESTERDAY_DIGEST_EVENT,
   DATABASE_URL,
   IMPORT_CHANGED_EVENT,
@@ -107,13 +106,11 @@ export function createTauriDesktop(): Desktop {
 
     dismissCapture: () => invoke('dismiss_capture'),
 
-    // Built at 560×64 in Rust; each Prediction adds a row under the field.
-    fitCapture: (predictionCount) =>
+    // Built at the resting size in Rust; the height is worked out in one place
+    // so the window and the panel drawn inside it cannot disagree.
+    fitCapture: (fit) =>
       getCurrentWindow().setSize(
-        new LogicalSize(
-          CAPTURE_WIDTH,
-          CAPTURE_FIELD_HEIGHT + predictionCount * CAPTURE_PREDICTION_ROW,
-        ),
+        new LogicalSize(CAPTURE_WIDTH, captureWindowHeight(fit)),
       ),
 
     onCaptureShown: (handle) => listen(CAPTURE_SHOWN_EVENT, () => handle()),

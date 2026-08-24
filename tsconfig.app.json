@@ -27,5 +27,5 @@
   // Tests and their support run under Node, not in the webview: they are
   // typechecked by tsconfig.test.json instead.
   "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/**/testing/**"]
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/**/testing/**"]
 }
