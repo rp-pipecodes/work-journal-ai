@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import { createJournal, type Journal, type Note } from '@/journal/journal'
 import { fixedClock, openTestDatabase } from '@/journal/testing/database'
 import { fakeDesktop } from '@/platform/testing/desktop'
+import type { HotkeyStatus } from '@/settings/hotkey'
 import HistoryView from '../HistoryView'
 
 /**
@@ -20,9 +21,20 @@ export function closeTestDatabases() {
   for (const close of openDatabases.splice(0)) close()
 }
 
+/**
+ * What the desktop should say when the window asks about the Hotkey. Only the
+ * empty state asks, and the answer is the whole of what it teaches.
+ */
+export interface HotkeyAnswer {
+  hotkey?: HotkeyStatus
+  /** The OS refusing the question, rather than answering it unfavourably. */
+  refuseHotkeyStatus?: boolean
+}
+
 /** History opened over the given Captures, already showing its first list. */
 export async function showHistory(
   captured: Array<{ at: string; body: string }>,
+  { hotkey, refuseHotkeyStatus = false }: HotkeyAnswer = {},
 ) {
   const { driver, close } = await openTestDatabase()
   openDatabases.push(close)
@@ -38,12 +50,16 @@ export async function showHistory(
     notes.push(note)
   }
 
-  const desktop = fakeDesktop({ driver })
+  const desktop = fakeDesktop({ driver, hotkey })
+  if (refuseHotkeyStatus) {
+    desktop.hotkeyStatus = () => Promise.reject(new Error('no answer'))
+  }
   render(<HistoryView desktop={desktop} journal={Promise.resolve(core)} />)
 
   // The first read has to have landed: until it does there is no Filter, and
-  // the header is not on screen at all.
-  await screen.findByRole('banner')
+  // the header is not on screen at all. A journal holding nothing never grows
+  // one, so there is nothing to wait for.
+  if (captured.length > 0) await screen.findByRole('banner')
 
   return { desktop, core, notes }
 }

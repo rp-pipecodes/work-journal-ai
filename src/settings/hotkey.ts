@@ -95,3 +95,13 @@ export function describeUnavailableHotkey(
 ): string {
   return `${hotkey} could not be registered: ${reason}. Start a Capture from the Work Journal menu in the menu bar instead.`
 }
+
+/**
+ * The keys a Hotkey is made of, in the order it spells them. A Hotkey is
+ * joined by `+`, and this is the one place it is taken apart again — so what
+ * Settings reads back and what the empty state teaches are always the same
+ * keys.
+ */
+export function keysOfHotkey(hotkey: string): string[] {
+  return hotkey.split('+')
+}

@@ -4,8 +4,11 @@ import {
   CalendarRangeIcon,
   ClipboardCopyIcon,
   HashIcon,
+  NotebookPenIcon,
   SearchIcon,
   Trash2Icon,
+  TriangleAlertIcon,
+  type LucideIcon,
 } from 'lucide-react'
 import { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox'
 import { toast } from 'sonner'
@@ -33,6 +36,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import { Toaster } from '@/components/ui/sonner'
 import {
   Tooltip,
@@ -75,7 +79,7 @@ import {
   type Note,
 } from '@/journal/journal'
 import type { Desktop } from '@/platform/desktop'
-import type { HotkeyStatus } from '@/settings/hotkey'
+import { keysOfHotkey, type HotkeyStatus } from '@/settings/hotkey'
 import { formatDayRange } from './range-label'
 
 /**
@@ -285,15 +289,24 @@ export default function HistoryView({
         {problem !== null && <Problem>{problem}</Problem>}
 
         <main className="flex-1 overflow-y-auto px-6 pb-5">
-          {history.state === 'empty' && <EmptyState hotkey={hotkey} />}
+          {history.state === 'empty' && <NoNotesYet hotkey={hotkey} />}
           {history.state === 'unreadable' && (
-            <Centred>The journal could not be read.</Centred>
+            <EmptyState
+              icon={TriangleAlertIcon}
+              heading="The journal could not be read."
+            />
           )}
           {history.state === 'notes' && history.days.length === 0 && (
-            <Centred>{nothingHere(filter)}</Centred>
+            <EmptyState
+              icon={CalendarRangeIcon}
+              heading={nothingHere(filter)}
+            />
           )}
           {history.state === 'results' && history.notes.length === 0 && (
-            <Centred>No Notes say “{history.term}”.</Centred>
+            <EmptyState
+              icon={SearchIcon}
+              heading={`No Notes say “${history.term}”.`}
+            />
           )}
           {history.state === 'results' && history.notes.length > 0 && (
             <ol className="flex flex-col gap-1">
@@ -311,7 +324,13 @@ export default function HistoryView({
           {history.state === 'notes' &&
             history.days.map((day) => (
               <section key={day.journalDay} className="mb-6 last:mb-0">
-                <h2 className="mb-3 type-section text-muted-foreground">
+                {/*
+                  Pulled out to the window's edges and stuck to the top of the
+                  scroller, so a long day scrolls under its own heading rather
+                  than out from under it. The hairline is what keeps a heading
+                  that has caught up with the list above it legible.
+                */}
+                <h2 className="sticky top-0 z-10 -mx-6 mb-3 border-b border-border bg-background px-6 py-2 type-section text-muted-foreground">
                   {formatJournalDay(day.journalDay)}
                 </h2>
                 <ol className="flex flex-col gap-1">
@@ -1094,8 +1113,10 @@ function projectOptions(
 }
 
 /**
- * A day outside the Filter has gained a Note. Unobtrusive on purpose: it says
- * what happened and waits, rather than moving what is being read.
+ * A day outside the Filter has gained a Note. An inline banner, lifted just
+ * off the page by an accent hairline and a shadow so it reads as something
+ * that arrived — and unobtrusive all the same: it says what happened and
+ * waits, rather than moving what is being read.
  */
 function Nudge({
   journalDay,
@@ -1109,7 +1130,7 @@ function Nudge({
   return (
     <div
       role="status"
-      className="flex shrink-0 items-center gap-3 border-t border-border bg-muted/40 px-6 py-3 type-meta"
+      className="mx-6 mb-5 flex shrink-0 items-center gap-3 rounded-md border border-border border-l-2 border-l-primary bg-card px-4 py-3 type-meta shadow-sm"
     >
       <span className="flex-1 text-muted-foreground">
         A new Note on {formatJournalDay(journalDay)}.
@@ -1138,30 +1159,67 @@ function Nudge({
  * unavailable or unknown: an empty state that taught a combination doing
  * nothing would be worse than the slow way in.
  */
-function EmptyState({ hotkey }: { hotkey: HotkeyStatus | null }) {
+function NoNotesYet({ hotkey }: { hotkey: HotkeyStatus | null }) {
   return (
-    <Centred>
-      <p className="font-medium">No Notes yet</p>
+    <EmptyState icon={NotebookPenIcon} heading="No Notes yet">
       {hotkey?.state === 'registered' ? (
-        <p className="text-muted-foreground">
-          Press <span className="font-mono">{hotkey.hotkey}</span>, type one
-          line about what you just did, and press Enter. New Note in the Work
-          Journal menu does the same thing.
-        </p>
+        <>
+          {/* The same keycaps Settings reads the Hotkey back in, so what is
+              taught here is what is read back there. */}
+          Press{' '}
+          <KbdGroup className="align-baseline">
+            {keysOfHotkey(hotkey.hotkey).map((key) => (
+              <Kbd key={key}>{key}</Kbd>
+            ))}
+          </KbdGroup>
+          , type one line about what you just did, and press Enter. New Note in
+          the Work Journal menu does the same thing.
+        </>
       ) : (
-        <p className="text-muted-foreground">
+        <>
           Choose New Note from the Work Journal menu, type one line about what
           you just did, and press Enter.
-        </p>
+        </>
       )}
-    </Centred>
+    </EmptyState>
   )
 }
 
-function Centred({ children }: { children: React.ReactNode }) {
+/**
+ * A list that is not there, and why. The icon and the heading are what make it
+ * read as an answer rather than as a page still loading; the heading is the
+ * whole of the answer, so each of the ways a list can be empty keeps its own
+ * words, and naming the region with it is how a screen reader hears the answer
+ * rather than an unlabelled block.
+ */
+function EmptyState({
+  icon: Icon,
+  heading,
+  children,
+}: {
+  icon: LucideIcon
+  heading: string
+  children?: React.ReactNode
+}) {
+  const headingId = useId()
+
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 text-center type-body">
-      {children}
-    </div>
+    <section
+      aria-labelledby={headingId}
+      className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center type-body"
+    >
+      <span
+        aria-hidden
+        className="flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground"
+      >
+        <Icon className="size-5" />
+      </span>
+      <h2 id={headingId} className="type-section text-foreground">
+        {heading}
+      </h2>
+      {children !== undefined && (
+        <p className="max-w-sm text-muted-foreground">{children}</p>
+      )}
+    </section>
   )
 }
