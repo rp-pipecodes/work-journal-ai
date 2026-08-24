@@ -5,6 +5,9 @@ import App from './App.tsx'
 import ErrorBoundary from './components/ErrorBoundary.tsx'
 import ThemeProvider from './components/ThemeProvider.tsx'
 import { createAppJournal } from './journal/app-journal.ts'
+import { systemClock } from './journal/journal.ts'
+import { createTrayCount } from './journal/tray-count.ts'
+import { CAPTURE_WINDOW } from './platform/desktop.ts'
 import { createTauriDesktop } from './platform/tauri-desktop.ts'
 import { createAppSettings } from './settings/app-settings.ts'
 
@@ -21,6 +24,21 @@ const journal = createAppJournal({ desktop })
 // This is only so that a window which never asks — Settings, unless the user
 // exports — does not leave the failure unhandled.
 journal.catch(() => {})
+
+// Today's Captured Note count, beside the menu bar glyph. Kept by the capture
+// window because that one is built at startup and only ever hidden, so it is
+// the single window that lives exactly as long as the tray it writes to — the
+// other two come and go, and neither is open on the day this is meant to be
+// noticed. It is never stopped: it ends when the app does.
+if (desktop.windowLabel() === CAPTURE_WINDOW) {
+  void createTrayCount({ journal, desktop, clock: systemClock })
+    .start()
+    // The count is a reminder, not the journal: a tray that cannot be written
+    // to must not take the Capture down with it.
+    .catch((error: unknown) => {
+      console.error('could not keep the tray count', error)
+    })
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

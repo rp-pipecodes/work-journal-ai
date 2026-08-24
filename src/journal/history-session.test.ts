@@ -767,6 +767,62 @@ describe('copying the Digest', () => {
   })
 })
 
+describe('announcing a change to the journal', () => {
+  it('says so when a Note is deleted', async () => {
+    const { session, notes, announced } = await sessionOver([
+      { at: '2026-03-09T09:00:00', body: 'the migration landed' },
+    ])
+    await session.open()
+    expect(announced.times).toBe(0)
+
+    await session.delete(notes[0].id)
+
+    expect(announced.times).toBe(1)
+  })
+
+  it('says so when a Note is refiled onto another day', async () => {
+    const { session, notes, announced } = await sessionOver([
+      { at: '2026-03-09T09:00:00', body: 'the migration landed' },
+    ])
+    await session.open()
+
+    await session.refile(notes[0].id, '2026-03-08')
+
+    expect(announced.times).toBe(1)
+  })
+
+  it('stays quiet about a correction the record refused', async () => {
+    const { session, notes, announced } = await sessionOver(
+      [{ at: '2026-03-09T09:00:00', body: 'the migration landed' }],
+      {
+        journal: (core) => ({
+          ...core,
+          delete: () => Promise.reject(new Error('no database')),
+        }),
+      },
+    )
+    await session.open()
+
+    await session.delete(notes[0].id)
+
+    expect(session.snapshot().problem).not.toBeNull()
+    expect(announced.times).toBe(0)
+  })
+
+  it('stays quiet about merely reading', async () => {
+    const { session, announced } = await sessionOver([
+      { at: '2026-03-09T09:00:00', body: 'the migration landed' },
+    ])
+    await session.open()
+
+    await session.moveTo(rangeForJournalDay('2026-03-08'))
+    await session.search('migration')
+    await settle()
+
+    expect(announced.times).toBe(0)
+  })
+})
+
 /**
  * A session over a real database holding the given Notes, plus the collaborators
  * a test needs to drive it: the clipboard it writes to, a way to capture more
@@ -797,13 +853,19 @@ async function sessionOver(
 
   const clipboard = recordingClipboard()
   const seen: HistorySnapshot[] = []
+  // Every time the session said the Notes are no longer what they were. Only
+  // the count matters: the announcement carries nothing.
+  const announced = { times: 0 }
   const session = createHistorySession({
     journal: Promise.resolve(journal(core)),
     clipboard: clipboard.write,
+    announceChange: () => {
+      announced.times += 1
+    },
     onChange: (snapshot) => seen.push(snapshot),
   })
 
-  return { session, capture, notes, clipboard, seen }
+  return { session, capture, notes, clipboard, seen, announced }
 }
 
 function recordingClipboard() {

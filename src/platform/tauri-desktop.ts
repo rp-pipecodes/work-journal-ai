@@ -22,6 +22,7 @@ import {
   CAPTURE_SHOWN_EVENT,
   CAPTURE_WIDTH,
   DATABASE_URL,
+  JOURNAL_CHANGED_EVENT,
   NOTE_CAPTURED_EVENT,
   SETTINGS_FILE,
   THEME_CHANGED_EVENT,
@@ -117,6 +118,9 @@ export function createTauriDesktop(): Desktop {
         handle(payload.journalDay),
       ),
 
+    announceJournalChanged: () => emit(JOURNAL_CHANGED_EVENT),
+    onJournalChanged: (handle) => listen(JOURNAL_CHANGED_EVENT, () => handle()),
+
     announceTheme: (theme) => emit(THEME_CHANGED_EVENT, { theme }),
     onThemeChanged: (handle) =>
       listen<{ theme: Theme }>(THEME_CHANGED_EVENT, ({ payload }) =>
@@ -138,5 +142,7 @@ export function createTauriDesktop(): Desktop {
 
     exportNotes: (markdown, fileName) =>
       invoke<ExportedFile>('export_notes', { markdown, fileName }),
+
+    showTrayCount: (title) => invoke('show_tray_count', { title }),
   }
 }

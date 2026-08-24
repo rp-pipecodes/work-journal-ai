@@ -58,6 +58,9 @@ export default function HistoryView({
     createHistorySession({
       journal,
       clipboard: copyToClipboard,
+      // The tray count is kept by another window entirely, and a correction
+      // here is the only way it learns that today holds one Note fewer.
+      announceChange: () => void desktop.announceJournalChanged(),
       onChange: setSnapshot,
     }),
   )

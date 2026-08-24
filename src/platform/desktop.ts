@@ -73,6 +73,14 @@ export const CAPTURE_PREDICTION_ROW = 32
 export const NOTE_CAPTURED_EVENT = 'note://captured'
 export const THEME_CHANGED_EVENT = 'settings://theme'
 
+/**
+ * The Notes are no longer what they were: one was captured, deleted, refiled or
+ * reworded. Distinct from `NOTE_CAPTURED_EVENT`, which says a Note arrived on a
+ * particular day and is about the reader's Filter; this one says only that a
+ * count taken before it is now out of date.
+ */
+export const JOURNAL_CHANGED_EVENT = 'journal://changed'
+
 /** Where an export ended up — the Rust side's `ExportedFile`. */
 export interface ExportedFile {
   path: string
@@ -121,6 +129,8 @@ export interface Desktop {
 
   announceCapturedNote(journalDay: string): Promise<void>
   onNoteCaptured(handle: (journalDay: string) => void): Promise<Unlisten>
+  announceJournalChanged(): Promise<void>
+  onJournalChanged(handle: () => void): Promise<Unlisten>
   announceTheme(theme: Theme): Promise<void>
   onThemeChanged(handle: (theme: Theme) => void): Promise<Unlisten>
 
@@ -144,4 +154,11 @@ export interface Desktop {
 
   /** Writes a rendered export to a file, and says where it went. */
   exportNotes(markdown: string, fileName: string): Promise<ExportedFile>
+
+  /**
+   * Puts a short piece of text beside the menu bar glyph. Rendered by the
+   * journal core, never here: this only carries it across to the tray. macOS
+   * only — elsewhere the glyph stands alone and this does nothing.
+   */
+  showTrayCount(title: string): Promise<void>
 }

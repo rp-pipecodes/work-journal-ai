@@ -5,9 +5,9 @@
  * what an arrival does, what a correction re-reads, which of two overlapping
  * reads may reach the view — so the history window is JSX over a snapshot.
  *
- * Headless on purpose: it is built from a Journal and a clipboard and nothing
- * else, so the rules can be driven end to end from a test with real SQL and no
- * DOM. It holds no domain rule of its own — those stay in the core, which this
+ * Headless on purpose: it is built from a Journal, a clipboard and one
+ * announcement, and nothing else, so the rules can be driven end to end from a
+ * test with real SQL and no DOM. It holds no domain rule of its own — those stay in the core, which this
  * module asks.
  *
  * A session is built per history window and is never reset: the window is
@@ -153,6 +153,7 @@ export interface HistorySession {
 export function createHistorySession({
   journal,
   clipboard,
+  announceChange,
   onChange,
 }: {
   /**
@@ -162,6 +163,13 @@ export function createHistorySession({
    */
   journal: Promise<Journal>
   clipboard: (text: string) => Promise<void>
+  /**
+   * Said after every correction that landed, so anything counting Notes
+   * elsewhere in the app — the tray, in another window entirely — is not left
+   * on a number that stopped being true. A correction the record refused says
+   * nothing: nothing changed.
+   */
+  announceChange: () => void
   onChange: (snapshot: HistorySnapshot) => void
 }): HistorySession {
   let snapshot = openingSnapshot
@@ -361,6 +369,7 @@ export function createHistorySession({
     try {
       const core = await journal
       await change(core)
+      announceChange()
     } catch (error) {
       console.error('could not change the Note', error)
       problem = refusal

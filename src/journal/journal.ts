@@ -12,6 +12,9 @@ export interface Clock {
   now(): Date
 }
 
+/** The machine's clock: the one the app runs on, wherever it needs one. */
+export const systemClock: Clock = { now: () => new Date() }
+
 /** The whole of the app's storage surface: a SQL string plus parameters. */
 export interface SqlDriver {
   execute(sql: string, params: unknown[]): Promise<unknown>
@@ -199,6 +202,18 @@ export interface Journal {
    * prefix and nobody typing.
    */
   projectsInUse(): Promise<string[]>
+  /**
+   * How many Captured Notes are filed under one Journal Day — what the tray
+   * glyph carries, and the only reminder the app ever gives that a day has
+   * nothing said about it.
+   *
+   * Captured Notes only: a count inflated by meetings would reassure precisely
+   * on the days nothing was typed — see
+   * docs/adr/0010-notes-have-two-origins.md. Every Note there is today comes
+   * from a Capture, so the day is the whole predicate; when Import lands, the
+   * origin narrows it here.
+   */
+  capturedNoteCount(journalDay: string): Promise<number>
 }
 
 interface NoteRow {
@@ -319,6 +334,17 @@ const SELECT_NOTES_MATCHING = `
 const SELECT_ALL_NOTES_FOR_EXPORT = `
   ${SELECT_NOTES}
   ${IN_DIGEST_ORDER}
+`
+
+/**
+ * The Captured Notes on one Journal Day, counted rather than read: the tray
+ * wants a number, and a day's rows are not worth carrying across the seam to
+ * take the length of.
+ */
+const COUNT_CAPTURED_NOTES_ON_DAY = `
+  SELECT COUNT(*) AS count
+  FROM notes
+  WHERE journal_day = ?
 `
 
 /** Every Project still on a Note: the Filter's Project axis, enumerated. */
@@ -502,6 +528,14 @@ export function createJournal({
       )
       return rows.map((row) => row.project)
     },
+
+    async capturedNoteCount(journalDay) {
+      const [row] = await driver.select<{ count: number }>(
+        COUNT_CAPTURED_NOTES_ON_DAY,
+        [journalDay],
+      )
+      return row?.count ?? 0
+    },
   }
 }
 
@@ -586,6 +620,39 @@ export function journalDayFor(instant: Date): string {
     String(instant.getMonth() + 1).padStart(2, '0'),
     String(instant.getDate()).padStart(2, '0'),
   ].join('-')
+}
+
+/** An en dash: a rule wide enough to notice, and narrower than a digit. */
+const EMPTY_DAY = '–'
+
+/**
+ * Today's Captured Note count as the menu bar reads it, beside the glyph.
+ *
+ * Zero is a dash rather than a `0`, because the two say different things in a
+ * place this small: a `0` is a total, and a total reads as a day that has been
+ * accounted for. A dash reads as a blank still waiting to be filled — which is
+ * the whole reason the count is up there, since the app never asks for a Note
+ * any other way.
+ */
+export function formatTrayCount(count: number): string {
+  return count === 0 ? EMPTY_DAY : String(count)
+}
+
+/**
+ * How long until the Journal Day changes — what the tray count waits out
+ * before it starts the next day at nothing.
+ *
+ * Counted to the next local midnight rather than by adding a day's worth of
+ * milliseconds: a day either side of a DST transition is 23 or 25 hours long,
+ * and a fixed 24 would roll the count over at the wrong hour twice a year.
+ */
+export function msUntilNextJournalDay(now: Date): number {
+  const midnight = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + 1,
+  )
+  return midnight.getTime() - now.getTime()
 }
 
 /**
