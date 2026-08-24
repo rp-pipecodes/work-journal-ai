@@ -8,7 +8,7 @@
  * "must match" pair are one screen apart rather than four files apart.
  */
 
-import type { SqlDriver } from '@/journal/journal'
+import type { CalendarEvent, SqlDriver } from '@/journal/journal'
 import type { HotkeyStatus } from '@/settings/hotkey'
 import type { SettingsStore } from '@/settings/settings'
 import type { Theme } from '@/settings/theme'
@@ -82,6 +82,24 @@ export const NOTE_CAPTURED_EVENT = 'note://captured'
 export const THEME_CHANGED_EVENT = 'settings://theme'
 
 /**
+ * Import was turned on or off, or the ticked calendars changed. Spoken by
+ * Settings and heard by the window that sweeps, which is a different one: a
+ * change the user just made should show up in the journal now rather than at
+ * the next sweep.
+ */
+export const IMPORT_CHANGED_EVENT = 'settings://import'
+
+/**
+ * The machine woke up. Spoken by the Rust side, which is the only part of the
+ * app the OS tells. Must match `SYSTEM_WOKE_EVENT` in `src-tauri/src/lib.rs`.
+ *
+ * Import needs it: a lid closed before a meeting ended would otherwise lose
+ * that meeting for good, since nothing ever looks back for it — see
+ * docs/adr/0011-imported-meetings-are-today-only.md.
+ */
+export const SYSTEM_WOKE_EVENT = 'system://woke'
+
+/**
  * The Notes are no longer what they were: one was captured, deleted, refiled or
  * reworded. Distinct from `NOTE_CAPTURED_EVENT`, which says a Note arrived on a
  * particular day and is about the reader's Filter; this one says only that a
@@ -98,6 +116,24 @@ export interface ExportedFile {
 export interface AppIdentity {
   version: string
   isDevelopment: boolean
+}
+
+/**
+ * What the OS is currently allowing the app to read of the user's calendars.
+ * `undetermined` is the state before anyone has been asked, and it is also
+ * where macOS leaves a build it has no record of — every rebuilt release is a
+ * new binary as far as the grant is concerned, so being asked again is routine
+ * rather than exceptional.
+ */
+export type CalendarAccess = 'granted' | 'denied' | 'undetermined'
+
+/** One of the user's calendars, as Settings lists it to be ticked. */
+export interface CalendarInfo {
+  /** Stable enough to remember a tick against; opaque to the journal. */
+  id: string
+  title: string
+  /** The account it belongs to — two calendars can share a title. */
+  source: string
 }
 
 export interface Desktop {
@@ -136,6 +172,30 @@ export interface Desktop {
   onCaptureShown(handle: () => void): Promise<Unlisten>
   /** The Tray Menu wants yesterday's Digest on the clipboard. */
   onYesterdayDigestRequested(handle: () => void): Promise<Unlisten>
+
+  /**
+   * What the OS allows right now, asked rather than remembered: a grant can be
+   * revoked in System Settings, and a rebuilt binary is one macOS has never
+   * seen. Never prompts.
+   */
+  calendarAccess(): Promise<CalendarAccess>
+  /**
+   * Asks the user, through the OS. Resolves once they have answered, with what
+   * the answer came to. Asking again after a refusal does not re-prompt: macOS
+   * answers for the user, which is why the app never nags.
+   */
+  requestCalendarAccess(): Promise<CalendarAccess>
+  /** Every calendar the user has, for Settings to offer. Empty without access. */
+  calendars(): Promise<CalendarInfo[]>
+  /**
+   * Today's events, from every calendar — which ones matter is the journal's
+   * decision, not the machine's. Empty without access.
+   */
+  todaysCalendarEvents(): Promise<CalendarEvent[]>
+  /** The machine woke from sleep: whatever was missed is worth looking for. */
+  onSystemWoke(handle: () => void): Promise<Unlisten>
+  announceImportChanged(): Promise<void>
+  onImportChanged(handle: () => void): Promise<Unlisten>
 
   announceCapturedNote(journalDay: string): Promise<void>
   onNoteCaptured(handle: (journalDay: string) => void): Promise<Unlisten>

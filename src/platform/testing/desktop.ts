@@ -1,9 +1,11 @@
-import type { SqlDriver } from '../../journal/journal'
+import type { CalendarEvent, SqlDriver } from '../../journal/journal'
 import type { HotkeyStatus } from '../../settings/hotkey'
 import type { SettingsStore } from '../../settings/settings'
 import type { Theme } from '../../settings/theme'
 import type {
   AppIdentity,
+  CalendarAccess,
+  CalendarInfo,
   Desktop,
   ExportedFile,
   Unlisten,
@@ -29,6 +31,14 @@ export interface FakeDesktop extends Desktop {
   clipboard: string | null
   /** The Tray Menu asks for yesterday's Digest. */
   requestYesterdayDigest(): void
+  /** The machine wakes from sleep. */
+  wake(): void
+  /** What the OS allows of the calendars; writable, as a revocation is. */
+  access: CalendarAccess
+  /** Whether the user was ever asked, and what they said if they were. */
+  prompted: boolean
+  /** What the calendars hold today. */
+  events: CalendarEvent[]
 }
 
 export function fakeDesktop({
@@ -37,6 +47,10 @@ export function fakeDesktop({
   hotkey = { state: 'registered', hotkey: 'Cmd+Shift+J' },
   appIdentity = { version: 'test', isDevelopment: true },
   openSettingsStore,
+  access = 'undetermined',
+  answersPrompt = 'granted',
+  calendars = [],
+  events = [],
 }: {
   /** Only the tests that reach the journal need one. */
   driver?: SqlDriver
@@ -45,8 +59,16 @@ export function fakeDesktop({
   appIdentity?: AppIdentity
   /** Overridden by the tests about a settings file that cannot be read. */
   openSettingsStore?: () => Promise<SettingsStore>
+  /** What the OS allows before anybody asks. */
+  access?: CalendarAccess
+  /** What answering the prompt comes to. */
+  answersPrompt?: CalendarAccess
+  calendars?: CalendarInfo[]
+  events?: CalendarEvent[]
 } = {}): FakeDesktop {
   const captureShown = subscribers<void>()
+  const systemWoke = subscribers<void>()
+  const importChanged = subscribers<void>()
   const yesterdayDigestRequested = subscribers<void>()
   const noteCaptured = subscribers<string>()
   const journalChanged = subscribers<void>()
@@ -58,9 +80,13 @@ export function fakeDesktop({
     exported: [],
     trayTitle: null,
     clipboard: null,
+    access,
+    prompted: false,
+    events,
 
     beginCapture: () => captureShown.announce(undefined),
     requestYesterdayDigest: () => yesterdayDigestRequested.announce(undefined),
+    wake: () => systemWoke.announce(undefined),
 
     windowLabel: () => 'history',
     appIdentity: async () => appIdentity,
@@ -94,6 +120,24 @@ export function fakeDesktop({
     onCaptureShown: async (handle) => captureShown.add(handle),
     onYesterdayDigestRequested: async (handle) =>
       yesterdayDigestRequested.add(handle),
+
+    calendarAccess: async () => desktop.access,
+    requestCalendarAccess: async () => {
+      desktop.prompted = true
+      // macOS answers for the user once it has an answer on file, which is why
+      // the app never nags: asking again after a refusal does not re-prompt.
+      if (desktop.access === 'undetermined') {
+        desktop.access = answersPrompt
+      }
+      return desktop.access
+    },
+    calendars: async () => (desktop.access === 'granted' ? calendars : []),
+    todaysCalendarEvents: async () =>
+      desktop.access === 'granted' ? desktop.events : [],
+
+    onSystemWoke: async (handle) => systemWoke.add(handle),
+    announceImportChanged: async () => importChanged.announce(undefined),
+    onImportChanged: async (handle) => importChanged.add(handle),
 
     announceCapturedNote: async (journalDay) => noteCaptured.announce(journalDay),
     onNoteCaptured: async (handle) => noteCaptured.add(handle),

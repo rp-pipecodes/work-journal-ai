@@ -8,6 +8,10 @@ A personal, local-first log of short work notes captured throughout the day, so 
 A single dated line of text about the user's work. The unit of everything — there is no smaller or larger record. Always has a Body from the moment it exists. May be filed under one Project; may be Unfiled. Comes into existence one of exactly two ways: a Capture or an Import.
 _Avoid_: Entry, log, item, memo
 
+**Task**:
+A work commitment the user intends to complete. A first-class record beside a Note, not a kind or state of Note: Notes recover work that happened; Tasks hold work that remains to be done.
+_Avoid_: Todo, action item, reminder, Note
+
 **Body**:
 The text content of a Note: a single line, no line breaks. Editable forever. One line is a deliberate limit — a Note is a remark, not a document — and it means every Note renders as exactly one bullet in a Digest.
 _Avoid_: Content, text, transcript
@@ -24,7 +28,7 @@ The act of turning a meeting on the user's calendar into a Note, without being a
 _Avoid_: Sync, ingest, intake
 
 **Imported Note**:
-A Note made by an Import. Its Body is the calendar event's title, verbatim, and its Captured At is when the meeting began. Always Unfiled — the calendars it comes from carry no Project meaning, so there is nothing to file it under. Ordinary in every other respect — editable, refilable and deletable like any Note. Declined events never become one, nor do events covering the whole local day — whether or not the calendar marks them all-day, since an out-of-office block running local midnight to midnight does not, and would otherwise arrive as a meeting that began at 00:00.
+A Note made by an Import. Its Body is the calendar event's title, verbatim, and its Captured At is when the meeting began. Always Unfiled — the calendars it comes from carry no Project meaning, so there is nothing to file it under. Ordinary in every other respect — editable, refilable and deletable like any Note. Rendered muted in History, with no icon and no label, so a scan-and-delete pass down the day is fast; a Digest shows no difference at all. Declined events never become one, nor do events covering the whole local day — whether or not the calendar marks them all-day, since an out-of-office block running local midnight to midnight does not, and would otherwise arrive as a meeting that began at 00:00.
 _Avoid_: Meeting note, event, calendar entry
 
 **Draft**:
@@ -114,7 +118,11 @@ Permanent removal of a Note. There is no trash, no archive, and no recovery — 
 ## Settings
 
 **Settings**:
-The four things about the app the user gets to decide: the Hotkey, the Theme, whether the app starts at login, and — as the one action rather than a setting — Export. Reached from the Tray Menu, and closed on dismiss rather than kept resident.
+What the user gets to decide about the app: the Hotkey, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars — and, as the one action rather than a setting, Export. Reached from the Tray Menu, and closed on dismiss rather than kept resident.
+
+**Meeting Import**:
+Whether Import runs, and over which calendars. Off until turned on, with no calendar ticked, so enabling it sweeps nothing until the user says which calendars mean work; an unticked calendar is ignored entirely. Turning it on is also where the calendar permission is asked for, because it is the one moment the user has said they want it. The stored setting is the user's wish for Import, and only the user writes it; whether Import runs is that wish and the OS answer together. Permission refused or revoked therefore leaves the wish standing and the toggle reading off, with a line saying why — a routine path rather than an exceptional one, since macOS keys the grant to the exact binary and every rebuilt release is asked about once. A grant restored in System Settings resumes Import without asking a second time, and pressing the toggle while it reads off withdraws the wish. The app never nags, and the journal keeps working exactly as before.
+_Avoid_: Calendar sync, integration, connection
 
 **Theme**:
 Whether the app paints itself light or dark. Three answers, not two: `light`, `dark`, and `system` — and `system` is the absence of a preference rather than a third palette, so an unasked user follows the OS. Settable from Settings, and toggled from any window with Cmd+Shift+D. One preference for the whole app, so a window that did not host the change still hears about it and repaints.

@@ -112,6 +112,20 @@ export default function HistoryView({
     }
   }, [desktop, session])
 
+  useEffect(() => {
+    // The other way the list stops being true: a sweep imported today's
+    // meetings, which never nudges. This window's own corrections are heard
+    // here too, and cost one extra read that finds the list exactly as it left
+    // it — cheaper than a second event that means almost the same thing.
+    const subscription = desktop.onJournalChanged(() => {
+      void session.refresh()
+    })
+
+    return () => {
+      void subscription.then((stop) => stop())
+    }
+  }, [desktop, session])
+
   // Escape belongs to whatever has taken the screen over: a correction first,
   // then a Search, and the window when neither has. Dismissing the window
   // closes it — History is not kept resident.
@@ -342,7 +356,13 @@ function NoteLine({
           <button
             type="button"
             onClick={onEdit}
-            className="flex-1 cursor-text rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            className={`flex-1 cursor-text rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ${
+              // A Note nobody typed reads quieter than one they did, so a
+              // scan-and-delete pass down the day is fast. No icon and no
+              // label: the weight is the whole of the difference, and a Digest
+              // shows none of it — see docs/adr/0010-notes-have-two-origins.md.
+              note.origin === 'import' ? 'text-muted-foreground' : ''
+            }`}
           >
             <ProjectChip project={note.project} className="mr-2" />
             {note.body}

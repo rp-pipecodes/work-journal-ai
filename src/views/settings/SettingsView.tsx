@@ -13,7 +13,12 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useTheme } from '@/components/theme-context'
 import { exportFileName, type Journal } from '@/journal/journal'
-import type { AppIdentity, Desktop } from '@/platform/desktop'
+import type {
+  AppIdentity,
+  CalendarAccess,
+  CalendarInfo,
+  Desktop,
+} from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
 import { describeTheme, isTheme, THEME_CHOICES } from '@/settings/theme'
 import {
@@ -24,8 +29,9 @@ import {
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 
 /**
- * The four things about the app the user gets to decide: the Hotkey, the
- * Theme, whether the app starts at login, and the way out of the SQLite file.
+ * The things about the app the user gets to decide: the Hotkey, the Theme,
+ * whether the app starts at login, whether today's meetings are imported — and
+ * the way out of the SQLite file, which is an action rather than a setting.
  * The window behind this view is created on demand and genuinely closed on
  * dismiss, so the view loads once on mount and needs no reset — see
  * docs/adr/0002-capture-window-is-hidden-never-closed.md.
@@ -47,6 +53,16 @@ export default function SettingsView({
   const [exported, setExported] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [appIdentity, setAppIdentity] = useState<AppIdentity | null>(null)
+  const [importMeetings, setImportMeetings] = useState(
+    DEFAULT_SETTINGS.importMeetings,
+  )
+  const [importCalendars, setImportCalendars] = useState<string[]>(
+    DEFAULT_SETTINGS.importCalendars,
+  )
+  const [calendars, setCalendars] = useState<CalendarInfo[]>([])
+  // Why Import is not on, when the reason is the OS rather than the user.
+  // Nothing until there is something to say.
+  const [calendarProblem, setCalendarProblem] = useState<string | null>(null)
   // The first-run question, asked once and never again — whichever way it is
   // answered. False until the store has been asked whether it was answered.
   const [asking, setAsking] = useState(false)
@@ -61,6 +77,14 @@ export default function SettingsView({
     })
   }, [desktop])
 
+  // Everything this window opens knowing, read once. What the OS allows is
+  // asked every time rather than remembered — a grant is revoked in System
+  // Settings without the app hearing of it, and a rebuilt release is a binary
+  // macOS has never seen. This is the routine path rather than the exceptional
+  // one: Import shows as off, the reason is said once, and nothing is asked of
+  // the user. One read, because the stored settings and the OS answer decide
+  // the same toggle between them, and two of these racing could leave it
+  // reading on with the reason it is not underneath.
   useEffect(() => {
     // A Dock-less app does not reliably hand focus to a new window, and Escape
     // has to reach this view for the window to close.
@@ -68,14 +92,34 @@ export default function SettingsView({
 
     void (async () => {
       try {
-        const [status, atLogin, answered] = await Promise.all([
+        const [status, atLogin, answered, stored, access] = await Promise.all([
           desktop.hotkeyStatus(),
           desktop.startsAtLogin(),
           settings.hasBeenAskedAboutStartAtLogin(),
+          settings.load(),
+          desktop.calendarAccess(),
         ])
         setStartAtLogin(atLogin)
         setHotkey(status)
         setAsking(!answered)
+        setImportMeetings(stored.importMeetings)
+        setImportCalendars(stored.importCalendars)
+
+        if (access === 'granted') {
+          setCalendars(await desktop.calendars())
+          setCalendarProblem(null)
+          return
+        }
+
+        setCalendars([])
+        // Only worth saying to someone who asked for Import: a user who has
+        // never turned it on is owed no explanation for something they never
+        // wanted, and the toggle says so for itself the moment they do. The
+        // stored wish is the evidence, and it survives the permission going —
+        // the sweep does not overwrite it, precisely so this can be said.
+        setCalendarProblem(
+          stored.importMeetings ? describeCalendarAccess(access) : null,
+        )
       } catch (error) {
         console.error('could not read the settings', error)
       }
@@ -98,6 +142,12 @@ export default function SettingsView({
       void closeRequested.then((stop) => stop())
     }
   }, [asking, desktop, settings])
+
+  // Import as the window shows it: the user's wish, less whatever macOS is
+  // withholding. The stored wish outlives a lost permission — that is what
+  // makes the reason sayable — so the toggle is off whenever there is a reason
+  // underneath it saying why.
+  const importing = importMeetings && calendarProblem === null
 
   // Escape dismisses, and dismissing closes: Settings is not kept resident.
   // While the recorder is listening, Escape belongs to it — abandoning a
@@ -137,6 +187,59 @@ export default function SettingsView({
     },
     [desktop],
   )
+
+  /**
+   * Turning Import on is also where the calendar is asked for, because it is
+   * the one moment the user has said they want it. Refused, it stays off and
+   * says why — the app asks once here and never again on its own.
+   */
+  function toggleImport(next: boolean) {
+    void (async () => {
+      try {
+        if (!next) {
+          setImportMeetings(false)
+          await settings.saveImportMeetings(false)
+          return
+        }
+
+        const access =
+          (await desktop.calendarAccess()) === 'granted'
+            ? 'granted'
+            : await desktop.requestCalendarAccess()
+
+        if (access !== 'granted') {
+          // The wish is kept, not discarded: the toggle reads off because the
+          // reason underneath it says so, and a grant given in System Settings
+          // later resumes Import without being asked for a second time.
+          setImportMeetings(true)
+          setCalendarProblem(describeCalendarAccess(access))
+          await settings.saveImportMeetings(true)
+          return
+        }
+
+        setImportMeetings(true)
+        setCalendarProblem(null)
+        setCalendars(await desktop.calendars())
+        await settings.saveImportMeetings(true)
+      } catch (error) {
+        console.error('could not change how meetings are imported', error)
+        setImportMeetings(!next)
+      }
+    })()
+  }
+
+  /** Ticking a calendar, or unticking it — an unticked one is ignored. */
+  function toggleCalendar(id: string, ticked: boolean) {
+    const next = ticked
+      ? [...importCalendars, id]
+      : importCalendars.filter((each) => each !== id)
+
+    setImportCalendars(next)
+    settings.saveImportCalendars(next).catch((error: unknown) => {
+      console.error('could not change which calendars are imported', error)
+      setImportCalendars(importCalendars)
+    })
+  }
 
   /** The whole journal, on disk and outside this app. */
   function exportAll() {
@@ -251,6 +354,44 @@ export default function SettingsView({
       </Section>
 
       <Section
+        title="Meetings"
+        explanation="Today's meetings, added to the journal as they end. Never a backfill."
+      >
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={importing}
+            // Pressed, the box means the opposite of the wish rather than the
+            // opposite of what it reads: with the permission gone it reads off
+            // while the wish is on, and a press there is the user withdrawing
+            // it — the reason underneath goes with it. Reading the box back
+            // would ask to turn on what is already wished for, leaving no way
+            // to change their mind.
+            onChange={() => toggleImport(!importMeetings)}
+            className="size-4 accent-foreground"
+          />
+          <span>Add today's meetings to the journal</span>
+        </label>
+
+        {calendarProblem !== null && <Problem>{calendarProblem}</Problem>}
+
+        {importing && (
+          <CalendarTicks
+            calendars={calendars}
+            ticked={importCalendars}
+            onToggle={toggleCalendar}
+          />
+        )}
+
+        <Aside>
+          Imported meetings are ordinary Notes: reword them, file them under a
+          Project, or delete them. Deleting one refuses that meeting for good —
+          it is never added again. Declined meetings and all-day blocks are
+          never added in the first place.
+        </Aside>
+      </Section>
+
+      <Section
         title="Export"
         explanation="Every Note as Markdown, in your Downloads folder — nothing captured here is locked in."
       >
@@ -278,6 +419,56 @@ export default function SettingsView({
 
       <FirstRunQuestion open={asking} onAnswer={answerStartAtLogin} />
     </div>
+  )
+}
+
+/**
+ * Why Import is not on, when the reason is macOS rather than the user. Both
+ * answers are routine: a grant is keyed to the binary, so every rebuilt release
+ * starts as one macOS has no record of.
+ */
+function describeCalendarAccess(access: Exclude<CalendarAccess, 'granted'>): string {
+  return access === 'denied'
+    ? 'macOS is not allowing Work Journal to read your calendars. Turn Calendars on for Work Journal in System Settings › Privacy & Security, then switch this back on.'
+    : 'macOS has not been asked about your calendars — a rebuilt Work Journal is a new app as far as it is concerned. Meetings are not being imported; everything else in the journal is unaffected.'
+}
+
+/**
+ * Which calendars an Import reads. None are ticked to begin with, because the
+ * app cannot tell which of them mean work — a calendar nobody ticked is ignored
+ * entirely rather than swept quietly.
+ */
+function CalendarTicks({
+  calendars,
+  ticked,
+  onToggle,
+}: {
+  calendars: CalendarInfo[]
+  ticked: string[]
+  onToggle: (id: string, ticked: boolean) => void
+}) {
+  if (calendars.length === 0) {
+    return <Aside>No calendars to read.</Aside>
+  }
+
+  return (
+    <fieldset className="flex flex-col gap-1">
+      <legend className="sr-only">Calendars to import from</legend>
+      {calendars.map((calendar) => (
+        <label key={calendar.id} className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={ticked.includes(calendar.id)}
+            onChange={(event) => onToggle(calendar.id, event.target.checked)}
+            className="size-4 accent-foreground"
+          />
+          <span>{calendar.title}</span>
+          <span className="text-xs text-muted-foreground">
+            {calendar.source}
+          </span>
+        </label>
+      ))}
+    </fieldset>
   )
 }
 

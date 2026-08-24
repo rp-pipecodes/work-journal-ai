@@ -3,6 +3,8 @@ import {
   DEFAULT_SETTINGS,
   hasAnsweredStartAtLogin,
   readSettings,
+  writeImportCalendars,
+  writeImportMeetings,
   writeStartAtLogin,
   type SettingsStore,
 } from './settings'
@@ -31,19 +33,37 @@ describe('readSettings', () => {
     expect(await readSettings(emptyStore())).toEqual(DEFAULT_SETTINGS)
   })
 
-  it('ships with no start at login', async () => {
+  it('ships with no start at login, and with Import off and no calendar ticked', async () => {
     expect(DEFAULT_SETTINGS).toEqual({
       startAtLogin: false,
+      importMeetings: false,
+      importCalendars: [],
     })
   })
 
   it('reads back what was written', async () => {
     const store = emptyStore()
     await writeStartAtLogin(store, true)
+    await writeImportMeetings(store, true)
+    await writeImportCalendars(store, ['work', 'personal'])
 
     expect(await readSettings(store)).toEqual({
       startAtLogin: true,
+      importMeetings: true,
+      importCalendars: ['work', 'personal'],
     })
+  })
+
+  it('reads no ticked calendars rather than a list that is not one', async () => {
+    const store = emptyStore({ importCalendars: 'work' })
+
+    expect((await readSettings(store)).importCalendars).toEqual([])
+  })
+
+  it('keeps only the names out of a list that holds other things too', async () => {
+    const store = emptyStore({ importCalendars: ['work', 7, null] })
+
+    expect((await readSettings(store)).importCalendars).toEqual(['work'])
   })
 
   it('falls back to a default rather than trusting a nonsense stored value', async () => {
@@ -55,7 +75,10 @@ describe('readSettings', () => {
   it('ignores a leftover dayStartHour from an older install', async () => {
     const store = emptyStore({ dayStartHour: 6, startAtLogin: true })
 
-    expect(await readSettings(store)).toEqual({ startAtLogin: true })
+    expect(await readSettings(store)).toEqual({
+      ...DEFAULT_SETTINGS,
+      startAtLogin: true,
+    })
   })
 })
 

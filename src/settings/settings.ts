@@ -28,14 +28,34 @@ export interface SettingsStore {
 export interface Settings {
   /** Off until the user says otherwise: the app never adds itself uninvited. */
   startAtLogin: boolean
+  /**
+   * The user's wish for Import: whether they want today's meetings swept into
+   * the journal. Off until turned on, and only ever written by the user — a
+   * permission refused or revoked leaves it standing, which is what lets
+   * Settings say why Import is not running, and what lets a grant restored in
+   * System Settings resume it without asking a second time. Whether Import
+   * actually runs is this and the OS answer together, derived where it is
+   * needed. The journal keeps working exactly as before either way.
+   */
+  importMeetings: boolean
+  /**
+   * The calendars an Import reads, by identifier. None ticked by default, so
+   * turning Import on sweeps nothing until the user says which calendars mean
+   * work. An unticked calendar is ignored entirely.
+   */
+  importCalendars: string[]
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   startAtLogin: false,
+  importMeetings: false,
+  importCalendars: [],
 }
 
 /** The store keys. The Hotkey's own key is written from Rust. */
 const START_AT_LOGIN_KEY = 'startAtLogin'
+const IMPORT_MEETINGS_KEY = 'importMeetings'
+const IMPORT_CALENDARS_KEY = 'importCalendars'
 
 /**
  * Every setting at once, with a default wherever the store is silent or holds
@@ -43,14 +63,44 @@ const START_AT_LOGIN_KEY = 'startAtLogin'
  * written by an older version, must not stop the app from starting.
  */
 export async function readSettings(store: SettingsStore): Promise<Settings> {
-  const startAtLogin = await store.get<unknown>(START_AT_LOGIN_KEY)
+  const [startAtLogin, importMeetings, importCalendars] = await Promise.all([
+    store.get<unknown>(START_AT_LOGIN_KEY),
+    store.get<unknown>(IMPORT_MEETINGS_KEY),
+    store.get<unknown>(IMPORT_CALENDARS_KEY),
+  ])
 
   return {
     startAtLogin:
       typeof startAtLogin === 'boolean'
         ? startAtLogin
         : DEFAULT_SETTINGS.startAtLogin,
+    importMeetings:
+      typeof importMeetings === 'boolean'
+        ? importMeetings
+        : DEFAULT_SETTINGS.importMeetings,
+    // Anything that is not a list of names says nothing about which calendars
+    // the user meant, and Import reading the wrong ones is worse than reading
+    // none: it writes Notes the user never asked for.
+    importCalendars: Array.isArray(importCalendars)
+      ? importCalendars.filter((id): id is string => typeof id === 'string')
+      : DEFAULT_SETTINGS.importCalendars,
   }
+}
+
+/** Whether meetings are swept at all. Both answers are the user's. */
+export async function writeImportMeetings(
+  store: SettingsStore,
+  importMeetings: boolean,
+): Promise<void> {
+  await store.set(IMPORT_MEETINGS_KEY, importMeetings)
+}
+
+/** Which calendars an Import reads. An empty list is a real answer: none. */
+export async function writeImportCalendars(
+  store: SettingsStore,
+  importCalendars: string[],
+): Promise<void> {
+  await store.set(IMPORT_CALENDARS_KEY, importCalendars)
 }
 
 /** Both answers are answers: declining is recorded exactly as accepting is. */

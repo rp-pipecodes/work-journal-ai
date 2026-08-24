@@ -58,3 +58,27 @@ describe('start at login', () => {
     expect(await settings.hasBeenAskedAboutStartAtLogin()).toBe(false)
   })
 })
+
+describe('importing meetings', () => {
+  it('reads back what was saved, and announces it to the window that sweeps', async () => {
+    const desktop = fakeDesktop()
+    const settings = createAppSettings(desktop)
+    let announced = 0
+    await desktop.onImportChanged(() => (announced += 1))
+
+    await settings.saveImportMeetings(true)
+    await settings.saveImportCalendars(['work'])
+
+    const stored = await settings.load()
+    expect(stored.importMeetings).toBe(true)
+    expect(stored.importCalendars).toEqual(['work'])
+    expect(announced).toBe(2)
+  })
+
+  it('is off, with nothing ticked, until the user says otherwise', async () => {
+    const stored = await createAppSettings(fakeDesktop()).load()
+
+    expect(stored.importMeetings).toBe(false)
+    expect(stored.importCalendars).toEqual([])
+  })
+})

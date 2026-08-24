@@ -18,9 +18,13 @@ import {
   groupByJournalDay,
   journalDayFor,
   markerPrefix,
+  meetingBody,
+  meetingKey,
+  meetingsToImport,
   projectChoice,
   projectConstraintFor,
   UNFILED,
+  type CalendarEvent,
   type Journal,
   type ProjectConstraint,
 } from './journal'
@@ -1636,5 +1640,341 @@ describe('msUntilNextJournalDay', () => {
     expect(
       journalDayFor(new Date(now.getTime() + msUntilNextJournalDay(now))),
     ).toBe('2026-03-30')
+  })
+})
+
+/**
+ * One event on the calendar, with the fields an Import reads. Times are wall
+ * clock in the machine's own zone, like every other instant in this file.
+ */
+function event(
+  overrides: Omit<Partial<CalendarEvent>, 'startsAt' | 'endsAt'> & {
+    startsAt: string
+    endsAt: string
+  },
+): CalendarEvent {
+  return {
+    id: 'event-1',
+    calendarId: 'work',
+    title: 'Standup',
+    isAllDay: false,
+    isDeclined: false,
+    ...overrides,
+    startsAt: local(overrides.startsAt).getTime(),
+    endsAt: local(overrides.endsAt).getTime(),
+  }
+}
+
+describe('meetingBody', () => {
+  it('is the title, verbatim', () => {
+    expect(meetingBody('Weekly sync with Habic')).toBe('Weekly sync with Habic')
+  })
+
+  it('collapses a title that is not one line into one', () => {
+    expect(meetingBody('  Weekly\nsync   with\tHabic  ')).toBe(
+      'Weekly sync with Habic',
+    )
+  })
+
+  it('says so when there is no title at all, because a Body is never empty', () => {
+    expect(meetingBody('')).toBe('(untitled meeting)')
+    expect(meetingBody('   ')).toBe('(untitled meeting)')
+  })
+})
+
+describe('meetingKey', () => {
+  it('tells two occurrences of the same recurring event apart', () => {
+    const monday = event({ startsAt: '2026-03-09T09:30', endsAt: '2026-03-09T09:45' })
+    const tuesday = event({ startsAt: '2026-03-10T09:30', endsAt: '2026-03-10T09:45' })
+
+    expect(meetingKey(monday)).not.toBe(meetingKey(tuesday))
+  })
+
+  it('is the same key for the same occurrence read twice', () => {
+    const swept = event({ startsAt: '2026-03-09T09:30', endsAt: '2026-03-09T09:45' })
+    const sweptAgain = event({ startsAt: '2026-03-09T09:30', endsAt: '2026-03-09T09:45' })
+
+    expect(meetingKey(swept)).toBe(meetingKey(sweptAgain))
+  })
+})
+
+describe('meetingsToImport', () => {
+  const now = local('2026-03-09T18:40:00')
+
+  function swept(
+    events: CalendarEvent[],
+    calendarIds = ['work'],
+    instant = now,
+  ) {
+    return meetingsToImport({ events, calendarIds, now: instant }).map(
+      (event) => event.id,
+    )
+  }
+
+  it('takes a meeting that has ended on a ticked calendar', () => {
+    expect(
+      swept([event({ startsAt: '2026-03-09T09:30', endsAt: '2026-03-09T10:00' })]),
+    ).toEqual(['event-1'])
+  })
+
+  it('ignores a calendar the user has not ticked', () => {
+    expect(
+      swept([
+        event({
+          id: 'personal-lunch',
+          calendarId: 'personal',
+          startsAt: '2026-03-09T12:00',
+          endsAt: '2026-03-09T13:00',
+        }),
+      ]),
+    ).toEqual([])
+  })
+
+  it('sweeps nothing at all when no calendar is ticked', () => {
+    expect(
+      swept(
+        [event({ startsAt: '2026-03-09T09:30', endsAt: '2026-03-09T10:00' })],
+        [],
+      ),
+    ).toEqual([])
+  })
+
+  it('leaves a meeting alone until it has ended', () => {
+    expect(
+      swept([event({ startsAt: '2026-03-09T18:30', endsAt: '2026-03-09T19:00' })]),
+    ).toEqual([])
+  })
+
+  it('takes a meeting the moment it ends', () => {
+    expect(
+      swept([event({ startsAt: '2026-03-09T18:00', endsAt: '2026-03-09T18:40' })]),
+    ).toEqual(['event-1'])
+  })
+
+  it('never takes one the user declined', () => {
+    expect(
+      swept([
+        event({
+          isDeclined: true,
+          startsAt: '2026-03-09T09:30',
+          endsAt: '2026-03-09T10:00',
+        }),
+      ]),
+    ).toEqual([])
+  })
+
+  it('never takes an event the calendar marks all-day', () => {
+    expect(
+      swept([
+        event({
+          isAllDay: true,
+          startsAt: '2026-03-09T00:00',
+          endsAt: '2026-03-10T00:00',
+        }),
+      ]),
+    ).toEqual([])
+  })
+
+  it('never takes one that covers the whole local day without saying it is all-day', () => {
+    // The out-of-office block #61 found: local midnight to local midnight,
+    // reporting isAllDay: false. On the flag alone it would arrive as a
+    // meeting that began at 00:00.
+    expect(
+      swept([
+        event({
+          title: 'Out of office',
+          startsAt: '2026-03-09T00:00',
+          endsAt: '2026-03-10T00:00',
+        }),
+      ]),
+    ).toEqual([])
+  })
+
+  it('never takes one that spans several days', () => {
+    expect(
+      swept([
+        event({ title: 'Offsite', startsAt: '2026-03-08T00:00', endsAt: '2026-03-11T00:00' }),
+      ]),
+    ).toEqual([])
+  })
+
+  it('takes one that merely runs long', () => {
+    expect(
+      swept([
+        event({ title: 'Workshop', startsAt: '2026-03-09T00:00', endsAt: '2026-03-09T17:00' }),
+      ]),
+    ).toEqual(['event-1'])
+  })
+
+  it('still takes a straddler on a later sweep the same day', () => {
+    // It ended today, so today's sweep is the only one that will ever see it.
+    // The Note lands on the day it began — see
+    // docs/adr/0011-imported-meetings-are-today-only.md.
+    expect(
+      swept([
+        event({ title: 'Late release', startsAt: '2026-03-08T22:00', endsAt: '2026-03-09T01:00' }),
+      ]),
+    ).toEqual(['event-1'])
+  })
+
+  it('never takes one that ended before today began', () => {
+    expect(
+      swept([
+        event({ title: 'Retro', startsAt: '2026-03-08T15:00', endsAt: '2026-03-08T16:00' }),
+      ]),
+    ).toEqual([])
+  })
+
+  it('never backfills a meeting from before yesterday', () => {
+    expect(
+      swept([
+        event({ title: 'Long haul', startsAt: '2026-03-02T09:00', endsAt: '2026-03-09T10:00' }),
+      ]),
+    ).toEqual([])
+  })
+
+  it('takes one that began last night and ran past midnight', () => {
+    // The only meeting the old start-of-day rule could never sweep: still
+    // running at midnight, so on the next sweep it no longer began today.
+    expect(
+      swept(
+        [
+          event({
+            title: 'Late release',
+            startsAt: '2026-03-08T23:00',
+            endsAt: '2026-03-09T00:30',
+          }),
+        ],
+        ['work'],
+        local('2026-03-09T00:35:00'),
+      ),
+    ).toEqual(['event-1'])
+  })
+
+  it('has no duration floor: a five-minute meeting is a meeting', () => {
+    expect(
+      swept([event({ startsAt: '2026-03-09T09:30', endsAt: '2026-03-09T09:35' })]),
+    ).toEqual(['event-1'])
+  })
+})
+
+describe('importMeeting', () => {
+  it('files the meeting under the morning it happened in, not the evening it was swept in', async () => {
+    const { journal } = await journalAt('2026-03-09T18:40:00')
+
+    const note = await journal.importMeeting(
+      event({ title: 'Weekly sync', startsAt: '2026-03-09T09:30', endsAt: '2026-03-09T10:00' }),
+    )
+
+    expect(note).toMatchObject({
+      body: 'Weekly sync',
+      project: null,
+      journalDay: '2026-03-09',
+      editedAt: null,
+      origin: 'import',
+    })
+    expect(note!.capturedAt).toBe(local('2026-03-09T09:30').toISOString())
+  })
+
+  it("puts the Note in the day's list like any other", async () => {
+    const { journal } = await journalAt('2026-03-09T18:40:00')
+
+    await journal.capture('the migration landed')
+    await journal.importMeeting(
+      event({ title: 'Weekly sync', startsAt: '2026-03-09T09:30', endsAt: '2026-03-09T10:00' }),
+    )
+
+    expect((await notesOn(journal, '2026-03-09')).map((note) => note.body)).toEqual([
+      'the migration landed',
+      'Weekly sync',
+    ])
+  })
+
+  it('imports the same meeting exactly once, however often it is swept', async () => {
+    const { journal } = await journalAt('2026-03-09T18:40:00')
+    const meeting = event({ startsAt: '2026-03-09T09:30', endsAt: '2026-03-09T10:00' })
+
+    expect(await journal.importMeeting(meeting)).not.toBeNull()
+    expect(await journal.importMeeting(meeting)).toBeNull()
+    expect(await notesOn(journal, '2026-03-09')).toHaveLength(1)
+  })
+
+  it('never brings back a meeting whose Note was deleted: refusal is permanent', async () => {
+    const { journal } = await journalAt('2026-03-09T18:40:00')
+    const meeting = event({ startsAt: '2026-03-09T09:30', endsAt: '2026-03-09T10:00' })
+
+    const note = await journal.importMeeting(meeting)
+    await journal.delete(note!.id)
+
+    expect(await journal.importMeeting(meeting)).toBeNull()
+    expect(await notesOn(journal, '2026-03-09')).toEqual([])
+  })
+
+  it('imports each occurrence of a recurring meeting', async () => {
+    const { journal } = await journalAt('2026-03-10T18:40:00')
+
+    await journal.importMeeting(
+      event({ startsAt: '2026-03-09T09:30', endsAt: '2026-03-09T09:45' }),
+    )
+    await journal.importMeeting(
+      event({ startsAt: '2026-03-10T09:30', endsAt: '2026-03-10T09:45' }),
+    )
+
+    expect(await notesOn(journal, '2026-03-09')).toHaveLength(1)
+    expect(await notesOn(journal, '2026-03-10')).toHaveLength(1)
+  })
+
+  it('gives an untitled meeting a Body anyway', async () => {
+    const { journal } = await journalAt('2026-03-09T18:40:00')
+
+    const note = await journal.importMeeting(
+      event({ title: '', startsAt: '2026-03-09T09:30', endsAt: '2026-03-09T10:00' }),
+    )
+
+    expect(note!.body).toBe('(untitled meeting)')
+  })
+
+  it('is edited, refiled and filed like any other Note', async () => {
+    const { journal } = await journalAt('2026-03-09T18:40:00')
+    const note = await journal.importMeeting(
+      event({ startsAt: '2026-03-09T09:30', endsAt: '2026-03-09T10:00' }),
+    )
+
+    const reworded = await journal.editBody(note!.id, 'Standup: agreed the cutover')
+    const refiled = await journal.refile(reworded.id, '2026-03-10')
+    const filed = await journal.editProject(refiled.id, 'habic')
+
+    expect(filed).toMatchObject({
+      body: 'Standup: agreed the cutover',
+      journalDay: '2026-03-10',
+      project: 'habic',
+      origin: 'import',
+    })
+    // Provenance survives every correction, exactly as it does for a Capture.
+    expect(filed.capturedAt).toBe(note!.capturedAt)
+  })
+
+  it('does not count towards the day the tray reports', async () => {
+    const { journal } = await journalAt('2026-03-09T18:40:00')
+
+    await journal.capture('the migration landed')
+    await journal.importMeeting(
+      event({ startsAt: '2026-03-09T09:30', endsAt: '2026-03-09T10:00' }),
+    )
+
+    expect(await journal.capturedNoteCount('2026-03-09')).toBe(1)
+  })
+
+  it('reads in a Digest exactly like a Note that was typed', async () => {
+    const { journal } = await journalAt('2026-03-09T18:40:00')
+
+    await journal.importMeeting(
+      event({ title: 'Weekly sync', startsAt: '2026-03-09T09:30', endsAt: '2026-03-09T10:00' }),
+    )
+    await journal.capture('the migration landed')
+
+    const digest = await journal.digest(rangeForJournalDay('2026-03-09'))
+    expect(digest.markdown).toBe('- Weekly sync\n- the migration landed')
+    expect(digest.noteCount).toBe(2)
   })
 })

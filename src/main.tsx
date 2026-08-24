@@ -6,6 +6,7 @@ import ErrorBoundary from './components/ErrorBoundary.tsx'
 import ThemeProvider from './components/ThemeProvider.tsx'
 import { createAppJournal } from './journal/app-journal.ts'
 import { systemClock } from './journal/journal.ts'
+import { createImportSession } from './journal/import-session.ts'
 import { createTrayCount } from './journal/tray-count.ts'
 import { createYesterdayDigest } from './journal/yesterday-digest.ts'
 import { CAPTURE_WINDOW } from './platform/desktop.ts'
@@ -38,6 +39,17 @@ if (desktop.windowLabel() === CAPTURE_WINDOW) {
     // to must not take the Capture down with it.
     .catch((error: unknown) => {
       console.error('could not keep the tray count', error)
+    })
+
+  // Today's meetings, swept into the journal as they end. Kept here for the
+  // same reason as the count: this is the one window that lives as long as the
+  // app, and a sweep has to keep happening while nothing is on screen.
+  void createImportSession({ journal, desktop, settings, clock: systemClock })
+    .start()
+    // Import is an addition to the journal, never a condition of it: a sweep
+    // that cannot run leaves everything else working exactly as before.
+    .catch((error: unknown) => {
+      console.error('could not import today’s meetings', error)
     })
 
   // Yesterday's Digest, copied from the Tray Menu. Kept here for the same

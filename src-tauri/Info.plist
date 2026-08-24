@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the bundled .app's Info.plist by Tauri.
+
+  Without NSCalendarsFullAccessUsageDescription macOS refuses calendar access
+  in milliseconds and never shows a dialog, which looks exactly like a bug —
+  see docs/calendar-access.md.
+-->
+<plist version="1.0">
+  <dict>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Work Journal reads today's meetings so it can add them to your journal.</string>
+  </dict>
+</plist>
