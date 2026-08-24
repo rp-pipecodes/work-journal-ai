@@ -7,6 +7,7 @@ import ThemeProvider from './components/ThemeProvider.tsx'
 import { createAppJournal } from './journal/app-journal.ts'
 import { systemClock } from './journal/journal.ts'
 import { createTrayCount } from './journal/tray-count.ts'
+import { createYesterdayDigest } from './journal/yesterday-digest.ts'
 import { CAPTURE_WINDOW } from './platform/desktop.ts'
 import { createTauriDesktop } from './platform/tauri-desktop.ts'
 import { createAppSettings } from './settings/app-settings.ts'
@@ -37,6 +38,15 @@ if (desktop.windowLabel() === CAPTURE_WINDOW) {
     // to must not take the Capture down with it.
     .catch((error: unknown) => {
       console.error('could not keep the tray count', error)
+    })
+
+  // Yesterday's Digest, copied from the Tray Menu. Kept here for the same
+  // reason as the count: the Rust side owns the menu but cannot reach the
+  // Notes, and this is the one window certain to be around to answer it.
+  void createYesterdayDigest({ journal, desktop, clock: systemClock })
+    .start()
+    .catch((error: unknown) => {
+      console.error("could not answer the Tray Menu's copy", error)
     })
 }
 

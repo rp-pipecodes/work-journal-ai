@@ -52,6 +52,14 @@ export const DATABASE_URL = 'sqlite:work-journal.db'
 export const CAPTURE_SHOWN_EVENT = 'capture://shown'
 
 /**
+ * The Tray Menu asked for yesterday's Digest. Spoken by the Rust side, which
+ * owns the menu but not the journal — the Notes are only reachable from a
+ * webview, so the tray asks and a window answers. Must match
+ * `COPY_YESTERDAY_DIGEST_EVENT` in `src-tauri/src/lib.rs`.
+ */
+export const COPY_YESTERDAY_DIGEST_EVENT = 'digest://yesterday'
+
+/**
  * Capture window geometry. Width and resting height must match `.inner_size`
  * in `build_capture_window` (`src-tauri/src/lib.rs`). Row height must match
  * the Prediction button (`h-8`) in `CaptureView`.
@@ -126,6 +134,8 @@ export interface Desktop {
   fitCapture(predictionCount: number): Promise<void>
   /** A Capture is beginning: the window has just been shown. */
   onCaptureShown(handle: () => void): Promise<Unlisten>
+  /** The Tray Menu wants yesterday's Digest on the clipboard. */
+  onYesterdayDigestRequested(handle: () => void): Promise<Unlisten>
 
   announceCapturedNote(journalDay: string): Promise<void>
   onNoteCaptured(handle: (journalDay: string) => void): Promise<Unlisten>
@@ -151,6 +161,13 @@ export interface Desktop {
   startsAtLogin(): Promise<boolean>
   /** Adds or removes the login item. */
   setStartAtLogin(startAtLogin: boolean): Promise<void>
+
+  /**
+   * Puts text on the system clipboard. Written by the OS rather than by the
+   * webview: a Digest is also copied from the Tray Menu, where no window is
+   * focused and no click is granting the page user activation.
+   */
+  copyToClipboard(text: string): Promise<void>
 
   /** Writes a rendered export to a file, and says where it went. */
   exportNotes(markdown: string, fileName: string): Promise<ExportedFile>

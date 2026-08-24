@@ -25,6 +25,10 @@ export interface FakeDesktop extends Desktop {
   exported: Array<{ markdown: string; fileName: string }>
   /** What is beside the menu bar glyph; null until something is put there. */
   trayTitle: string | null
+  /** What is on the clipboard; null until something is copied there. */
+  clipboard: string | null
+  /** The Tray Menu asks for yesterday's Digest. */
+  requestYesterdayDigest(): void
 }
 
 export function fakeDesktop({
@@ -43,6 +47,7 @@ export function fakeDesktop({
   openSettingsStore?: () => Promise<SettingsStore>
 } = {}): FakeDesktop {
   const captureShown = subscribers<void>()
+  const yesterdayDigestRequested = subscribers<void>()
   const noteCaptured = subscribers<string>()
   const journalChanged = subscribers<void>()
   const themeChanged = subscribers<Theme>()
@@ -52,8 +57,10 @@ export function fakeDesktop({
     loginItem: false,
     exported: [],
     trayTitle: null,
+    clipboard: null,
 
     beginCapture: () => captureShown.announce(undefined),
+    requestYesterdayDigest: () => yesterdayDigestRequested.announce(undefined),
 
     windowLabel: () => 'history',
     appIdentity: async () => appIdentity,
@@ -85,6 +92,8 @@ export function fakeDesktop({
     dismissCapture: async () => {},
     fitCapture: async () => {},
     onCaptureShown: async (handle) => captureShown.add(handle),
+    onYesterdayDigestRequested: async (handle) =>
+      yesterdayDigestRequested.add(handle),
 
     announceCapturedNote: async (journalDay) => noteCaptured.announce(journalDay),
     onNoteCaptured: async (handle) => noteCaptured.add(handle),
@@ -99,6 +108,10 @@ export function fakeDesktop({
     startsAtLogin: async () => desktop.loginItem,
     setStartAtLogin: async (startAtLogin) => {
       desktop.loginItem = startAtLogin
+    },
+
+    copyToClipboard: async (text) => {
+      desktop.clipboard = text
     },
 
     exportNotes: async (markdown, fileName): Promise<ExportedFile> => {

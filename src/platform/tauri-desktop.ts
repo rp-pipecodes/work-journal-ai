@@ -12,6 +12,7 @@ import { emit, listen } from '@tauri-apps/api/event'
 import { LogicalSize } from '@tauri-apps/api/dpi'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
+import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import Database from '@tauri-apps/plugin-sql'
 import { load } from '@tauri-apps/plugin-store'
 import type { HotkeyStatus } from '@/settings/hotkey'
@@ -21,6 +22,7 @@ import {
   CAPTURE_PREDICTION_ROW,
   CAPTURE_SHOWN_EVENT,
   CAPTURE_WIDTH,
+  COPY_YESTERDAY_DIGEST_EVENT,
   DATABASE_URL,
   JOURNAL_CHANGED_EVENT,
   NOTE_CAPTURED_EVENT,
@@ -111,6 +113,9 @@ export function createTauriDesktop(): Desktop {
 
     onCaptureShown: (handle) => listen(CAPTURE_SHOWN_EVENT, () => handle()),
 
+    onYesterdayDigestRequested: (handle) =>
+      listen(COPY_YESTERDAY_DIGEST_EVENT, () => handle()),
+
     announceCapturedNote: (journalDay) =>
       emit(NOTE_CAPTURED_EVENT, { journalDay }),
     onNoteCaptured: (handle) =>
@@ -139,6 +144,10 @@ export function createTauriDesktop(): Desktop {
         await (startAtLogin ? enable() : disable())
       }
     },
+
+    // The OS writes it, not the webview: the Tray Menu copies with no window
+    // focused, where the webview's own clipboard is not allowed to.
+    copyToClipboard: (text) => writeText(text),
 
     exportNotes: (markdown, fileName) =>
       invoke<ExportedFile>('export_notes', { markdown, fileName }),

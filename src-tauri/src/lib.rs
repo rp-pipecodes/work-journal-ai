@@ -23,6 +23,7 @@ const TRAY_ID: &str = "tray";
 const NEW_NOTE_MENU_ITEM: &str = "new-note";
 
 const VIEW_NOTES_MENU_ITEM: &str = "view-notes";
+const COPY_YESTERDAY_DIGEST_MENU_ITEM: &str = "copy-yesterday-digest";
 const SETTINGS_MENU_ITEM: &str = "settings";
 const QUIT_MENU_ITEM: &str = "quit";
 
@@ -53,6 +54,14 @@ const THEME_KEY: &str = "theme";
 /// docs/adr/0002-capture-window-is-hidden-never-closed.md.
 const CAPTURE_SHOWN_EVENT: &str = "capture://shown";
 
+/// Asked of the capture window when the Tray Menu wants yesterday's Digest.
+/// This side owns the menu but not the Notes — they are only reachable through
+/// plugin-sql from a webview — so the tray asks and the window answers. The
+/// capture window is the one that is always there to hear it; see
+/// docs/adr/0002-capture-window-is-hidden-never-closed.md. Must match
+/// `COPY_YESTERDAY_DIGEST_EVENT` in `src/platform/desktop.ts`.
+const COPY_YESTERDAY_DIGEST_EVENT: &str = "digest://yesterday";
+
 /// Relative, so plugin-sql resolves it inside the app's data directory and the
 /// journal survives a restart of the app and of the machine.
 const DATABASE_URL: &str = "sqlite:work-journal.db";
@@ -75,6 +84,7 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(
             tauri_plugin_sql::Builder::new()
                 .add_migrations(DATABASE_URL, migrations())
@@ -529,6 +539,24 @@ fn activate_for_tray_menu() {
     }
 }
 
+/// Asks the capture window for yesterday's Digest. Nothing more happens here:
+/// the day, the Notes and the Markdown are all the journal's, and the window
+/// puts the result on the clipboard itself.
+///
+/// A failure is not worth taking the app down for — the clipboard simply keeps
+/// what it had, which is the same thing an empty yesterday does.
+fn copy_yesterday_digest(app: &tauri::AppHandle) {
+    if app.get_webview_window(CAPTURE_WINDOW).is_none() {
+        log::warn!("there is no capture window to render yesterday's Digest");
+        return;
+    }
+    // Addressed rather than broadcast: one window answers this, and a second
+    // one hearing it would copy the same Digest twice over the first.
+    if let Err(error) = app.emit_to(CAPTURE_WINDOW, COPY_YESTERDAY_DIGEST_EVENT, ()) {
+        log::warn!("could not ask for yesterday's Digest: {error}");
+    }
+}
+
 /// The Tray Menu — the Entry Point that always works, and the one Settings
 /// points at when the Hotkey cannot be registered. Quit is here because without
 /// a Dock icon it is the only way out.
@@ -547,12 +575,28 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     app.manage(NewNoteMenuItem(new_note.clone()));
     let view_notes =
         MenuItem::with_id(app, VIEW_NOTES_MENU_ITEM, "View Notes", true, None::<&str>)?;
+    // The other half of the loop: what was captured yesterday, ready to paste
+    // into the work log the user owes their chat group every morning.
+    let copy_yesterday = MenuItem::with_id(
+        app,
+        COPY_YESTERDAY_DIGEST_MENU_ITEM,
+        "Copy Yesterday's Digest",
+        true,
+        None::<&str>,
+    )?;
     let settings = MenuItem::with_id(app, SETTINGS_MENU_ITEM, "Settings", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, QUIT_MENU_ITEM, "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
-        &[&new_note, &view_notes, &settings, &separator, &quit],
+        &[
+            &new_note,
+            &view_notes,
+            &copy_yesterday,
+            &settings,
+            &separator,
+            &quit,
+        ],
     )?;
 
     // tray-icon opens the menu from `mouseDown` via `performClick`. On an
@@ -579,6 +623,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             NEW_NOTE_MENU_ITEM => start_capture(app),
             VIEW_NOTES_MENU_ITEM => open_history(app),
+            COPY_YESTERDAY_DIGEST_MENU_ITEM => copy_yesterday_digest(app),
             SETTINGS_MENU_ITEM => open_settings(app),
             QUIT_MENU_ITEM => app.exit(0),
             _ => {}
