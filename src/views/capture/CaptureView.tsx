@@ -39,23 +39,37 @@ export default function CaptureView({
   const prefix = markerPrefix(body)
   const predictions = prefix === null ? [] : offered
 
+  // Fitting the window to the Predictions is the window's business, not the
+  // Note's: a Capture that could not resize still holds everything the user
+  // typed and still commits it. So a failure is logged and goes no further —
+  // but it is logged, because the only symptom is a window of the wrong size,
+  // which reads as a layout bug rather than the denied call it is.
+  const fit = useCallback(
+    (predictionCount: number) => {
+      desktop.fitCapture(predictionCount).catch((error: unknown) => {
+        console.error('could not fit the Capture window', error)
+      })
+    },
+    [desktop],
+  )
+
   const begin = useCallback(() => {
     setBody('')
     setRefusals(0)
     setOffered([])
     setHighlight(0)
-    void desktop.fitCapture(0)
+    fit(0)
     field.current?.focus()
-  }, [desktop])
+  }, [fit])
 
   const dismiss = useCallback(async () => {
     setBody('')
     setRefusals(0)
     setOffered([])
     setHighlight(0)
-    void desktop.fitCapture(0)
+    fit(0)
     await desktop.dismissCapture()
-  }, [desktop])
+  }, [desktop, fit])
 
   const commit = useCallback(
     async (text: string) => {
@@ -102,7 +116,7 @@ export default function CaptureView({
       setBody(next)
       setOffered([])
       setHighlight(0)
-      void desktop.fitCapture(0)
+      fit(0)
       // After the fill, the cursor sits ready for the Body.
       requestAnimationFrame(() => {
         const input = field.current
@@ -111,7 +125,7 @@ export default function CaptureView({
         input.setSelectionRange(next.length, next.length)
       })
     },
-    [desktop],
+    [fit],
   )
 
   useEffect(() => {
@@ -136,7 +150,7 @@ export default function CaptureView({
 
   useEffect(() => {
     if (prefix === null) {
-      void desktop.fitCapture(0)
+      fit(0)
       return
     }
 
@@ -147,13 +161,13 @@ export default function CaptureView({
       if (cancelled) return
       setOffered(names)
       setHighlight(0)
-      void desktop.fitCapture(names.length)
+      fit(names.length)
     })()
 
     return () => {
       cancelled = true
     }
-  }, [prefix, journal, desktop])
+  }, [prefix, journal, fit])
 
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (predictions.length > 0 && prefix !== null) {
