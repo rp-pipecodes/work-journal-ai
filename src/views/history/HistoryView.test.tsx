@@ -155,8 +155,16 @@ describe('every filter control', () => {
   it('says what it is to a screen reader', async () => {
     await showHistory([{ at: '2026-03-09T10:00:00', body: 'Monday' }])
 
-    expect(within(header()).getByLabelText('Days')).toBeTruthy()
-    expect(within(header()).getByLabelText('Project')).toBeTruthy()
+    // Each says what it is — and the two that hold a value say that too,
+    // rather than letting a label swallow it.
+    expect(
+      within(header()).getByRole('button', {
+        name: `Days ${formatDayRange('2026-03-09', '2026-03-09')}`,
+      }),
+    ).toBeTruthy()
+    expect(
+      within(header()).getByRole('combobox', { name: 'Project Any Project' }),
+    ).toBeTruthy()
     expect(within(header()).getByLabelText('Search')).toBeTruthy()
   })
 })
@@ -229,10 +237,11 @@ async function showHistory(captured: Array<{ at: string; body: string }>) {
     desktop,
     core,
     notes,
-    // Scoped to the header: a Note row has a Project of its own, and this
-    // file is about the Filter.
-    days: () => within(header()).getByLabelText('Days'),
-    project: () => within(header()).getByLabelText('Project'),
+    // Found by what a screen reader hears: the name of the control, and then
+    // what it is currently set to. Scoped to the header, because a Note row
+    // has a Project of its own and this file is about the Filter.
+    days: () => within(header()).getByRole('button', { name: /^Days/ }),
+    project: () => within(header()).getByRole('combobox', { name: /^Project/ }),
   }
 }
 

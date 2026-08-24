@@ -106,10 +106,6 @@ export default function HistoryView({
   // differently: copying the same Filter twice says the same words both times,
   // and both times the reader asked to be told.
   const copying = useRef(false)
-  // Whether a Filter control has a popup open. Its own Escape closes it, and
-  // the keystroke still reaches this view through the React tree even though
-  // the popup itself is portalled out of it.
-  const [picking, setPicking] = useState(false)
   const page = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -167,7 +163,10 @@ export default function HistoryView({
   // Dismissing the window closes it — History is not kept resident.
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
     if (event.key !== 'Escape' || editing !== null || deleting !== null) return
-    if (picking) return
+    // A popup — the day picker, the Project picker — is portalled out of the
+    // page and closes itself on Escape, but the keystroke still arrives here
+    // through the React tree. It belongs to whatever it was typed into.
+    if (!page.current?.contains(event.target as Node)) return
 
     if (searching) {
       // Clears the results and empties the field; the window stays open.
@@ -238,13 +237,11 @@ export default function HistoryView({
             filter={filter}
             onPick={pick}
             onChoosePreset={applyPreset}
-            onOpenChange={setPicking}
           />
           <ProjectConstraintField
             constraint={constraintOf(filter)}
             projects={projects}
             onNarrow={(constraint) => void session.narrowTo(constraint)}
-            onOpenChange={setPicking}
           />
           <SearchField
             term={term}
@@ -629,12 +626,10 @@ function DayRangeField({
   filter,
   onPick,
   onChoosePreset,
-  onOpenChange,
 }: {
   filter: Filter
   onPick: (from: string, to: string) => void
   onChoosePreset: (preset: FilterPreset) => void
-  onOpenChange: (open: boolean) => void
 }) {
   const [open, setOpen] = useState(false)
   // The first end of a range being picked, while the second is still to come.
@@ -643,7 +638,6 @@ function DayRangeField({
 
   function show(next: boolean) {
     setOpen(next)
-    onOpenChange(next)
     if (!next) setStarted(null)
   }
 
@@ -661,9 +655,15 @@ function DayRangeField({
   return (
     <Popover open={open} onOpenChange={show}>
       <PopoverTrigger
-        render={<Button variant="outline" size="sm" aria-label="Days" />}
+        render={<Button variant="outline" size="sm" />}
       >
         <CalendarRangeIcon data-icon="inline-start" />
+        {/*
+          Named and read at once: a label that replaced the button's text
+          would announce "Days" and keep the range — the whole point of the
+          control — to itself.
+        */}
+        <span className="sr-only">Days</span>{' '}
         {formatDayRange(filter.from, filter.to)}
       </PopoverTrigger>
       <PopoverContent align="start" className="w-auto gap-2 p-2">
@@ -686,6 +686,7 @@ function DayRangeField({
         <Calendar
           mode="range"
           autoFocus
+          // Monday, as every Preset's week is — see ADR-0006.
           weekStartsOn={1}
           defaultMonth={dayAsDate(filter.to)}
           selected={
@@ -725,13 +726,13 @@ function ProjectConstraintField({
   constraint,
   projects,
   onNarrow,
-  onOpenChange,
 }: {
   constraint: ProjectConstraint
   projects: string[]
   onNarrow: (constraint: ProjectConstraint) => void
-  onOpenChange: (open: boolean) => void
 }) {
+  const labelId = useId()
+  const valueId = useId()
   const chosen = projectChoice(constraint)
   const named =
     constraint.kind === 'named' && !projects.includes(constraint.name)
@@ -748,10 +749,18 @@ function ProjectConstraintField({
       items={options}
       value={chosen}
       onValueChange={(value) => onNarrow(projectConstraintFor(String(value)))}
-      onOpenChange={onOpenChange}
     >
-      <SelectTrigger size="sm" aria-label="Project" className="max-w-40">
-        <SelectValue />
+      {/* Same bargain as the days: the name of the control, then what it
+          currently narrows to. */}
+      <span id={labelId} className="sr-only">
+        Project
+      </span>
+      <SelectTrigger
+        size="sm"
+        aria-labelledby={`${labelId} ${valueId}`}
+        className="max-w-40"
+      >
+        <SelectValue id={valueId} />
       </SelectTrigger>
       <SelectContent>
         {options.map((option) => (
@@ -783,7 +792,7 @@ function SearchField({
     // the Digest are fixed things, a field is just as usable half as wide. It
     // gives way down to a readable width and then takes a row of its own,
     // rather than shrinking until nothing can be typed into it.
-    <label className="relative flex min-w-0 flex-1 basis-40 items-center">
+    <label className="relative flex min-w-32 flex-1 basis-40 items-center">
       <span className="sr-only">Search</span>
       <SearchIcon className="pointer-events-none absolute left-2 size-3 text-muted-foreground" />
       <Input
