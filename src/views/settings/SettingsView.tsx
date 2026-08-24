@@ -31,6 +31,7 @@ import { isTheme, type Theme } from '@/settings/theme'
 import {
   describeUnavailableHotkey,
   hotkeyForKeystroke,
+  keysOfHotkey,
   type HotkeyStatus,
 } from '@/settings/hotkey'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
@@ -586,10 +587,8 @@ function HotkeyRecorder({
   return (
     <div className="flex items-center gap-2">
       <KbdGroup role="group" aria-label="Current Hotkey">
-        {/* A Hotkey is spelled as the keys joined by `+`, and that is exactly
-            how it is taken apart again. Nothing yet while the Rust side is
-            still being asked. */}
-        {(hotkey?.hotkey.split('+') ?? ['…']).map((key) => (
+        {/* Nothing yet while the Rust side is still being asked. */}
+        {(hotkey === null ? ['…'] : keysOfHotkey(hotkey.hotkey)).map((key) => (
           <Kbd key={key}>{key}</Kbd>
         ))}
       </KbdGroup>
