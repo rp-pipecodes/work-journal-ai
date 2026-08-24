@@ -60,6 +60,10 @@ _Avoid_: Shortcut, keybinding, accelerator
 The menu bar icon's menu. The Entry Point that always works, so it is the fallback rather than a duplicate of the Hotkey.
 _Avoid_: Menu bar, status item
 
+**Tray Count**:
+How many Captured Notes today's Journal Day holds, shown beside the menu bar glyph. The app solicits nothing — no prompts, no scheduled nudges — so this is the only reminder to journal there is, and the only reason the app is noticed on a day nothing has been written. Captured Notes only: a count inflated by Imported Notes would reassure precisely on the days nothing was typed. A day with none reads as a blank rather than as a zero, because a total reads as a day already accounted for.
+_Avoid_: Badge, counter, notification
+
 ## Time
 
 **Captured At**:

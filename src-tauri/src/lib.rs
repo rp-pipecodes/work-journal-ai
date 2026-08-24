@@ -17,6 +17,9 @@ use tauri_plugin_store::StoreExt;
 /// The menu bar glyph, compiled in so the tray never depends on a file on disk.
 const TRAY_ICON: &[u8] = include_bytes!("../icons/tray-icon.png");
 
+/// The one tray icon, named so the count can find it again after it is built.
+const TRAY_ID: &str = "tray";
+
 const NEW_NOTE_MENU_ITEM: &str = "new-note";
 
 const VIEW_NOTES_MENU_ITEM: &str = "view-notes";
@@ -81,7 +84,8 @@ pub fn run() {
             dismiss_capture,
             hotkey_status,
             set_hotkey,
-            export_notes
+            export_notes,
+            show_tray_count
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -467,6 +471,25 @@ fn export_notes(
     export::write(&directory, &file_name, &markdown).map_err(|error| error.to_string())
 }
 
+/// Puts today's Captured Note count beside the menu bar glyph. What it says is
+/// decided in `src/journal/tray-count.ts` and rendered by the journal core —
+/// this only carries the text across, because the count lives in the database
+/// and the tray lives here.
+///
+/// A missing tray is not worth failing over: the count is a reminder, and the
+/// window that asked for it is in the middle of a Capture.
+#[tauri::command]
+fn show_tray_count(app: tauri::AppHandle, title: String) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        log::warn!("there is no tray to count on");
+        return;
+    };
+
+    if let Err(error) = tray.set_title(Some(title)) {
+        log::warn!("the tray kept the old count: {error}");
+    }
+}
+
 /// Ends a Capture, whether it committed a Note or discarded one. The window is
 /// only ever hidden — see docs/adr/0002-capture-window-is-hidden-never-closed.md.
 #[tauri::command]
@@ -537,7 +560,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     // the app, and the activation cancels the menu ~250ms later — first click
     // after launch flashes open and shut. Open from `mouseUp` after becoming
     // active, so the menu is only shown once activation has finished.
-    let mut tray = TrayIconBuilder::with_id("tray")
+    let mut tray = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {

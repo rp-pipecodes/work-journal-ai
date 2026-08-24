@@ -5,11 +5,11 @@
  */
 
 import type { Desktop } from '@/platform/desktop'
-import { createJournal, type Clock, type Journal } from './journal'
+import { createJournal, systemClock, type Clock, type Journal } from './journal'
 
 export async function createAppJournal({
   desktop,
-  clock = { now: () => new Date() },
+  clock = systemClock,
 }: {
   desktop: Desktop
   clock?: Clock

@@ -12,7 +12,9 @@ import {
   formatJournalDay,
   formatProject,
   formatTimeOfDay,
+  formatTrayCount,
   exportFileName,
+  msUntilNextJournalDay,
   groupByJournalDay,
   journalDayFor,
   markerPrefix,
@@ -1543,3 +1545,96 @@ describe('decideArrival', () => {
 function local(wallClock: string): Date {
   return new Date(wallClock)
 }
+
+describe('capturedNoteCount', () => {
+  it('counts the Captured Notes filed under one Journal Day', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+
+    await journal.capture('the migration landed')
+    await journal.capture('#habic reviewed the tray work')
+    clock.set(local('2026-03-12T09:00:00'))
+    await journal.capture('took the on-call handover')
+
+    expect(await journal.capturedNoteCount('2026-03-11')).toBe(2)
+    expect(await journal.capturedNoteCount('2026-03-12')).toBe(1)
+  })
+
+  it('is zero on a day nothing was written on', async () => {
+    const { journal } = await journalAt('2026-03-11T09:00:00')
+
+    await journal.capture('the migration landed')
+
+    expect(await journal.capturedNoteCount('2026-03-12')).toBe(0)
+  })
+
+  it('is zero on an empty journal', async () => {
+    const { journal } = await journalAt('2026-03-11T09:00:00')
+
+    expect(await journal.capturedNoteCount('2026-03-11')).toBe(0)
+  })
+
+  it('falls as Notes are deleted', async () => {
+    const { journal } = await journalAt('2026-03-11T09:00:00')
+
+    const note = await journal.capture('the migration landed')
+    await journal.capture('took the on-call handover')
+    await journal.delete(note!.id)
+
+    expect(await journal.capturedNoteCount('2026-03-11')).toBe(1)
+  })
+
+  it('follows a Note refiled onto another day', async () => {
+    const { journal } = await journalAt('2026-03-11T09:00:00')
+
+    const note = await journal.capture('the migration landed')
+    await journal.refile(note!.id, '2026-03-10')
+
+    expect(await journal.capturedNoteCount('2026-03-11')).toBe(0)
+    expect(await journal.capturedNoteCount('2026-03-10')).toBe(1)
+  })
+})
+
+describe('formatTrayCount', () => {
+  it('is the count itself once something has been written', () => {
+    expect(formatTrayCount(1)).toBe('1')
+    expect(formatTrayCount(12)).toBe('12')
+  })
+
+  it('is not a number at all on a day nothing was written on', () => {
+    expect(formatTrayCount(0)).not.toBe('0')
+    expect(formatTrayCount(0)).not.toBe('')
+  })
+
+  it('reads as a blank waiting to be filled rather than a total', () => {
+    expect(formatTrayCount(0)).toBe('–')
+  })
+})
+
+describe('msUntilNextJournalDay', () => {
+  it('is the time left until the local day turns over', () => {
+    expect(msUntilNextJournalDay(local('2026-03-12T23:59:59.000'))).toBe(1_000)
+    expect(msUntilNextJournalDay(local('2026-03-12T00:00:00.000'))).toBe(
+      24 * 60 * 60 * 1000,
+    )
+  })
+
+  it('lands on the first instant of the next Journal Day', () => {
+    const now = local('2026-03-12T17:04:23.500')
+    const next = new Date(now.getTime() + msUntilNextJournalDay(now))
+
+    expect(journalDayFor(next)).toBe('2026-03-13')
+    expect(journalDayFor(new Date(next.getTime() - 1))).toBe('2026-03-12')
+  })
+
+  it('follows the wall clock across a DST transition', () => {
+    // Europe/Lisbon springs forward at 01:00 on 2026-03-29, so that day is 23
+    // hours long — a rollover counted as a fixed 24 would land an hour into
+    // the day after. See vite.config.ts for why the suite pins the timezone.
+    const now = local('2026-03-29T00:00:00.000')
+
+    expect(msUntilNextJournalDay(now)).toBe(23 * 60 * 60 * 1000)
+    expect(
+      journalDayFor(new Date(now.getTime() + msUntilNextJournalDay(now))),
+    ).toBe('2026-03-30')
+  })
+})

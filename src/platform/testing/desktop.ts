@@ -15,12 +15,16 @@ import type {
  * is what the real one does too, so a test sees what a second window would.
  */
 export interface FakeDesktop extends Desktop {
+  /** Shows the capture window, as an Entry Point would. */
+  beginCapture(): void
   /** What the settings store holds, readable without going through a facade. */
   stored: Record<string, unknown>
   /** Whether the login item is there, as the OS would report it. */
   loginItem: boolean
   /** Every export written, most recent last. */
   exported: Array<{ markdown: string; fileName: string }>
+  /** What is beside the menu bar glyph; null until something is put there. */
+  trayTitle: string | null
 }
 
 export function fakeDesktop({
@@ -38,13 +42,18 @@ export function fakeDesktop({
   /** Overridden by the tests about a settings file that cannot be read. */
   openSettingsStore?: () => Promise<SettingsStore>
 } = {}): FakeDesktop {
+  const captureShown = subscribers<void>()
   const noteCaptured = subscribers<string>()
+  const journalChanged = subscribers<void>()
   const themeChanged = subscribers<Theme>()
 
   const desktop: FakeDesktop = {
     stored,
     loginItem: false,
     exported: [],
+    trayTitle: null,
+
+    beginCapture: () => captureShown.announce(undefined),
 
     windowLabel: () => 'history',
     appIdentity: async () => appIdentity,
@@ -75,10 +84,12 @@ export function fakeDesktop({
 
     dismissCapture: async () => {},
     fitCapture: async () => {},
-    onCaptureShown: async () => () => {},
+    onCaptureShown: async (handle) => captureShown.add(handle),
 
     announceCapturedNote: async (journalDay) => noteCaptured.announce(journalDay),
     onNoteCaptured: async (handle) => noteCaptured.add(handle),
+    announceJournalChanged: async () => journalChanged.announce(undefined),
+    onJournalChanged: async (handle) => journalChanged.add(handle),
     announceTheme: async (theme) => themeChanged.announce(theme),
     onThemeChanged: async (handle) => themeChanged.add(handle),
 
@@ -93,6 +104,10 @@ export function fakeDesktop({
     exportNotes: async (markdown, fileName): Promise<ExportedFile> => {
       desktop.exported.push({ markdown, fileName })
       return { path: `/tmp/${fileName}`, fileName }
+    },
+
+    showTrayCount: async (title) => {
+      desktop.trayTitle = title
     },
   }
 
