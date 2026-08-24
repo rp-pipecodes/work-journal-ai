@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -330,7 +331,7 @@ function NoteLine({
 }) {
   return (
     <li className="group relative flex gap-3 rounded-md px-2 py-1 type-body hover:bg-muted/40 focus-within:bg-muted/40">
-      <span className="shrink-0 pt-px font-mono type-meta tabular-nums text-muted-foreground">
+      <span className="shrink-0 pt-px font-mono type-meta text-muted-foreground">
         {formatTimeOfDay(note.capturedAt)}
       </span>
 
@@ -343,9 +344,7 @@ function NoteLine({
             onClick={onEdit}
             className="flex-1 cursor-text rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           >
-            <span className="mr-2 shrink-0 font-mono type-meta text-muted-foreground">
-              {formatProject(note.project)}
-            </span>
+            <ProjectChip project={note.project} className="mr-2" />
             {note.body}
             {note.editedAt !== null && (
               // Provenance for the reader: the wording is not necessarily the
@@ -417,6 +416,24 @@ function NoteLine({
  * — take History to that day in full. The Notes are not correctable here: a
  * result is a signpost to a day, and the day is where the list lives.
  */
+/*
+ * The accent marks a filed Project and nothing else on the line. `Unfiled` is
+ * the absence of a Project rather than one of them, so it stays quiet.
+ */
+function ProjectChip({ project, className }: { project: string | null; className?: string }) {
+  return (
+    <span
+      className={cn(
+        'shrink-0 font-mono type-meta',
+        project === null ? 'text-muted-foreground' : 'text-primary',
+        className,
+      )}
+    >
+      {formatProject(project)}
+    </span>
+  )
+}
+
 function ResultLine({ note, onShow }: { note: Note; onShow: () => void }) {
   return (
     <li>
@@ -425,9 +442,7 @@ function ResultLine({ note, onShow }: { note: Note; onShow: () => void }) {
         onClick={onShow}
         className="flex w-full gap-3 rounded-md px-2 py-1 text-left type-body outline-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/30"
       >
-        <span className="shrink-0 font-mono type-meta text-muted-foreground">
-          {formatProject(note.project)}
-        </span>
+        <ProjectChip project={note.project} />
         <span className="flex-1">{note.body}</span>
         <span className="shrink-0 pt-px type-meta text-muted-foreground">
           {formatJournalDay(note.journalDay)}
@@ -757,7 +772,7 @@ function DayField({
         }
       }}
       aria-label={label}
-      className="rounded-md border border-border bg-transparent px-1.5 py-0.5 type-meta tabular-nums text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+      className="rounded-md border border-border bg-transparent px-1.5 py-0.5 type-meta text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
     />
   )
 }

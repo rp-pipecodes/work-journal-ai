@@ -332,7 +332,7 @@ function HotkeyRecorder({
 
   return (
     <>
-      <span className="rounded-md border border-border px-3 py-1.5 font-mono type-body tabular-nums">
+      <span className="rounded-md border border-border px-3 py-1.5 font-mono type-body">
         {hotkey?.hotkey ?? '…'}
       </span>
       <Button variant="outline" size="sm" onClick={onStart}>

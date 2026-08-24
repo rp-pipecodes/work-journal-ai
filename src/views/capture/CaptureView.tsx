@@ -229,7 +229,7 @@ export default function CaptureView({
         spellCheck={false}
         // The ring is drawn inside: the field all but fills the window, and an
         // outset one would be clipped by the window's own edge.
-        className="h-16 w-full shrink-0 rounded-2xl bg-transparent px-5 type-title outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
+        className="h-16 w-full shrink-0 rounded-2xl bg-transparent px-5 type-field outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
       />
       {predictions.length > 0 && (
         <ul
@@ -275,7 +275,7 @@ export default function CaptureView({
           key={refusals}
           id={PROBLEM_ID}
           role="alert"
-          className="shrink-0 px-5 pb-2 type-micro text-destructive"
+          className="shrink-0 px-5 pb-2 type-meta text-destructive"
         >
           {CAPTURE_REFUSED}
         </p>
