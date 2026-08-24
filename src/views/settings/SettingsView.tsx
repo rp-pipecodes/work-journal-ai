@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Kbd, KbdGroup } from '@/components/ui/kbd'
+import { Separator } from '@/components/ui/separator'
+import { Switch } from '@/components/ui/switch'
+import { Toaster } from '@/components/ui/sonner'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,7 +27,7 @@ import type {
   Desktop,
 } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
-import { describeTheme, isTheme, THEME_CHOICES } from '@/settings/theme'
+import { isTheme, type Theme } from '@/settings/theme'
 import {
   describeUnavailableHotkey,
   hotkeyForKeystroke,
@@ -29,9 +36,28 @@ import {
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 
 /**
+ * The Themes as a segmented control offers them: the two palettes first,
+ * because they are what the user is choosing between, and deferring to the OS
+ * last. Short labels, because each one sits inside a chip rather than a
+ * sentence.
+ */
+const THEME_SEGMENTS: readonly { theme: Theme; label: string }[] = [
+  { theme: 'light', label: 'Light' },
+  { theme: 'dark', label: 'Dark' },
+  { theme: 'system', label: 'System' },
+]
+
+/**
  * The things about the app the user gets to decide: the Hotkey, the Theme,
  * whether the app starts at login, whether today's meetings are imported — and
  * the way out of the SQLite file, which is an action rather than a setting.
+ *
+ * Laid out the way macOS lays settings out: what the setting is on the left,
+ * the control that changes it on the right, and a separator wherever the
+ * subject changes. Every control here is the app's own — a native widget
+ * brings its own font, height and focus ring, and belongs to the OS rather
+ * than to this window.
+ *
  * The window behind this view is created on demand and genuinely closed on
  * dismiss, so the view loads once on mount and needs no reset — see
  * docs/adr/0002-capture-window-is-hidden-never-closed.md.
@@ -241,7 +267,11 @@ export default function SettingsView({
     })
   }
 
-  /** The whole journal, on disk and outside this app. */
+  /**
+   * The whole journal, on disk and outside this app. The result is said twice
+   * on purpose: a toast, which is where the user is looking, and the line
+   * under the button, which is still there once the toast has gone.
+   */
   function exportAll() {
     setExporting(true)
     setExported(null)
@@ -252,16 +282,19 @@ export default function SettingsView({
           digest.markdown,
           exportFileName(new Date()),
         )
-        setExported(
+        const said =
           digest.noteCount === 0
             ? `Exported an empty journal to ${file.path}.`
             : `Exported ${digest.noteCount} Note${
                 digest.noteCount === 1 ? '' : 's'
-              } to ${file.path}.`,
-        )
+              } to ${file.path}.`
+        setExported(said)
+        toast.success(said)
       } catch (error) {
         console.error('could not export the journal', error)
-        setExported('Could not export the journal.')
+        const said = 'Could not export the journal.'
+        setExported(said)
+        toast.error(said)
       } finally {
         setExporting(false)
       }
@@ -273,13 +306,13 @@ export default function SettingsView({
       ref={page}
       tabIndex={-1}
       onKeyDown={onKeyDown}
-      className="flex h-screen flex-col gap-6 overflow-y-auto bg-background px-6 py-5 type-body outline-none"
+      className="flex h-screen flex-col overflow-y-auto bg-background px-6 py-5 type-body outline-none"
     >
-      <Section
-        title="Hotkey"
-        explanation="The global combination that begins a Capture from anywhere."
-      >
-        <div className="flex items-center gap-3">
+      <Group>
+        <Row
+          label="Hotkey"
+          explanation="The global combination that begins a Capture from anywhere."
+        >
           <HotkeyRecorder
             recording={recording}
             hotkey={hotkey}
@@ -290,7 +323,7 @@ export default function SettingsView({
             onAbandon={() => setRecording(false)}
             onRecord={remap}
           />
-        </div>
+        </Row>
 
         {hotkey?.state === 'unavailable' && (
           <Problem>
@@ -305,73 +338,87 @@ export default function SettingsView({
           own window cannot be detected — the Hotkey will simply take precedence
           there.
         </Aside>
-      </Section>
+      </Group>
 
-      <Section
-        title="Theme"
-        explanation="Whether the app is light or dark, and whether it decides that for itself."
-      >
-        <label className="flex items-center gap-2 type-body">
-          <span className="text-muted-foreground">Theme</span>
-          <select
-            value={theme}
-            onChange={(event) => {
-              // The picker only ever offers Themes; anything else is a bug
-              // rather than a value to store.
-              if (isTheme(event.target.value)) {
-                setTheme(event.target.value)
+      <Separator />
+
+      <Group>
+        <Row
+          label="Theme"
+          explanation="Whether the app is light or dark, and whether it decides that for itself."
+        >
+          <ToggleGroup
+            aria-labelledby="theme-heading"
+            spacing={0}
+            // A segmented control the way macOS draws one: one recessed track,
+            // and the chosen segment raised out of it.
+            className="gap-0 rounded-md bg-muted p-0.5"
+            value={[theme]}
+            onValueChange={(next) => {
+              // Pressing the Theme already chosen deselects it, which is not a
+              // Theme at all — the app is always painted as something, so
+              // there is nothing to record.
+              const chosen = next[0]
+              if (isTheme(chosen)) {
+                setTheme(chosen)
               }
             }}
-            className="rounded-md border border-border bg-transparent px-2 py-1 type-body text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
           >
-            {THEME_CHOICES.map((choice) => (
-              <option key={choice} value={choice}>
-                {describeTheme(choice)}
-              </option>
+            {THEME_SEGMENTS.map(({ theme: choice, label }) => (
+              <ToggleGroupItem
+                key={choice}
+                value={choice}
+                className="rounded-sm! px-2.5 hover:bg-transparent data-pressed:bg-background data-pressed:text-foreground data-pressed:shadow-sm"
+              >
+                {label}
+              </ToggleGroupItem>
             ))}
-          </select>
-        </label>
+          </ToggleGroup>
+        </Row>
+
         <Aside>
           {theme === 'system'
             ? `Following the system, which is currently ${resolved}. Cmd+Shift+D switches to the other one.`
             : `Cmd+Shift+D switches between light and dark from any window.`}
         </Aside>
-      </Section>
+      </Group>
 
-      <Section
-        title="Start at login"
-        explanation="Whether Work Journal launches when you log in."
-      >
-        <label className="flex items-center gap-2 type-body">
-          <input
-            type="checkbox"
+      <Separator />
+
+      <Group>
+        <Row
+          label="Start at login"
+          explanation="Whether Work Journal launches when you log in."
+          controls="start-at-login"
+        >
+          <Switch
+            id="start-at-login"
             checked={startAtLogin}
-            onChange={(event) => toggleStartAtLogin(event.target.checked)}
-            className="size-4 accent-foreground"
+            onCheckedChange={toggleStartAtLogin}
           />
-          <span>Start Work Journal at login</span>
-        </label>
-      </Section>
+        </Row>
+      </Group>
 
-      <Section
-        title="Meetings"
-        explanation="Today's meetings, added to the journal as they end. Never a backfill."
-      >
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
+      <Separator />
+
+      <Group>
+        <Row
+          label="Add today's meetings to the journal"
+          explanation="Today's meetings, added to the journal as they end. Never a backfill."
+          controls="import-meetings"
+        >
+          <Switch
+            id="import-meetings"
             checked={importing}
-            // Pressed, the box means the opposite of the wish rather than the
-            // opposite of what it reads: with the permission gone it reads off
-            // while the wish is on, and a press there is the user withdrawing
-            // it — the reason underneath goes with it. Reading the box back
-            // would ask to turn on what is already wished for, leaving no way
-            // to change their mind.
-            onChange={() => toggleImport(!importMeetings)}
-            className="size-4 accent-foreground"
+            // Pressed, the switch means the opposite of the wish rather than
+            // the opposite of what it reads: with the permission gone it reads
+            // off while the wish is on, and a press there is the user
+            // withdrawing it — the reason underneath goes with it. Reading the
+            // switch back would ask to turn on what is already wished for,
+            // leaving no way to change their mind.
+            onCheckedChange={() => toggleImport(!importMeetings)}
           />
-          <span>Add today's meetings to the journal</span>
-        </label>
+        </Row>
 
         {calendarProblem !== null && <Problem>{calendarProblem}</Problem>}
 
@@ -389,35 +436,47 @@ export default function SettingsView({
           it is never added again. Declined meetings and all-day blocks are
           never added in the first place.
         </Aside>
-      </Section>
+      </Group>
 
-      <Section
-        title="Export"
-        explanation="Every Note as Markdown, in your Downloads folder — nothing captured here is locked in."
-      >
-        <div className="flex items-center gap-3">
+      <Separator />
+
+      <Group>
+        <Row
+          label="Export"
+          explanation="Every Note as Markdown, in your Downloads folder — nothing captured here is locked in."
+        >
           <Button variant="outline" size="sm" onClick={exportAll} disabled={exporting}>
             {exporting ? 'Exporting…' : 'Export all to Markdown'}
           </Button>
-          <span role="status" aria-live="polite" className="type-meta text-muted-foreground">
-            {exported}
-          </span>
-        </div>
-      </Section>
+        </Row>
+
+        {/* The toast is where the user is looking; this is where the answer
+            stays. It is here before there is anything to say, so that what it
+            says next is announced rather than merely appearing. */}
+        <p
+          role="status"
+          aria-live="polite"
+          className="type-meta text-muted-foreground"
+        >
+          {exported}
+        </p>
+      </Group>
 
       {appIdentity !== null && (
-        <footer
-          aria-label="Application version"
-          className="mt-auto flex items-center justify-center gap-2 type-meta text-muted-foreground"
-        >
-          <span>{appIdentity.version}</span>
-          {appIdentity.isDevelopment && (
-            <Badge variant="outline">Dev</Badge>
-          )}
-        </footer>
+        <>
+          <Separator className="mt-auto" />
+          <footer
+            aria-label="Application version"
+            className="flex items-center justify-center gap-2 py-3 type-meta text-muted-foreground"
+          >
+            <span>{appIdentity.version}</span>
+            {appIdentity.isDevelopment && <Badge variant="outline">Dev</Badge>}
+          </footer>
+        </>
       )}
 
       <FirstRunQuestion open={asking} onAnswer={answerStartAtLogin} />
+      <Toaster />
     </div>
   )
 }
@@ -452,21 +511,22 @@ function CalendarTicks({
   }
 
   return (
-    <fieldset className="flex flex-col gap-1">
+    <fieldset className="flex flex-col gap-2 pl-1">
       <legend className="sr-only">Calendars to import from</legend>
       {calendars.map((calendar) => (
-        <label key={calendar.id} className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
+        <div key={calendar.id} className="flex items-center gap-2">
+          <Checkbox
+            id={`calendar-${calendar.id}`}
             checked={ticked.includes(calendar.id)}
-            onChange={(event) => onToggle(calendar.id, event.target.checked)}
-            className="size-4 accent-foreground"
+            onCheckedChange={(next: boolean) => onToggle(calendar.id, next)}
           />
-          <span>{calendar.title}</span>
-          <span className="text-xs text-muted-foreground">
+          <label htmlFor={`calendar-${calendar.id}`} className="type-meta">
+            {calendar.title}
+          </label>
+          <span className="type-micro text-muted-foreground">
             {calendar.source}
           </span>
-        </label>
+        </div>
       ))}
     </fieldset>
   )
@@ -474,7 +534,9 @@ function CalendarTicks({
 
 /**
  * The Hotkey as it stands, and the one way to change it: press the combination
- * rather than describe it, so what is recorded is what the OS will see.
+ * rather than describe it, so what is recorded is what the OS will see. It
+ * reads as keys because that is what it is — one chip per key, in the order
+ * they are held down.
  */
 function HotkeyRecorder({
   recording,
@@ -514,7 +576,7 @@ function HotkeyRecorder({
         autoFocus
         onKeyDown={onKeyDown}
         onBlur={onAbandon}
-        className="rounded-md border border-ring bg-transparent px-3 py-1.5 font-mono type-body text-foreground outline-none ring-2 ring-ring/30"
+        className="rounded-md border border-ring bg-transparent px-3 py-1.5 type-meta text-foreground outline-none ring-2 ring-ring/30"
       >
         Press a combination…
       </button>
@@ -522,14 +584,19 @@ function HotkeyRecorder({
   }
 
   return (
-    <>
-      <span className="rounded-md border border-border px-3 py-1.5 font-mono type-body">
-        {hotkey?.hotkey ?? '…'}
-      </span>
+    <div className="flex items-center gap-2">
+      <KbdGroup role="group" aria-label="Current Hotkey">
+        {/* A Hotkey is spelled as the keys joined by `+`, and that is exactly
+            how it is taken apart again. Nothing yet while the Rust side is
+            still being asked. */}
+        {(hotkey?.hotkey.split('+') ?? ['…']).map((key) => (
+          <Kbd key={key}>{key}</Kbd>
+        ))}
+      </KbdGroup>
       <Button variant="outline" size="sm" onClick={onStart}>
         Change
       </Button>
-    </>
+    </div>
   )
 }
 
@@ -569,22 +636,53 @@ function FirstRunQuestion({
   )
 }
 
-function Section({
-  title,
+/** Settings about one subject, between two separators. */
+function Group({ children }: { children: React.ReactNode }) {
+  return <section className="flex flex-col gap-2 py-4">{children}</section>
+}
+
+/**
+ * One setting: what it is on the left, the control that changes it on the
+ * right. The name of the setting stays a heading, because that is what it is —
+ * a settings list is a document with sections, and a screen reader navigates
+ * it as one. `controls` names the control's element inside that heading, so the
+ * name is also the control's label rather than text that merely sits beside it.
+ */
+function Row({
+  label,
   explanation,
+  controls,
   children,
 }: {
-  title: string
+  label: string
   explanation: string
+  controls?: string
   children: React.ReactNode
 }) {
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="type-section">{title}</h2>
-      <p className="type-meta text-muted-foreground">{explanation}</p>
-      {children}
-    </section>
+    <div className="flex items-start justify-between gap-6">
+      <div className="flex flex-col gap-0.5">
+        <h2 id={`${headingId(label)}-heading`} className="type-section">
+          {controls === undefined ? (
+            label
+          ) : (
+            <label htmlFor={controls}>{label}</label>
+          )}
+        </h2>
+        <p className="type-meta text-muted-foreground">{explanation}</p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2 pt-0.5">{children}</div>
+    </div>
   )
+}
+
+/**
+ * A Row's heading, named after the setting, so that a control which cannot
+ * carry a `<label>` — a group of buttons is not a form field — can still point
+ * at the words the user is reading as its own name.
+ */
+function headingId(label: string): string {
+  return label.toLowerCase().replace(/[^a-z]+/g, '-')
 }
 
 /** Said plainly, and never in place of the setting it is about. */
