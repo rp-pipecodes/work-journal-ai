@@ -1,6 +1,8 @@
+mod calendar;
 mod export;
 mod hotkey;
 
+use calendar::{Access, CalendarEvent, CalendarInfo};
 use export::ExportedFile;
 use hotkey::HotkeyStatus;
 use std::sync::Mutex;
@@ -62,6 +64,12 @@ const CAPTURE_SHOWN_EVENT: &str = "capture://shown";
 /// `COPY_YESTERDAY_DIGEST_EVENT` in `src/platform/desktop.ts`.
 const COPY_YESTERDAY_DIGEST_EVENT: &str = "digest://yesterday";
 
+/// The machine woke from sleep, so anything that looks at the world afresh has
+/// to look again — Import above all, since a lid closed before a meeting ended
+/// would otherwise lose that meeting for good. Must match `SYSTEM_WOKE_EVENT`
+/// in `src/platform/desktop.ts`.
+const SYSTEM_WOKE_EVENT: &str = "system://woke";
+
 /// Relative, so plugin-sql resolves it inside the app's data directory and the
 /// journal survives a restart of the app and of the machine.
 const DATABASE_URL: &str = "sqlite:work-journal.db";
@@ -95,7 +103,11 @@ pub fn run() {
             hotkey_status,
             set_hotkey,
             export_notes,
-            show_tray_count
+            show_tray_count,
+            calendar_access,
+            request_calendar_access,
+            calendars,
+            todays_calendar_events
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -118,6 +130,11 @@ pub fn run() {
             // webview costs a few hundred milliseconds a Capture cannot afford.
             build_capture_window(app.handle())?;
             build_tray(app.handle())?;
+
+            // Told to whichever window is sweeping the calendar. Set up after
+            // the capture window, because that is the window that hears it.
+            #[cfg(target_os = "macos")]
+            watch_for_wake(app.handle());
 
             // Start at login is offered once, and only once: the app must
             // never add itself to the login items without being asked, and
@@ -146,6 +163,12 @@ fn migrations() -> Vec<Migration> {
             version: 2,
             description: "notes project",
             sql: include_str!("../migrations/0002_notes_project.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 3,
+            description: "note origin and imported meetings",
+            sql: include_str!("../migrations/0003_note_origin_and_imported_meetings.sql"),
             kind: MigrationKind::Up,
         },
     ]
@@ -497,6 +520,72 @@ fn show_tray_count(app: tauri::AppHandle, title: String) {
 
     if let Err(error) = tray.set_title(Some(title)) {
         log::warn!("the tray kept the old count: {error}");
+    }
+}
+
+/// What the OS allows the app to read of the user's calendars. Asked rather
+/// than remembered: a grant can be revoked in System Settings, and a rebuilt
+/// binary is one macOS has never seen. Never prompts.
+#[tauri::command(async)]
+fn calendar_access() -> Access {
+    calendar::access()
+}
+
+/// Asks the user, through the OS, and answers with what it came to. Off the
+/// main thread: the dialog is the system's, and the app must not sit frozen
+/// behind it while the user reads it.
+#[tauri::command(async)]
+fn request_calendar_access() -> Access {
+    calendar::request_access()
+}
+
+/// Every calendar the user has, for Settings to offer as a tick-list.
+#[tauri::command(async)]
+fn calendars() -> Vec<CalendarInfo> {
+    calendar::calendars()
+}
+
+/// Today's events, from every calendar. Which of them are meetings worth
+/// keeping is the journal's question, not this side's.
+#[tauri::command(async)]
+fn todays_calendar_events() -> Vec<CalendarEvent> {
+    calendar::todays_events()
+}
+
+/// Passes on the one thing the OS says that the webviews cannot hear for
+/// themselves: the machine is awake again. A sleeping Mac runs no timers, so
+/// without this a sweep that was due at 11:00 simply never happens.
+#[cfg(target_os = "macos")]
+fn watch_for_wake(app: &tauri::AppHandle) {
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use objc2_foundation::NSString;
+
+    let handle = app.clone();
+    let observed = block2::RcBlock::new(move |_notification: *mut AnyObject| {
+        if let Err(error) = handle.emit(SYSTEM_WOKE_EVENT, ()) {
+            log::warn!("could not pass on the wake: {error}");
+        }
+    });
+
+    unsafe {
+        let workspace: Retained<AnyObject> = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let center: Retained<AnyObject> = msg_send![&*workspace, notificationCenter];
+        let name = NSString::from_str("NSWorkspaceDidWakeNotification");
+
+        let observer: Retained<AnyObject> = msg_send![
+            &*center,
+            addObserverForName: &*name,
+            object: std::ptr::null::<AnyObject>(),
+            queue: std::ptr::null::<AnyObject>(),
+            usingBlock: block2::RcBlock::as_ptr(&observed),
+        ];
+
+        // Both live as long as the app does, and the app only stops when the
+        // process does — so they are deliberately never given up.
+        std::mem::forget(observer);
+        std::mem::forget(observed);
     }
 }
 

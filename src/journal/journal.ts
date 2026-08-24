@@ -21,6 +21,13 @@ export interface SqlDriver {
   select<Row>(sql: string, params: unknown[]): Promise<Row[]>
 }
 
+/**
+ * The two ways a Note comes into existence, and there is no third — see
+ * docs/adr/0010-notes-have-two-origins.md. `capture` is the user typing one;
+ * `import` is a meeting swept off their calendar without being asked.
+ */
+export type NoteOrigin = 'capture' | 'import'
+
 export interface Note {
   id: string
   /** A single line, never empty or whitespace-only. */
@@ -36,6 +43,36 @@ export interface Note {
   journalDay: string
   /** Null until the Note is changed after capture. */
   editedAt: string | null
+  /**
+   * Which of the two ways this Note came into existence. Ordinary in every
+   * other respect: an Imported Note is edited, refiled and deleted like any
+   * other, and only History renders it any differently.
+   */
+  origin: NoteOrigin
+}
+
+/**
+ * One event on the user's calendar, as the machine hands it over — see
+ * `Desktop.todaysCalendarEvents`. Nothing here is a decision: which of these
+ * become Notes is the core's, below.
+ */
+export interface CalendarEvent {
+  /**
+   * The event's identifier. Shared by every occurrence of a recurring event,
+   * which is why it is not on its own the identity of a meeting.
+   */
+  id: string
+  /** Which calendar it sits on — matched against the ticked ones. */
+  calendarId: string
+  /** The title, exactly as the calendar holds it. May be empty. */
+  title: string
+  /** Milliseconds since the epoch: a real instant, not a local label. */
+  startsAt: number
+  endsAt: number
+  /** What the calendar itself says. Not the whole of the all-day rule. */
+  isAllDay: boolean
+  /** Whether the user's own attendance is Declined. */
+  isDeclined: boolean
 }
 
 /**
@@ -114,6 +151,17 @@ export interface Journal {
    * Returns null when there was nothing to commit.
    */
   capture(text: string): Promise<Note | null>
+  /**
+   * Turns one meeting into a Note, or does nothing because that meeting has
+   * been handled before — including by an Import the user has since deleted,
+   * which is a refusal and is permanent. Returns null in that case.
+   *
+   * The Note is Unfiled, its Body is the event's title and its Captured At is
+   * the instant the meeting began, so a meeting swept up in the evening still
+   * sorts into the morning it happened in. Whether an event should be here at
+   * all is `meetingsToImport`'s question, not this one's.
+   */
+  importMeeting(event: CalendarEvent): Promise<Note | null>
   /**
    * Rewords a Note, so the journal reads correctly later. Captured At is
    * untouched — provenance survives every correction — and the Note is marked
@@ -223,16 +271,34 @@ interface NoteRow {
   captured_at: string
   journal_day: string
   edited_at: string | null
+  origin: string
 }
 
 const INSERT_NOTE = `
-  INSERT INTO notes (id, body, project, captured_at, journal_day, edited_at)
-  VALUES (?, ?, ?, ?, ?, NULL)
+  INSERT INTO notes (id, body, project, captured_at, journal_day, edited_at, origin)
+  VALUES (?, ?, ?, ?, ?, NULL, ?)
+`
+
+/**
+ * A meeting the sweep has handled. Written before the Note it becomes, and
+ * never removed: the row outliving the Note is the whole point, since deleting
+ * an Imported Note is how the user refuses its meeting for good.
+ */
+const INSERT_IMPORTED_MEETING = `
+  INSERT INTO imported_meetings (event_key, handled_at)
+  VALUES (?, ?)
+`
+
+/** Whether this occurrence has been swept before, whatever became of the Note. */
+const SELECT_IMPORTED_MEETING = `
+  SELECT event_key
+  FROM imported_meetings
+  WHERE event_key = ?
 `
 
 /** Every read returns a whole Note; only the predicate and the order differ. */
 const SELECT_NOTES = `
-  SELECT id, body, project, captured_at, journal_day, edited_at
+  SELECT id, body, project, captured_at, journal_day, edited_at, origin
   FROM notes
 `
 
@@ -345,6 +411,7 @@ const COUNT_CAPTURED_NOTES_ON_DAY = `
   SELECT COUNT(*) AS count
   FROM notes
   WHERE journal_day = ?
+    AND origin = 'capture'
 `
 
 /** Every Project still on a Note: the Filter's Project axis, enumerated. */
@@ -394,6 +461,7 @@ export function createJournal({
         // Never recomputed — see docs/adr/0005-no-day-start.md.
         journalDay: journalDayFor(capturedAt),
         editedAt: null,
+        origin: 'capture',
       }
 
       await driver.execute(INSERT_NOTE, [
@@ -402,6 +470,51 @@ export function createJournal({
         note.project,
         note.capturedAt,
         note.journalDay,
+        note.origin,
+      ])
+
+      return note
+    },
+
+    async importMeeting(event) {
+      const key = meetingKey(event)
+      const [handled] = await driver.select<{ event_key: string }>(
+        SELECT_IMPORTED_MEETING,
+        [key],
+      )
+      if (handled !== undefined) {
+        return null
+      }
+
+      const began = new Date(event.startsAt)
+      const note: Note = {
+        id: crypto.randomUUID(),
+        body: meetingBody(event.title),
+        // Always Unfiled: the calendars carry no Project meaning, so there is
+        // nothing to derive — see docs/adr/0010-notes-have-two-origins.md.
+        project: null,
+        // The instant the meeting began, not the instant it was stored.
+        capturedAt: began.toISOString(),
+        journalDay: journalDayFor(began),
+        editedAt: null,
+        origin: 'import',
+      }
+
+      // Handled first, and deliberately: an interruption between the two writes
+      // loses one meeting, where the other order would resurrect a Note the
+      // user may have already deleted. A missed meeting is a gap; a resurrected
+      // one is the app overruling the user.
+      await driver.execute(INSERT_IMPORTED_MEETING, [
+        key,
+        clock.now().toISOString(),
+      ])
+      await driver.execute(INSERT_NOTE, [
+        note.id,
+        note.body,
+        note.project,
+        note.capturedAt,
+        note.journalDay,
+        note.origin,
       ])
 
       return note
@@ -620,6 +733,100 @@ export function journalDayFor(instant: Date): string {
     String(instant.getMonth() + 1).padStart(2, '0'),
     String(instant.getDate()).padStart(2, '0'),
   ].join('-')
+}
+
+/**
+ * Which of today's events are to become Notes on this sweep. Everything Import
+ * decides is here, so a sweep is this list and nothing else:
+ *
+ * - a calendar the user has not ticked is ignored entirely;
+ * - only meetings that *began today* are swept: Import covers the current day
+ *   and nothing else, so a meeting that ran from last night into this morning
+ *   belongs to yesterday and is never backfilled — see
+ *   docs/adr/0011-imported-meetings-are-today-only.md;
+ * - a meeting becomes a Note as it *ends*, never while it is still running;
+ * - a declined event never becomes one — the user was not there;
+ * - nor does an event covering the whole local day, whether or not the calendar
+ *   marks it all-day: an out-of-office block running local midnight to midnight
+ *   reports `isAllDay: false` and would otherwise arrive as a meeting that
+ *   began at 00:00.
+ *
+ * There is no duration floor. A missed meeting is worse than an extra one,
+ * because an extra one is deleted in a second and an absence is never noticed.
+ *
+ * Already-handled meetings are not filtered here: that is a fact about the
+ * journal rather than about the calendar, and `importMeeting` holds it.
+ */
+export function meetingsToImport({
+  events,
+  calendarIds,
+  now,
+}: {
+  events: CalendarEvent[]
+  /** The ticked calendars. Empty means nothing is swept at all. */
+  calendarIds: string[]
+  now: Date
+}): CalendarEvent[] {
+  const ticked = new Set(calendarIds)
+  const instant = now.getTime()
+  const today = journalDayFor(now)
+
+  return events.filter(
+    (event) =>
+      ticked.has(event.calendarId) &&
+      journalDayFor(new Date(event.startsAt)) === today &&
+      !event.isDeclined &&
+      event.endsAt <= instant &&
+      !coversWholeLocalDay(event),
+  )
+}
+
+/**
+ * Whether an event blankets the local day its Journal Day would fall under:
+ * starting at or before that midnight and ending at or after the next. True of
+ * a genuine all-day event, of a multi-day one, and of the midnight-to-midnight
+ * block a calendar does not mark as all-day. An event that merely runs long —
+ * 00:00 to 23:00 — is a real thing that happened, and is not one of these.
+ */
+function coversWholeLocalDay(event: CalendarEvent): boolean {
+  if (event.isAllDay) {
+    return true
+  }
+
+  const began = new Date(event.startsAt)
+  const midnight = new Date(began.getFullYear(), began.getMonth(), began.getDate())
+  const nextMidnight = new Date(
+    began.getFullYear(),
+    began.getMonth(),
+    began.getDate() + 1,
+  )
+
+  return (
+    event.startsAt <= midnight.getTime() && event.endsAt >= nextMidnight.getTime()
+  )
+}
+
+/**
+ * One occurrence of one event, as the journal remembers having handled it. A
+ * recurring meeting shares its identifier across every occurrence, so the
+ * instant it began is part of the identity — otherwise a daily standup would be
+ * imported once and silently skipped for the rest of time.
+ */
+export function meetingKey(event: CalendarEvent): string {
+  return `${event.id}@${new Date(event.startsAt).toISOString()}`
+}
+
+/** What an untitled meeting reads as, since a Body is never empty. */
+export const UNTITLED_MEETING = '(untitled meeting)'
+
+/**
+ * A meeting's title as a Body: verbatim, but a Body is one line, so any run of
+ * whitespace — including the line breaks a calendar allows in a title —
+ * collapses to a single space.
+ */
+export function meetingBody(title: string): string {
+  const body = title.replace(/\s+/g, ' ').trim()
+  return body === '' ? UNTITLED_MEETING : body
 }
 
 /** An en dash: a rule wide enough to notice, and narrower than a digit. */
@@ -999,5 +1206,9 @@ function toNote(row: NoteRow): Note {
     capturedAt: row.captured_at,
     journalDay: row.journal_day,
     editedAt: row.edited_at,
+    // A row written before Import existed has no origin of its own; the column
+    // defaults for those, and anything else at all is read as typed rather than
+    // silently rendering a Note the user wrote as one they did not.
+    origin: row.origin === 'import' ? 'import' : 'capture',
   }
 }

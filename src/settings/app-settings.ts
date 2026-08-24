@@ -12,6 +12,8 @@ import type { Desktop, Unlisten } from '@/platform/desktop'
 import {
   hasAnsweredStartAtLogin,
   readSettings,
+  writeImportCalendars,
+  writeImportMeetings,
   writeStartAtLogin,
   type Settings,
   type SettingsStore,
@@ -37,6 +39,15 @@ export interface AppSettings {
   saveStartAtLogin(startAtLogin: boolean): Promise<void>
   /** Whether the first-run question has been answered — either way. */
   hasBeenAskedAboutStartAtLogin(): Promise<boolean>
+  /**
+   * Whether meetings are swept, remembered and announced. Announced because
+   * the window that sweeps is not the window this is changed in, and a change
+   * the user just made should reach the journal now rather than at the next
+   * sweep. The app turns this off itself when the calendar permission is gone.
+   */
+  saveImportMeetings(importMeetings: boolean): Promise<void>
+  /** Which calendars an Import reads. Announced for the same reason. */
+  saveImportCalendars(importCalendars: string[]): Promise<void>
 }
 
 export function createAppSettings(desktop: Desktop): AppSettings {
@@ -71,6 +82,16 @@ export function createAppSettings(desktop: Desktop): AppSettings {
 
     async hasBeenAskedAboutStartAtLogin() {
       return hasAnsweredStartAtLogin(await store())
+    },
+
+    async saveImportMeetings(importMeetings) {
+      await writeImportMeetings(await store(), importMeetings)
+      await desktop.announceImportChanged()
+    },
+
+    async saveImportCalendars(importCalendars) {
+      await writeImportCalendars(await store(), importCalendars)
+      await desktop.announceImportChanged()
     },
   }
 }

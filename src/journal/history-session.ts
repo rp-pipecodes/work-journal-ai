@@ -136,6 +136,14 @@ export interface HistorySession {
   search(term: string): Promise<void>
   /** A Note was captured, in this window or another one. */
   noteArrived(journalDay: string): Promise<void>
+  /**
+   * The Notes are no longer what they were, and not because the user typed
+   * one: a sweep imported today's meetings, or another window corrected
+   * something. Re-reads what is on screen and never nudges — a Nudge means
+   * "you wrote something on another day", which is a fact about the user, and
+   * a sweep is not the user; see docs/adr/0010-notes-have-two-origins.md.
+   */
+  refresh(): Promise<void>
   /** The other way: the day gained content and the reader does not care. */
   dismissNudge(): void
   editBody(id: string, body: string): Promise<void>
@@ -411,6 +419,20 @@ export function createHistorySession({
       } else {
         show({ nudgedDay: arrival.journalDay })
       }
+    },
+
+    async refresh() {
+      // A Search is the reader's question, and it is answered as it was asked:
+      // results hold still whatever arrives underneath them.
+      if (snapshot.searching) return
+
+      // Nothing at all until now — the empty state has just stopped being true.
+      if (snapshot.filter === null) {
+        await open()
+        return
+      }
+
+      await read(snapshot.filter)
     },
 
     dismissNudge() {

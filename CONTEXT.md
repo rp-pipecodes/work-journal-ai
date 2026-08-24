@@ -24,7 +24,7 @@ The act of turning a meeting on the user's calendar into a Note, without being a
 _Avoid_: Sync, ingest, intake
 
 **Imported Note**:
-A Note made by an Import. Its Body is the calendar event's title, verbatim, and its Captured At is when the meeting began. Always Unfiled — the calendars it comes from carry no Project meaning, so there is nothing to file it under. Ordinary in every other respect — editable, refilable and deletable like any Note. Declined events never become one, nor do events covering the whole local day — whether or not the calendar marks them all-day, since an out-of-office block running local midnight to midnight does not, and would otherwise arrive as a meeting that began at 00:00.
+A Note made by an Import. Its Body is the calendar event's title, verbatim, and its Captured At is when the meeting began. Always Unfiled — the calendars it comes from carry no Project meaning, so there is nothing to file it under. Ordinary in every other respect — editable, refilable and deletable like any Note. Rendered muted in History, with no icon and no label, so a scan-and-delete pass down the day is fast; a Digest shows no difference at all. Declined events never become one, nor do events covering the whole local day — whether or not the calendar marks them all-day, since an out-of-office block running local midnight to midnight does not, and would otherwise arrive as a meeting that began at 00:00.
 _Avoid_: Meeting note, event, calendar entry
 
 **Draft**:
@@ -114,7 +114,11 @@ Permanent removal of a Note. There is no trash, no archive, and no recovery — 
 ## Settings
 
 **Settings**:
-The four things about the app the user gets to decide: the Hotkey, the Theme, whether the app starts at login, and — as the one action rather than a setting — Export. Reached from the Tray Menu, and closed on dismiss rather than kept resident.
+What the user gets to decide about the app: the Hotkey, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars — and, as the one action rather than a setting, Export. Reached from the Tray Menu, and closed on dismiss rather than kept resident.
+
+**Meeting Import**:
+Whether Import runs, and over which calendars. Off until turned on, with no calendar ticked, so enabling it sweeps nothing until the user says which calendars mean work; an unticked calendar is ignored entirely. Turning it on is also where the calendar permission is asked for, because it is the one moment the user has said they want it. Permission refused or revoked returns the toggle to off with a line saying why — a routine path rather than an exceptional one, since macOS keys the grant to the exact binary and every rebuilt release is asked about once. The app never nags, and the journal keeps working exactly as before.
+_Avoid_: Calendar sync, integration, connection
 
 **Theme**:
 Whether the app paints itself light or dark. Three answers, not two: `light`, `dark`, and `system` — and `system` is the absence of a preference rather than a third palette, so an unasked user follows the OS. Settable from Settings, and toggled from any window with Cmd+Shift+D. One preference for the whole app, so a window that did not host the change still hears about it and repaints.

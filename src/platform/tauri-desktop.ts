@@ -15,6 +15,7 @@ import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import Database from '@tauri-apps/plugin-sql'
 import { load } from '@tauri-apps/plugin-store'
+import type { CalendarEvent } from '@/journal/journal'
 import type { HotkeyStatus } from '@/settings/hotkey'
 import type { Theme } from '@/settings/theme'
 import {
@@ -24,10 +25,14 @@ import {
   CAPTURE_WIDTH,
   COPY_YESTERDAY_DIGEST_EVENT,
   DATABASE_URL,
+  IMPORT_CHANGED_EVENT,
   JOURNAL_CHANGED_EVENT,
   NOTE_CAPTURED_EVENT,
   SETTINGS_FILE,
+  SYSTEM_WOKE_EVENT,
   THEME_CHANGED_EVENT,
+  type CalendarAccess,
+  type CalendarInfo,
   type Desktop,
   type ExportedFile,
 } from './desktop'
@@ -115,6 +120,16 @@ export function createTauriDesktop(): Desktop {
 
     onYesterdayDigestRequested: (handle) =>
       listen(COPY_YESTERDAY_DIGEST_EVENT, () => handle()),
+
+    calendarAccess: () => invoke<CalendarAccess>('calendar_access'),
+    requestCalendarAccess: () => invoke<CalendarAccess>('request_calendar_access'),
+    calendars: () => invoke<CalendarInfo[]>('calendars'),
+    todaysCalendarEvents: () => invoke<CalendarEvent[]>('todays_calendar_events'),
+
+    onSystemWoke: (handle) => listen(SYSTEM_WOKE_EVENT, () => handle()),
+
+    announceImportChanged: () => emit(IMPORT_CHANGED_EVENT),
+    onImportChanged: (handle) => listen(IMPORT_CHANGED_EVENT, () => handle()),
 
     announceCapturedNote: (journalDay) =>
       emit(NOTE_CAPTURED_EVENT, { journalDay }),

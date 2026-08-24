@@ -823,6 +823,65 @@ describe('announcing a change to the journal', () => {
   })
 })
 
+describe('a sweep importing meetings while History is open', () => {
+  it('shows them, without nudging: a sweep is not the user', async () => {
+    const { session, core } = await sessionOver([
+      { at: '2026-03-09T09:00:00', body: 'the migration landed' },
+    ])
+    await session.open()
+
+    await core.importMeeting({
+      id: 'event-1',
+      calendarId: 'work',
+      title: 'Weekly sync',
+      startsAt: new Date('2026-03-09T11:00:00').getTime(),
+      endsAt: new Date('2026-03-09T11:30:00').getTime(),
+      isAllDay: false,
+      isDeclined: false,
+    })
+    await session.refresh()
+
+    expect(bodiesShown(session.snapshot())).toEqual([
+      'Weekly sync',
+      'the migration landed',
+    ])
+    expect(session.snapshot().nudgedDay).toBeNull()
+  })
+
+  it('leaves a Search exactly as the reader asked it', async () => {
+    const { session, capture } = await sessionOver([
+      { at: '2026-03-09T09:00:00', body: 'the migration landed' },
+    ])
+    await session.open()
+    await session.search('migration')
+    await settle()
+
+    await capture('2026-03-09T11:00:00', 'another migration note')
+    await session.refresh()
+
+    expect(session.snapshot().searching).toBe(true)
+    expect(session.snapshot().history).toMatchObject({ state: 'results' })
+  })
+
+  it('opens on the day when the journal had nothing in it at all', async () => {
+    const { session, capture } = await sessionOver([])
+    await session.open()
+    expect(session.snapshot().history).toMatchObject({ state: 'empty' })
+
+    await capture('2026-03-09T11:00:00', 'the migration landed')
+    await session.refresh()
+
+    expect(bodiesShown(session.snapshot())).toEqual(['the migration landed'])
+  })
+})
+
+/** Every Body on screen, newest first, whatever day it is filed under. */
+function bodiesShown(snapshot: HistorySnapshot): string[] {
+  const history = snapshot.history
+  if (history.state !== 'notes') return []
+  return history.days.flatMap((day) => day.notes.map((note) => note.body))
+}
+
 /**
  * A session over a real database holding the given Notes, plus the collaborators
  * a test needs to drive it: the clipboard it writes to, a way to capture more
@@ -865,7 +924,7 @@ async function sessionOver(
     onChange: (snapshot) => seen.push(snapshot),
   })
 
-  return { session, capture, notes, clipboard, seen, announced }
+  return { session, core, capture, notes, clipboard, seen, announced }
 }
 
 function recordingClipboard() {
