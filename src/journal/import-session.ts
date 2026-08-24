@@ -7,8 +7,9 @@
  * become Notes is `meetingsToImport`, and what an Import writes is
  * `importMeeting`. What lives here is *when* to look.
  *
- * Today and only today — never yesterday, never a backfill, including the first
- * time Import is turned on; see
+ * Today and only today — never a backfill, including the first time Import is
+ * turned on, and reaching back past midnight only for a meeting that was still
+ * running as today began; see
  * docs/adr/0011-imported-meetings-are-today-only.md. A meeting becomes a Note
  * as it ends, which is what the interval is for, and the wake and the launch
  * sweeps are the catch-up for the ones that ended while the machine was asleep.

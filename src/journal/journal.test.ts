@@ -1701,8 +1701,14 @@ describe('meetingKey', () => {
 describe('meetingsToImport', () => {
   const now = local('2026-03-09T18:40:00')
 
-  function swept(events: CalendarEvent[], calendarIds = ['work']) {
-    return meetingsToImport({ events, calendarIds, now }).map((event) => event.id)
+  function swept(
+    events: CalendarEvent[],
+    calendarIds = ['work'],
+    instant = now,
+  ) {
+    return meetingsToImport({ events, calendarIds, now: instant }).map(
+      (event) => event.id,
+    )
   }
 
   it('takes a meeting that has ended on a ticked calendar', () => {
@@ -1800,12 +1806,49 @@ describe('meetingsToImport', () => {
     ).toEqual(['event-1'])
   })
 
-  it('never takes one that began yesterday and ended this morning', () => {
+  it('still takes a straddler on a later sweep the same day', () => {
+    // It ended today, so today's sweep is the only one that will ever see it.
+    // The Note lands on the day it began — see
+    // docs/adr/0011-imported-meetings-are-today-only.md.
     expect(
       swept([
         event({ title: 'Late release', startsAt: '2026-03-08T22:00', endsAt: '2026-03-09T01:00' }),
       ]),
+    ).toEqual(['event-1'])
+  })
+
+  it('never takes one that ended before today began', () => {
+    expect(
+      swept([
+        event({ title: 'Retro', startsAt: '2026-03-08T15:00', endsAt: '2026-03-08T16:00' }),
+      ]),
     ).toEqual([])
+  })
+
+  it('never backfills a meeting from before yesterday', () => {
+    expect(
+      swept([
+        event({ title: 'Long haul', startsAt: '2026-03-02T09:00', endsAt: '2026-03-09T10:00' }),
+      ]),
+    ).toEqual([])
+  })
+
+  it('takes one that began last night and ran past midnight', () => {
+    // The only meeting the old start-of-day rule could never sweep: still
+    // running at midnight, so on the next sweep it no longer began today.
+    expect(
+      swept(
+        [
+          event({
+            title: 'Late release',
+            startsAt: '2026-03-08T23:00',
+            endsAt: '2026-03-09T00:30',
+          }),
+        ],
+        ['work'],
+        local('2026-03-09T00:35:00'),
+      ),
+    ).toEqual(['event-1'])
   })
 
   it('has no duration floor: a five-minute meeting is a meeting', () => {

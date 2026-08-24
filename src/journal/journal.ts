@@ -740,11 +740,15 @@ export function journalDayFor(instant: Date): string {
  * decides is here, so a sweep is this list and nothing else:
  *
  * - a calendar the user has not ticked is ignored entirely;
- * - only meetings that *began today* are swept: Import covers the current day
- *   and nothing else, so a meeting that ran from last night into this morning
- *   belongs to yesterday and is never backfilled — see
- *   docs/adr/0011-imported-meetings-are-today-only.md;
  * - a meeting becomes a Note as it *ends*, never while it is still running;
+ * - only meetings that *ran during today* are swept, and only back as far as
+ *   yesterday's midnight: Import covers the current day and nothing else, so
+ *   nothing is ever backfilled — see
+ *   docs/adr/0011-imported-meetings-are-today-only.md. The one meeting that
+ *   began before today and is still swept is the one that was running as today
+ *   began: it ends today, and anchoring on its start alone would mean no sweep
+ *   could ever reach it — before midnight it has not ended, and after midnight
+ *   it no longer began today;
  * - a declined event never becomes one — the user was not there;
  * - nor does an event covering the whole local day, whether or not the calendar
  *   marks it all-day: an out-of-office block running local midnight to midnight
@@ -769,16 +773,32 @@ export function meetingsToImport({
 }): CalendarEvent[] {
   const ticked = new Set(calendarIds)
   const instant = now.getTime()
-  const today = journalDayFor(now)
+  const today = localMidnight(now)
+  const yesterday = localMidnight(now, -1)
 
   return events.filter(
     (event) =>
       ticked.has(event.calendarId) &&
-      journalDayFor(new Date(event.startsAt)) === today &&
       !event.isDeclined &&
       event.endsAt <= instant &&
+      event.endsAt > today &&
+      event.startsAt >= yesterday &&
       !coversWholeLocalDay(event),
   )
+}
+
+/**
+ * The instant a local calendar day began, `offsetInDays` from the one the given
+ * instant falls under. Built from local calendar parts rather than by
+ * subtracting hours, so the day either side of a DST transition still starts at
+ * its own midnight.
+ */
+function localMidnight(instant: Date, offsetInDays = 0): number {
+  return new Date(
+    instant.getFullYear(),
+    instant.getMonth(),
+    instant.getDate() + offsetInDays,
+  ).getTime()
 }
 
 /**
@@ -794,15 +814,10 @@ function coversWholeLocalDay(event: CalendarEvent): boolean {
   }
 
   const began = new Date(event.startsAt)
-  const midnight = new Date(began.getFullYear(), began.getMonth(), began.getDate())
-  const nextMidnight = new Date(
-    began.getFullYear(),
-    began.getMonth(),
-    began.getDate() + 1,
-  )
 
   return (
-    event.startsAt <= midnight.getTime() && event.endsAt >= nextMidnight.getTime()
+    event.startsAt <= localMidnight(began) &&
+    event.endsAt >= localMidnight(began, 1)
   )
 }
 
