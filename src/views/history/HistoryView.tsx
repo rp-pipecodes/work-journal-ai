@@ -1,5 +1,22 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { CalendarRangeIcon, ClipboardCopyIcon, SearchIcon } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Calendar } from '@/components/ui/calendar'
+import { Input } from '@/components/ui/input'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Toaster } from '@/components/ui/sonner'
 import { cn } from '@/lib/utils'
 import {
   AlertDialog,
@@ -36,6 +53,7 @@ import {
 } from '@/journal/journal'
 import type { Desktop } from '@/platform/desktop'
 import type { HotkeyStatus } from '@/settings/hotkey'
+import { formatDayRange } from './range-label'
 
 /**
  * Reading back what you did. Every rule of reading back — where the Filter
@@ -83,6 +101,15 @@ export default function HistoryView({
   // Only the empty state reads this, and only to teach the fastest way in.
   // Null until the OS has been asked, and after a question it refused.
   const [hotkey, setHotkey] = useState<HotkeyStatus | null>(null)
+  // A copy the reader asked for and has not been told about yet. What makes a
+  // toast is that a copy was asked for, not that the confirmation reads
+  // differently: copying the same Filter twice says the same words both times,
+  // and both times the reader asked to be told.
+  const copying = useRef(false)
+  // Whether a Filter control has a popup open. Its own Escape closes it, and
+  // the keystroke still reaches this view through the React tree even though
+  // the popup itself is portalled out of it.
+  const [picking, setPicking] = useState(false)
   const page = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -92,6 +119,15 @@ export default function HistoryView({
 
     void session.open()
   }, [session])
+
+  useEffect(() => {
+    // Every session update is a new snapshot, so a copy is heard even when it
+    // confirms in exactly the words the last one did.
+    if (!copying.current || snapshot.confirmation === null) return
+
+    copying.current = false
+    toast(snapshot.confirmation)
+  }, [snapshot])
 
   useEffect(() => {
     desktop.hotkeyStatus().then(setHotkey, (error: unknown) => {
@@ -127,10 +163,11 @@ export default function HistoryView({
   }, [desktop, session])
 
   // Escape belongs to whatever has taken the screen over: a correction first,
-  // then a Search, and the window when neither has. Dismissing the window
-  // closes it — History is not kept resident.
+  // then an open Filter popup, then a Search, and the window when none has.
+  // Dismissing the window closes it — History is not kept resident.
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
     if (event.key !== 'Escape' || editing !== null || deleting !== null) return
+    if (picking) return
 
     if (searching) {
       // Clears the results and empties the field; the window stays open.
@@ -162,18 +199,24 @@ export default function HistoryView({
     void session.delete(note.id)
   }
 
-  /** A cleared date input is a half-picked range, not a Filter over nothing. */
+  /** Both ends of the day axis, in the one move that sets them. */
   function pick(from: string, to: string) {
-    if (from === '' || to === '') return
     void session.moveTo(rangeForDays(from, to))
   }
 
   /**
-   * A one-shot named range. The clock is read here and only here; the select
-   * snaps back, so the pickers stay the source of truth for what is on screen.
+   * A one-shot named range. The clock is read here and only here; nothing
+   * holds the Preset afterwards, so the picked range stays the source of
+   * truth for what is on screen.
    */
   function applyPreset(preset: FilterPreset) {
     void session.moveTo(rangeForPreset(preset, journalDayFor(new Date())))
+  }
+
+  /** The Digest onto the clipboard, and a toast once it is there. */
+  function copyDigest() {
+    copying.current = true
+    session.copy()
   }
 
   return (
@@ -191,12 +234,17 @@ export default function HistoryView({
       */}
       {filter !== null && (
         <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-6 py-4 type-meta text-muted-foreground">
-          <Range filter={filter} onPick={pick} />
-          <Preset onChoose={applyPreset} />
+          <DayRangeField
+            filter={filter}
+            onPick={pick}
+            onChoosePreset={applyPreset}
+            onOpenChange={setPicking}
+          />
           <ProjectConstraintField
             constraint={constraintOf(filter)}
             projects={projects}
             onNarrow={(constraint) => void session.narrowTo(constraint)}
+            onOpenChange={setPicking}
           />
           <SearchField
             term={term}
@@ -208,10 +256,7 @@ export default function HistoryView({
             month reaches a standup thread.
           */}
           {!searching && (
-            <CopyDigest
-              confirmation={confirmation}
-              onCopy={() => session.copy()}
-            />
+            <CopyDigest confirmation={confirmation} onCopy={copyDigest} />
           )}
         </header>
       )}
@@ -281,6 +326,9 @@ export default function HistoryView({
         onConfirm={confirmDelete}
         onCancel={() => setDeleting(null)}
       />
+
+      {/* Where a copy says what it did. Nothing else toasts. */}
+      <Toaster position="bottom-right" />
     </div>
   )
 }
@@ -555,36 +603,9 @@ function ConfirmDelete({
 }
 
 /**
- * The two ends of the Filter. Both are Journal Days rather than instants, which
- * is exactly what a date input edits.
- */
-function Range({
-  filter,
-  onPick,
-}: {
-  filter: Filter
-  onPick: (from: string, to: string) => void
-}) {
-  return (
-    <>
-      <End
-        label="From"
-        value={filter.from}
-        onChange={(from) => onPick(from, filter.to)}
-      />
-      <End
-        label="To"
-        value={filter.to}
-        onChange={(to) => onPick(filter.from, to)}
-      />
-    </>
-  )
-}
-
-/**
- * Named ranges that set the Filter once and are forgotten. Controlled on the
- * empty value so every choice snaps back to the neutral label; the pickers
- * remain what shows the range on screen.
+ * Named ranges that set the day axis once and are then forgotten. Nothing
+ * holds the one that was chosen: what the reader reads afterwards is the range
+ * itself, which is the only thing that is still true a day later.
  */
 const PRESET_OPTIONS: ReadonlyArray<{ value: FilterPreset; label: string }> = [
   { value: 'today', label: 'Today' },
@@ -595,28 +616,99 @@ const PRESET_OPTIONS: ReadonlyArray<{ value: FilterPreset; label: string }> = [
   { value: 'last-month', label: 'Last month' },
 ]
 
-function Preset({ onChoose }: { onChoose: (preset: FilterPreset) => void }) {
+/**
+ * The Filter's day axis, whole: a button that reads the range in words, and
+ * one popup holding both ways to change it — a named range, or two ends on a
+ * calendar. One concept, one control.
+ *
+ * A day is picked in one click and is a whole day when it lands, which is why
+ * nothing here holds a half-typed value: the partial-value dance the old date
+ * inputs needed is gone with them rather than ported across.
+ */
+function DayRangeField({
+  filter,
+  onPick,
+  onChoosePreset,
+  onOpenChange,
+}: {
+  filter: Filter
+  onPick: (from: string, to: string) => void
+  onChoosePreset: (preset: FilterPreset) => void
+  onOpenChange: (open: boolean) => void
+}) {
+  const [open, setOpen] = useState(false)
+  // The first end of a range being picked, while the second is still to come.
+  // Null whenever the calendar is showing the Filter rather than a new range.
+  const [started, setStarted] = useState<Date | null>(null)
+
+  function show(next: boolean) {
+    setOpen(next)
+    onOpenChange(next)
+    if (!next) setStarted(null)
+  }
+
+  function pickDay(day: Date) {
+    if (started === null) {
+      setStarted(day)
+      return
+    }
+
+    // Whichever end was clicked first: the core orders the range.
+    onPick(journalDayFor(started), journalDayFor(day))
+    show(false)
+  }
+
   return (
-    <label className="flex shrink-0 items-center gap-1.5">
-      <span className="sr-only">Preset</span>
-      <select
-        value=""
-        onChange={(event) => {
-          const value = event.target.value
-          if (value === '') return
-          onChoose(value as FilterPreset)
-        }}
-        className="rounded-md border border-border bg-transparent px-1.5 py-0.5 type-meta text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+    <Popover open={open} onOpenChange={show}>
+      <PopoverTrigger
+        render={<Button variant="outline" size="sm" aria-label="Days" />}
       >
-        <option value="">Preset</option>
-        {PRESET_OPTIONS.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
+        <CalendarRangeIcon data-icon="inline-start" />
+        {formatDayRange(filter.from, filter.to)}
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-auto gap-2 p-2">
+        <div className="grid grid-cols-3 gap-1">
+          {PRESET_OPTIONS.map((option) => (
+            <Button
+              key={option.value}
+              variant="ghost"
+              size="sm"
+              className="justify-start"
+              onClick={() => {
+                onChoosePreset(option.value)
+                show(false)
+              }}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+        <Calendar
+          mode="range"
+          autoFocus
+          weekStartsOn={1}
+          defaultMonth={dayAsDate(filter.to)}
+          selected={
+            started === null
+              ? { from: dayAsDate(filter.from), to: dayAsDate(filter.to) }
+              : { from: started, to: undefined }
+          }
+          onSelect={(_range, day) => pickDay(day)}
+          className="p-0"
+        />
+      </PopoverContent>
+    </Popover>
   )
+}
+
+/**
+ * A Journal Day as the calendar's own kind of value. A `YYYY-MM-DD` label is a
+ * civil day rather than an instant, and `journalDayFor` reads a local one back
+ * out, so it is built as the local midnight of the day it names.
+ */
+function dayAsDate(journalDay: string): Date {
+  const [year, month, day] = journalDay.split('-').map(Number)
+  return new Date(year, month - 1, day)
 }
 
 /**
@@ -633,34 +725,42 @@ function ProjectConstraintField({
   constraint,
   projects,
   onNarrow,
+  onOpenChange,
 }: {
   constraint: ProjectConstraint
   projects: string[]
   onNarrow: (constraint: ProjectConstraint) => void
+  onOpenChange: (open: boolean) => void
 }) {
   const chosen = projectChoice(constraint)
   const named =
     constraint.kind === 'named' && !projects.includes(constraint.name)
       ? [constraint.name, ...projects]
       : projects
+  const options = [
+    { value: 'any', label: 'Any Project' },
+    { value: 'unfiled', label: 'Unfiled' },
+    ...named.map((name) => ({ value: `#${name}`, label: `#${name}` })),
+  ]
 
   return (
-    <label className="flex shrink-0 items-center gap-1.5">
-      <span className="sr-only">Project</span>
-      <select
-        value={chosen}
-        onChange={(event) => onNarrow(projectConstraintFor(event.target.value))}
-        className="max-w-32 rounded-md border border-border bg-transparent px-1.5 py-0.5 type-meta text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-      >
-        <option value="any">Any Project</option>
-        <option value="unfiled">Unfiled</option>
-        {named.map((name) => (
-          <option key={name} value={`#${name}`}>
-            #{name}
-          </option>
+    <Select
+      items={options}
+      value={chosen}
+      onValueChange={(value) => onNarrow(projectConstraintFor(String(value)))}
+      onOpenChange={onOpenChange}
+    >
+      <SelectTrigger size="sm" aria-label="Project" className="max-w-40">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
         ))}
-      </select>
-    </label>
+      </SelectContent>
+    </Select>
   )
 }
 
@@ -683,23 +783,26 @@ function SearchField({
     // the Digest are fixed things, a field is just as usable half as wide. It
     // gives way down to a readable width and then takes a row of its own,
     // rather than shrinking until nothing can be typed into it.
-    <label className="flex min-w-0 flex-1 basis-40 items-center gap-1.5">
+    <label className="relative flex min-w-0 flex-1 basis-40 items-center">
       <span className="sr-only">Search</span>
-      <input
+      <SearchIcon className="pointer-events-none absolute left-2 size-3 text-muted-foreground" />
+      <Input
         type="search"
         value={term}
         onChange={(event) => onType(event.target.value)}
         placeholder="Search"
-        className="w-full min-w-0 rounded-md border border-border bg-transparent px-1.5 py-0.5 type-meta text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+        className="h-6 w-full min-w-0 pl-6 type-meta [&::-webkit-search-cancel-button]:hidden"
       />
     </label>
   )
 }
 
 /**
- * The journal's one output, and what it says it did. The confirmation is not a
- * decoration: a clipboard write is invisible, so a count is how the reader
- * knows it worked before they paste.
+ * The journal's one output, and the header's one primary action. The
+ * confirmation is not a decoration: a clipboard write is invisible, so a count
+ * is how the reader knows it worked before they paste. It is said twice, in
+ * the two ways a confirmation has to be said — a toast for whoever is looking
+ * at the screen, and a live region for whoever is not.
  */
 function CopyDigest({
   confirmation,
@@ -711,39 +814,23 @@ function CopyDigest({
   return (
     <div className="ml-auto flex shrink-0 items-center gap-3">
       {/* Empty until something has been copied, and announced when it is. */}
-      <span role="status" aria-live="polite" className="type-meta text-muted-foreground">
+      <span role="status" aria-live="polite" className="sr-only">
         {confirmation}
       </span>
-      <Button variant="outline" size="sm" onClick={onCopy}>
+      <Button size="sm" onClick={onCopy}>
+        <ClipboardCopyIcon data-icon="inline-start" />
         Copy Digest
       </Button>
     </div>
   )
 }
 
-function End({
-  label,
-  value,
-  onChange,
-}: {
-  label: string
-  value: string
-  onChange: (value: string) => void
-}) {
-  return (
-    <label className="flex shrink-0 items-center gap-1.5">
-      <span>{label}</span>
-      <DayField value={value} onPick={onChange} />
-    </label>
-  )
-}
-
 /**
  * A Journal Day being edited, which is not the same as one being typed. A date
- * input that already holds a day — both of these always do — reports a whole,
- * shaped value on every segment a keystroke touches, so typing the year `2026`
- * announces `0002`, `0020` and `0202` first. Committing those would refile a
- * Note three times on the way to the day the reader meant.
+ * input that already holds a day reports a whole, shaped value on every
+ * segment a keystroke touches, so typing the year `2026` announces `0002`,
+ * `0020` and `0202` first. Committing those would refile a Note three times on
+ * the way to the day the reader meant.
  *
  * So the typing is kept here and only the settled value leaves: the picked day
  * is announced when the field is left, or when the picker itself commits one.
