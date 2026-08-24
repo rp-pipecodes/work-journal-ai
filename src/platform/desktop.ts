@@ -72,9 +72,10 @@ export interface CaptureFit {
 }
 
 /**
- * Capture panel geometry, in the panel's own terms. Every height here must
- * match the element it names in `CaptureView`: the field (`h-16`), a Prediction
- * row (`h-9`), the hairline above the first one, and the refusal line (`h-8`).
+ * Capture panel geometry, in the panel's own terms: the field, a Prediction
+ * row, the hairline above the first one, and the refusal line. `CaptureView`
+ * sizes those elements from these very numbers rather than restating them in
+ * classes, so the window and the panel inside it cannot drift apart.
  */
 export const CAPTURE_PANEL_WIDTH = 560
 export const CAPTURE_FIELD_HEIGHT = 64
@@ -97,7 +98,7 @@ export const CAPTURE_SHADOW_GUTTER = 32
  */
 const CAPTURE_PANEL_MARGIN = 2 * (CAPTURE_PANEL_BORDER + CAPTURE_SHADOW_GUTTER)
 export const CAPTURE_WIDTH = CAPTURE_PANEL_WIDTH + CAPTURE_PANEL_MARGIN
-export const CAPTURE_HEIGHT = CAPTURE_FIELD_HEIGHT + CAPTURE_PANEL_MARGIN
+const CAPTURE_HEIGHT = CAPTURE_FIELD_HEIGHT + CAPTURE_PANEL_MARGIN
 
 /** How tall the window has to be to show the field and everything under it. */
 export function captureWindowHeight(fit: CaptureFit): number {

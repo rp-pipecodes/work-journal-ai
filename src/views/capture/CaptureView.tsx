@@ -7,7 +7,15 @@ import {
   type Journal,
   type KeystrokeDecision,
 } from '@/journal/journal'
-import type { Desktop } from '@/platform/desktop'
+import {
+  CAPTURE_FIELD_HEIGHT,
+  CAPTURE_HAIRLINE,
+  CAPTURE_PANEL_BORDER,
+  CAPTURE_PREDICTION_ROW,
+  CAPTURE_REFUSAL_HEIGHT,
+  CAPTURE_SHADOW_GUTTER,
+  type Desktop,
+} from '@/platform/desktop'
 
 /**
  * One line, one keystroke. The window behind this view is created at startup
@@ -44,21 +52,24 @@ export default function CaptureView({
   const prefix = markerPrefix(body)
   const predictions = prefix === null ? [] : offered
 
-  const begin = useCallback(() => {
+  // A Capture never inherits the last one: a Draft is nothing, so both the
+  // beginning of one and the end of one leave exactly the same empty window.
+  const reset = useCallback(() => {
     setBody('')
     setRefusals(0)
     setOffered([])
     setHighlight(0)
-    field.current?.focus()
   }, [])
 
+  const begin = useCallback(() => {
+    reset()
+    field.current?.focus()
+  }, [reset])
+
   const dismiss = useCallback(async () => {
-    setBody('')
-    setRefusals(0)
-    setOffered([])
-    setHighlight(0)
+    reset()
     await desktop.dismissCapture()
-  }, [desktop])
+  }, [desktop, reset])
 
   const commit = useCallback(
     async (text: string) => {
@@ -215,7 +226,8 @@ export default function CaptureView({
     // is a press outside the panel — a discard, exactly as a press on the
     // desktop behind would have been.
     <div
-      className="flex h-screen flex-col p-8"
+      className="flex h-screen flex-col"
+      style={{ padding: CAPTURE_SHADOW_GUTTER }}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) void dismiss()
       }}
@@ -233,7 +245,10 @@ export default function CaptureView({
           Never shrinks: the window is resized to fit this panel, and in the
           moment before that lands the field must keep its whole height rather
           than squeeze the line being typed. */}
-      <div className="flex shrink-0 flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-[0_12px_24px_-4px_rgb(0_0_0/0.28),0_2px_8px_-2px_rgb(0_0_0/0.16)] dark:shadow-[0_12px_24px_-4px_rgb(0_0_0/0.6),0_2px_8px_-2px_rgb(0_0_0/0.45)]">
+      <div
+        style={{ borderWidth: CAPTURE_PANEL_BORDER }}
+        className="flex shrink-0 flex-col overflow-hidden rounded-2xl border-border bg-background shadow-[0_12px_24px_-4px_rgb(0_0_0/0.28),0_2px_8px_-2px_rgb(0_0_0/0.16)] dark:shadow-[0_12px_24px_-4px_rgb(0_0_0/0.6),0_2px_8px_-2px_rgb(0_0_0/0.45)]"
+      >
         <div className="relative shrink-0">
           <input
             ref={field}
@@ -253,8 +268,10 @@ export default function CaptureView({
             spellCheck={false}
             // The ring is drawn inside: the field all but fills the panel, and
             // an outset one would be clipped by the panel's own edge. The right
-            // padding is the room the bargain takes.
-            className="h-16 w-full rounded-2xl bg-transparent pl-5 pr-40 type-field outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
+            // padding is the room the bargain takes, with enough over for a
+            // wider font than the one this was measured in.
+            style={{ height: CAPTURE_FIELD_HEIGHT }}
+            className="w-full rounded-2xl bg-transparent pl-5 pr-52 type-field outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
           />
           {/*
             What Return and Escape are worth, said where they are being pressed
@@ -266,16 +283,8 @@ export default function CaptureView({
             id={BARGAIN_ID}
             className="pointer-events-none absolute inset-y-0 right-5 flex select-none items-center gap-3 type-micro text-muted-foreground/70"
           >
-            <span className="flex items-center gap-1">
-              <KeyCap>↵</KeyCap>
-              <span className="sr-only">Return</span>
-              commits
-            </span>
-            <span className="flex items-center gap-1">
-              <KeyCap>esc</KeyCap>
-              <span className="sr-only">Escape</span>
-              abandons
-            </span>
+            <Hint glyph="↵" reading="Return commits." what="commits" />
+            <Hint glyph="esc" reading="Escape abandons." what="abandons" />
           </div>
         </div>
         {predictions.length > 0 && (
@@ -283,7 +292,11 @@ export default function CaptureView({
             {/* Inset rather than a rule across the panel: the Predictions
                 belong to the field above them, and a full-width line would cut
                 the panel in two. */}
-            <div className="mx-5 h-px shrink-0 bg-border" aria-hidden="true" />
+            <div
+              style={{ height: CAPTURE_HAIRLINE }}
+              className="mx-5 shrink-0 bg-border"
+              aria-hidden="true"
+            />
             <ul
               id={PREDICTIONS_ID}
               role="listbox"
@@ -300,10 +313,11 @@ export default function CaptureView({
                       event.preventDefault()
                       choosePrediction(name)
                     }}
+                    style={{ height: CAPTURE_PREDICTION_ROW }}
                     className={
                       index === highlight
-                        ? 'flex h-9 w-full items-center px-5 text-left type-body bg-accent text-accent-foreground'
-                        : 'flex h-9 w-full items-center px-5 text-left type-body hover:bg-accent/50'
+                        ? 'flex w-full items-center px-5 text-left type-body bg-accent text-accent-foreground'
+                        : 'flex w-full items-center px-5 text-left type-body hover:bg-accent/50'
                     }
                   >
                     <ProjectChip project={name} />
@@ -327,7 +341,8 @@ export default function CaptureView({
             key={refusals}
             id={PROBLEM_ID}
             role="alert"
-            className="flex h-8 shrink-0 items-center px-5 type-meta text-destructive"
+            style={{ height: CAPTURE_REFUSAL_HEIGHT }}
+            className="flex shrink-0 items-center px-5 type-meta text-destructive"
           >
             {CAPTURE_REFUSED}
           </p>
@@ -337,12 +352,31 @@ export default function CaptureView({
   )
 }
 
-/** One key, drawn as the key it is rather than spelled out mid-sentence. */
-function KeyCap({ children }: { children: React.ReactNode }) {
+/**
+ * Half of the bargain: a key cap and what pressing it is worth. Said twice and
+ * never at once — a glyph beside a verb for a reader who can see the key, and
+ * the whole sentence for one who cannot, since "↵ commits" read aloud is not
+ * one.
+ */
+function Hint({
+  glyph,
+  reading,
+  what,
+}: {
+  glyph: string
+  reading: string
+  what: string
+}) {
   return (
-    <kbd className="rounded-sm border border-border bg-muted px-1 py-px font-sans type-micro leading-none text-muted-foreground">
-      {children}
-    </kbd>
+    <>
+      <span className="sr-only">{reading}</span>
+      <span aria-hidden="true" className="flex items-center gap-1">
+        <kbd className="rounded-sm border border-border bg-muted px-1 py-px font-sans type-micro leading-none text-muted-foreground">
+          {glyph}
+        </kbd>
+        {what}
+      </span>
+    </>
   )
 }
 

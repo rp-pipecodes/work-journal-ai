@@ -44,6 +44,16 @@ function type(text: string) {
   fireEvent.change(field(), { target: { value: text } })
 }
 
+/** What a screen reader would make of a node: what is hidden from it, gone. */
+function reading(node: Element | null): string {
+  if (node === null) return ''
+  const copy = node.cloneNode(true) as Element
+  for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) {
+    hidden.remove()
+  }
+  return (copy.textContent ?? '').replace(/\s+/g, ' ').trim()
+}
+
 function pressEnter() {
   fireEvent.keyDown(field(), { key: 'Enter' })
 }
@@ -57,7 +67,7 @@ describe('a refused Capture', () => {
     pressEnter()
 
     await screen.findByRole('alert')
-    expect(desktop.fitted.at(-1)).toEqual({ predictions: 0, refused: true })
+    expect(desktop.fits.at(-1)).toEqual({ predictions: 0, refused: true })
     // The Body is still there, and still the user's to fix and retry.
     expect(field().value).toBe('shipped the importer')
   })
@@ -88,7 +98,7 @@ describe('a refused Capture', () => {
 
     await expect.poll(() => screen.queryByRole('alert')).toBeNull()
     expect(field().value).toBe('')
-    expect(desktop.fitted.at(-1)).toEqual({ predictions: 0, refused: false })
+    expect(desktop.fits.at(-1)).toEqual({ predictions: 0, refused: false })
   })
 })
 
@@ -101,7 +111,7 @@ describe('the Predictions', () => {
 
     await screen.findAllByRole('option')
     await expect
-      .poll(() => desktop.fitted.at(-1))
+      .poll(() => desktop.fits.at(-1))
       .toEqual({ predictions: 2, refused: false })
   })
 
@@ -144,10 +154,12 @@ describe('the keyboard bargain', () => {
     // so the bargain reaches a reader who never sees them.
     const described = field().getAttribute('aria-describedby')?.split(' ') ?? []
     const hints = described
-      .map((id) => document.getElementById(id)?.textContent ?? '')
+      .map((id) => reading(document.getElementById(id)))
       .join(' ')
 
-    expect(hints).toMatch(/return/i)
-    expect(hints).toMatch(/esc/i)
+    // A whole sentence each, rather than a glyph and a verb: "↵ commits" is
+    // not something to read aloud.
+    expect(hints).toMatch(/Return commits\./)
+    expect(hints).toMatch(/Escape abandons\./)
   })
 })

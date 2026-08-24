@@ -27,7 +27,7 @@ export interface FakeDesktop extends Desktop {
   /** Every export written, most recent last. */
   exported: Array<{ markdown: string; fileName: string }>
   /** Every size the Capture window was asked to take, most recent last. */
-  fitted: CaptureFit[]
+  fits: CaptureFit[]
   /** What is beside the menu bar glyph; null until something is put there. */
   trayTitle: string | null
   /** What is on the clipboard; null until something is copied there. */
@@ -81,7 +81,7 @@ export function fakeDesktop({
     stored,
     loginItem: false,
     exported: [],
-    fitted: [],
+    fits: [],
     trayTitle: null,
     clipboard: null,
     access,
@@ -121,7 +121,7 @@ export function fakeDesktop({
 
     dismissCapture: async () => {},
     fitCapture: async (fit) => {
-      desktop.fitted.push(fit)
+      desktop.fits.push(fit)
     },
     onCaptureShown: async (handle) => captureShown.add(handle),
     onYesterdayDigestRequested: async (handle) =>
