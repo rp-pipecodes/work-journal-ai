@@ -45,12 +45,12 @@ export default class ErrorBoundary extends Component<
         role="alert"
         className="flex h-screen flex-col items-start justify-center gap-3 bg-background px-6 text-foreground"
       >
-        <h1 className="text-sm font-medium">This window stopped working.</h1>
-        <p className="text-xs text-muted-foreground">
+        <h1 className="type-title">This window stopped working.</h1>
+        <p className="type-body text-muted-foreground">
           Nothing already captured has been lost — the journal is on disk, not in
           this window. Reloading rebuilds it from there.
         </p>
-        <p className="font-mono text-xs text-muted-foreground">
+        <p className="font-mono type-meta text-muted-foreground">
           {this.state.failure.message}
         </p>
         <div className="flex items-center gap-2">

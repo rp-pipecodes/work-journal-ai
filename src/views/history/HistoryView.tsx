@@ -175,7 +175,7 @@ export default function HistoryView({
         off. Nothing up here is optional enough to hide.
       */}
       {filter !== null && (
-        <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-6 py-4 text-xs text-muted-foreground">
+        <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-6 py-4 type-meta text-muted-foreground">
           <Range filter={filter} onPick={pick} />
           <Preset onChoose={applyPreset} />
           <ProjectConstraintField
@@ -230,7 +230,7 @@ export default function HistoryView({
         {history.state === 'notes' &&
           history.days.map((day) => (
             <section key={day.journalDay} className="mb-6 last:mb-0">
-              <h2 className="mb-3 text-sm font-medium text-muted-foreground">
+              <h2 className="mb-3 type-section text-muted-foreground">
                 {formatJournalDay(day.journalDay)}
               </h2>
               <ol className="flex flex-col gap-1">
@@ -296,7 +296,7 @@ function nothingHere(filter: Filter | null): string {
  */
 function Problem({ children }: { children: React.ReactNode }) {
   return (
-    <p role="alert" className="shrink-0 px-6 pb-3 text-xs text-destructive">
+    <p role="alert" className="shrink-0 px-6 pb-3 type-meta text-destructive">
       {children}
     </p>
   )
@@ -329,8 +329,8 @@ function NoteLine({
   onDelete: () => void
 }) {
   return (
-    <li className="group relative flex gap-3 rounded-md px-2 py-1 text-sm hover:bg-muted/40 focus-within:bg-muted/40">
-      <span className="shrink-0 pt-px font-mono text-xs tabular-nums text-muted-foreground">
+    <li className="group relative flex gap-3 rounded-md px-2 py-1 type-body hover:bg-muted/40 focus-within:bg-muted/40">
+      <span className="shrink-0 pt-px font-mono type-meta tabular-nums text-muted-foreground">
         {formatTimeOfDay(note.capturedAt)}
       </span>
 
@@ -343,7 +343,7 @@ function NoteLine({
             onClick={onEdit}
             className="flex-1 cursor-text rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           >
-            <span className="mr-2 shrink-0 font-mono text-xs text-muted-foreground">
+            <span className="mr-2 shrink-0 font-mono type-meta text-muted-foreground">
               {formatProject(note.project)}
             </span>
             {note.body}
@@ -351,7 +351,7 @@ function NoteLine({
               // Provenance for the reader: the wording is not necessarily the
               // one that was typed at Captured At.
               <span
-                className="ml-2 text-xs text-muted-foreground"
+                className="ml-2 type-meta text-muted-foreground"
                 title="Changed since it was captured"
               >
                 edited
@@ -378,7 +378,7 @@ function NoteLine({
           */}
           <div className="absolute inset-y-1 right-2 flex items-center rounded-md bg-background opacity-0 transition-opacity pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
             <div className="flex h-full items-center gap-1 rounded-md bg-muted/40 pl-3">
-              <label className="flex items-center gap-1 text-xs text-muted-foreground">
+              <label className="flex items-center gap-1 type-meta text-muted-foreground">
                 <span className="sr-only">Project</span>
                 <ProjectField
                   value={note.project}
@@ -387,7 +387,7 @@ function NoteLine({
                   label={`File "${note.body}" under a Project`}
                 />
               </label>
-              <label className="flex items-center gap-1 text-xs text-muted-foreground">
+              <label className="flex items-center gap-1 type-meta text-muted-foreground">
                 <span className="sr-only">File under</span>
                 <DayField
                   value={note.journalDay}
@@ -423,13 +423,13 @@ function ResultLine({ note, onShow }: { note: Note; onShow: () => void }) {
       <button
         type="button"
         onClick={onShow}
-        className="flex w-full gap-3 rounded-md px-2 py-1 text-left text-sm outline-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/30"
+        className="flex w-full gap-3 rounded-md px-2 py-1 text-left type-body outline-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/30"
       >
-        <span className="shrink-0 font-mono text-xs text-muted-foreground">
+        <span className="shrink-0 font-mono type-meta text-muted-foreground">
           {formatProject(note.project)}
         </span>
         <span className="flex-1">{note.body}</span>
-        <span className="shrink-0 pt-px text-xs text-muted-foreground">
+        <span className="shrink-0 pt-px type-meta text-muted-foreground">
           {formatJournalDay(note.journalDay)}
         </span>
       </button>
@@ -473,7 +473,7 @@ function EditBody({
       onKeyDown={onKeyDown}
       onBlur={onAbandon}
       aria-label="Body"
-      className="flex-1 rounded-md border border-border bg-transparent px-1.5 py-0.5 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+      className="flex-1 rounded-md border border-border bg-transparent px-1.5 py-0.5 type-body text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
     />
   )
 }
@@ -571,7 +571,7 @@ function Preset({ onChoose }: { onChoose: (preset: FilterPreset) => void }) {
           if (value === '') return
           onChoose(value as FilterPreset)
         }}
-        className="rounded-md border border-border bg-transparent px-1.5 py-0.5 text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+        className="rounded-md border border-border bg-transparent px-1.5 py-0.5 type-meta text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
       >
         <option value="">Preset</option>
         {PRESET_OPTIONS.map((option) => (
@@ -615,7 +615,7 @@ function ProjectConstraintField({
       <select
         value={chosen}
         onChange={(event) => onNarrow(projectConstraintFor(event.target.value))}
-        className="max-w-32 rounded-md border border-border bg-transparent px-1.5 py-0.5 text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+        className="max-w-32 rounded-md border border-border bg-transparent px-1.5 py-0.5 type-meta text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
       >
         <option value="any">Any Project</option>
         <option value="unfiled">Unfiled</option>
@@ -655,7 +655,7 @@ function SearchField({
         value={term}
         onChange={(event) => onType(event.target.value)}
         placeholder="Search"
-        className="w-full min-w-0 rounded-md border border-border bg-transparent px-1.5 py-0.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+        className="w-full min-w-0 rounded-md border border-border bg-transparent px-1.5 py-0.5 type-meta text-foreground outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
       />
     </label>
   )
@@ -676,7 +676,7 @@ function CopyDigest({
   return (
     <div className="ml-auto flex shrink-0 items-center gap-3">
       {/* Empty until something has been copied, and announced when it is. */}
-      <span role="status" aria-live="polite">
+      <span role="status" aria-live="polite" className="type-meta text-muted-foreground">
         {confirmation}
       </span>
       <Button variant="outline" size="sm" onClick={onCopy}>
@@ -757,7 +757,7 @@ function DayField({
         }
       }}
       aria-label={label}
-      className="rounded-md border border-border bg-transparent px-1.5 py-0.5 text-xs tabular-nums text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+      className="rounded-md border border-border bg-transparent px-1.5 py-0.5 type-meta tabular-nums text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
     />
   )
 }
@@ -843,7 +843,7 @@ function ProjectField({
           }
         }}
         aria-label={label}
-        className="w-24 rounded-md border border-border bg-transparent px-1.5 py-0.5 font-mono text-xs text-foreground outline-none placeholder:font-sans placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+        className="w-24 rounded-md border border-border bg-transparent px-1.5 py-0.5 font-mono type-meta text-foreground outline-none placeholder:font-sans placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
       />
       <datalist id={listId}>
         {projects.map((name) => (
@@ -870,7 +870,7 @@ function Nudge({
   return (
     <div
       role="status"
-      className="flex shrink-0 items-center gap-3 border-t border-border bg-muted/40 px-6 py-3 text-xs"
+      className="flex shrink-0 items-center gap-3 border-t border-border bg-muted/40 px-6 py-3 type-meta"
     >
       <span className="flex-1 text-muted-foreground">
         A new Note on {formatJournalDay(journalDay)}.
@@ -921,7 +921,7 @@ function EmptyState({ hotkey }: { hotkey: HotkeyStatus | null }) {
 
 function Centred({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm">
+    <div className="flex h-full flex-col items-center justify-center gap-2 text-center type-body">
       {children}
     </div>
   )
