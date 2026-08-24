@@ -170,7 +170,7 @@ export default function SettingsView({
       ref={page}
       tabIndex={-1}
       onKeyDown={onKeyDown}
-      className="flex h-screen flex-col gap-6 overflow-y-auto bg-background px-6 py-5 outline-none"
+      className="flex h-screen flex-col gap-6 overflow-y-auto bg-background px-6 py-5 type-body outline-none"
     >
       <Section
         title="Hotkey"
@@ -208,7 +208,7 @@ export default function SettingsView({
         title="Theme"
         explanation="Whether the app is light or dark, and whether it decides that for itself."
       >
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex items-center gap-2 type-body">
           <span className="text-muted-foreground">Theme</span>
           <select
             value={theme}
@@ -219,7 +219,7 @@ export default function SettingsView({
                 setTheme(event.target.value)
               }
             }}
-            className="rounded-md border border-border bg-transparent px-2 py-1 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+            className="rounded-md border border-border bg-transparent px-2 py-1 type-body text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
           >
             {THEME_CHOICES.map((choice) => (
               <option key={choice} value={choice}>
@@ -239,7 +239,7 @@ export default function SettingsView({
         title="Start at login"
         explanation="Whether Work Journal launches when you log in."
       >
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex items-center gap-2 type-body">
           <input
             type="checkbox"
             checked={startAtLogin}
@@ -258,7 +258,7 @@ export default function SettingsView({
           <Button variant="outline" size="sm" onClick={exportAll} disabled={exporting}>
             {exporting ? 'Exporting…' : 'Export all to Markdown'}
           </Button>
-          <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
+          <span role="status" aria-live="polite" className="type-meta text-muted-foreground">
             {exported}
           </span>
         </div>
@@ -267,7 +267,7 @@ export default function SettingsView({
       {appIdentity !== null && (
         <footer
           aria-label="Application version"
-          className="mt-auto flex items-center justify-center gap-2 text-xs text-muted-foreground"
+          className="mt-auto flex items-center justify-center gap-2 type-meta text-muted-foreground"
         >
           <span>{appIdentity.version}</span>
           {appIdentity.isDevelopment && (
@@ -323,7 +323,7 @@ function HotkeyRecorder({
         autoFocus
         onKeyDown={onKeyDown}
         onBlur={onAbandon}
-        className="rounded-md border border-ring bg-transparent px-3 py-1.5 font-mono text-sm text-foreground outline-none ring-2 ring-ring/30"
+        className="rounded-md border border-ring bg-transparent px-3 py-1.5 font-mono type-body text-foreground outline-none ring-2 ring-ring/30"
       >
         Press a combination…
       </button>
@@ -332,7 +332,7 @@ function HotkeyRecorder({
 
   return (
     <>
-      <span className="rounded-md border border-border px-3 py-1.5 font-mono text-sm tabular-nums">
+      <span className="rounded-md border border-border px-3 py-1.5 font-mono type-body">
         {hotkey?.hotkey ?? '…'}
       </span>
       <Button variant="outline" size="sm" onClick={onStart}>
@@ -389,8 +389,8 @@ function Section({
 }) {
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium">{title}</h2>
-      <p className="text-xs text-muted-foreground">{explanation}</p>
+      <h2 className="type-section">{title}</h2>
+      <p className="type-meta text-muted-foreground">{explanation}</p>
       {children}
     </section>
   )
@@ -399,12 +399,12 @@ function Section({
 /** Said plainly, and never in place of the setting it is about. */
 function Problem({ children }: { children: React.ReactNode }) {
   return (
-    <p role="alert" className="text-xs text-destructive">
+    <p role="alert" className="type-meta text-destructive">
       {children}
     </p>
   )
 }
 
 function Aside({ children }: { children: React.ReactNode }) {
-  return <p className="text-xs text-muted-foreground">{children}</p>
+  return <p className="type-meta text-muted-foreground">{children}</p>
 }
