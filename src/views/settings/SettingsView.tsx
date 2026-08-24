@@ -348,7 +348,7 @@ export default function SettingsView({
           explanation="Whether the app is light or dark, and whether it decides that for itself."
         >
           <ToggleGroup
-            aria-label="Theme"
+            aria-labelledby="theme-heading"
             spacing={0}
             // A segmented control the way macOS draws one: one recessed track,
             // and the chosen segment raised out of it.
@@ -456,7 +456,6 @@ export default function SettingsView({
         <p
           role="status"
           aria-live="polite"
-          aria-label="Last export"
           className="type-meta text-muted-foreground"
         >
           {exported}
@@ -644,8 +643,10 @@ function Group({ children }: { children: React.ReactNode }) {
 
 /**
  * One setting: what it is on the left, the control that changes it on the
- * right. `controls` names the control's element, so that the label on the left
- * is the control's label rather than text that merely sits beside it.
+ * right. The name of the setting stays a heading, because that is what it is —
+ * a settings list is a document with sections, and a screen reader navigates
+ * it as one. `controls` names the control's element inside that heading, so the
+ * name is also the control's label rather than text that merely sits beside it.
  */
 function Row({
   label,
@@ -661,18 +662,27 @@ function Row({
   return (
     <div className="flex items-start justify-between gap-6">
       <div className="flex flex-col gap-0.5">
-        {controls === undefined ? (
-          <span className="type-section">{label}</span>
-        ) : (
-          <label htmlFor={controls} className="type-section">
-            {label}
-          </label>
-        )}
+        <h2 id={`${headingId(label)}-heading`} className="type-section">
+          {controls === undefined ? (
+            label
+          ) : (
+            <label htmlFor={controls}>{label}</label>
+          )}
+        </h2>
         <p className="type-meta text-muted-foreground">{explanation}</p>
       </div>
       <div className="flex shrink-0 items-center gap-2 pt-0.5">{children}</div>
     </div>
   )
+}
+
+/**
+ * A Row's heading, named after the setting, so that a control which cannot
+ * carry a `<label>` — a group of buttons is not a form field — can still point
+ * at the words the user is reading as its own name.
+ */
+function headingId(label: string): string {
+  return label.toLowerCase().replace(/[^a-z]+/g, '-')
 }
 
 /** Said plainly, and never in place of the setting it is about. */

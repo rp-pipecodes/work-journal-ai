@@ -205,9 +205,11 @@ describe('Export', () => {
 
     // The line underneath keeps saying it, politely, for as long as the window
     // is open — a toast that has faded must not take the answer with it.
-    const announced = screen.getByRole('status', { name: 'Last export' })
-    expect(announced.getAttribute('aria-live')).toBe('polite')
-    expect(announced.textContent).toMatch(/Exported 1 Note to/)
+    // Found the way a screen reader finds it — the region itself carries no
+    // name, so that what it says is what is announced.
+    const announced = document.querySelector('p[role="status"]')
+    expect(announced?.getAttribute('aria-live')).toBe('polite')
+    expect(announced?.textContent).toMatch(/Exported 1 Note to/)
   })
 })
 
