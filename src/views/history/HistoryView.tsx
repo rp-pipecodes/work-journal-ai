@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { CalendarRangeIcon, ClipboardCopyIcon, SearchIcon } from 'lucide-react'
 import { toast } from 'sonner'
+import ProjectChip from '@/components/ProjectChip'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Input } from '@/components/ui/input'
@@ -17,7 +18,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Toaster } from '@/components/ui/sonner'
-import { cn } from '@/lib/utils'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,7 +37,6 @@ import {
   constraintOf,
   decideKeystroke,
   formatJournalDay,
-  formatProject,
   formatTimeOfDay,
   journalDayFor,
   projectChoice,
@@ -325,7 +324,7 @@ export default function HistoryView({
       />
 
       {/* Where a copy says what it did. Nothing else toasts. */}
-      <Toaster position="bottom-right" />
+      <Toaster />
     </div>
   )
 }
@@ -481,24 +480,6 @@ function NoteLine({
  * — take History to that day in full. The Notes are not correctable here: a
  * result is a signpost to a day, and the day is where the list lives.
  */
-/*
- * The accent marks a filed Project and nothing else on the line. `Unfiled` is
- * the absence of a Project rather than one of them, so it stays quiet.
- */
-function ProjectChip({ project, className }: { project: string | null; className?: string }) {
-  return (
-    <span
-      className={cn(
-        'shrink-0 font-mono type-meta',
-        project === null ? 'text-muted-foreground' : 'text-primary',
-        className,
-      )}
-    >
-      {formatProject(project)}
-    </span>
-  )
-}
-
 function ResultLine({ note, onShow }: { note: Note; onShow: () => void }) {
   return (
     <li>

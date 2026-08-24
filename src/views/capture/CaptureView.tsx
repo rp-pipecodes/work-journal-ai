@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import ProjectChip from '@/components/ProjectChip'
 import {
   applyPrediction,
   decideKeystroke,
@@ -6,7 +7,15 @@ import {
   type Journal,
   type KeystrokeDecision,
 } from '@/journal/journal'
-import type { Desktop } from '@/platform/desktop'
+import {
+  CAPTURE_FIELD_HEIGHT,
+  CAPTURE_HAIRLINE,
+  CAPTURE_PANEL_BORDER,
+  CAPTURE_PREDICTION_ROW,
+  CAPTURE_REFUSAL_HEIGHT,
+  CAPTURE_SHADOW_GUTTER,
+  type Desktop,
+} from '@/platform/desktop'
 
 /**
  * One line, one keystroke. The window behind this view is created at startup
@@ -16,6 +25,10 @@ import type { Desktop } from '@/platform/desktop'
  * While a Project Marker is open, Predictions drawn from Projects already on
  * Notes sit under the field. Choosing one fills the marker; typing a new name
  * and committing still works with no list required.
+ *
+ * Nothing here is rendered into a portal, and nothing here may be: the window
+ * is transparent, undecorated and only as tall as this view asks for, so
+ * anything drawn outside the panel is clipped by the window's own edge.
  */
 export default function CaptureView({
   desktop,
@@ -39,37 +52,24 @@ export default function CaptureView({
   const prefix = markerPrefix(body)
   const predictions = prefix === null ? [] : offered
 
-  // Fitting the window to the Predictions is the window's business, not the
-  // Note's: a Capture that could not resize still holds everything the user
-  // typed and still commits it. So a failure is logged and goes no further —
-  // but it is logged, because the only symptom is a window of the wrong size,
-  // which reads as a layout bug rather than the denied call it is.
-  const fit = useCallback(
-    (predictionCount: number) => {
-      desktop.fitCapture(predictionCount).catch((error: unknown) => {
-        console.error('could not fit the Capture window', error)
-      })
-    },
-    [desktop],
-  )
+  // A Capture never inherits the last one: a Draft is nothing, so both the
+  // beginning of one and the end of one leave exactly the same empty window.
+  const reset = useCallback(() => {
+    setBody('')
+    setRefusals(0)
+    setOffered([])
+    setHighlight(0)
+  }, [])
 
   const begin = useCallback(() => {
-    setBody('')
-    setRefusals(0)
-    setOffered([])
-    setHighlight(0)
-    fit(0)
+    reset()
     field.current?.focus()
-  }, [fit])
+  }, [reset])
 
   const dismiss = useCallback(async () => {
-    setBody('')
-    setRefusals(0)
-    setOffered([])
-    setHighlight(0)
-    fit(0)
+    reset()
     await desktop.dismissCapture()
-  }, [desktop, fit])
+  }, [desktop, reset])
 
   const commit = useCallback(
     async (text: string) => {
@@ -110,23 +110,19 @@ export default function CaptureView({
     [desktop, journal, dismiss],
   )
 
-  const choosePrediction = useCallback(
-    (name: string) => {
-      const next = applyPrediction(name)
-      setBody(next)
-      setOffered([])
-      setHighlight(0)
-      fit(0)
-      // After the fill, the cursor sits ready for the Body.
-      requestAnimationFrame(() => {
-        const input = field.current
-        if (input === null) return
-        input.focus()
-        input.setSelectionRange(next.length, next.length)
-      })
-    },
-    [fit],
-  )
+  const choosePrediction = useCallback((name: string) => {
+    const next = applyPrediction(name)
+    setBody(next)
+    setOffered([])
+    setHighlight(0)
+    // After the fill, the cursor sits ready for the Body.
+    requestAnimationFrame(() => {
+      const input = field.current
+      if (input === null) return
+      input.focus()
+      input.setSelectionRange(next.length, next.length)
+    })
+  }, [])
 
   useEffect(() => {
     // The page behind the window has to give way to the rounded corners drawn
@@ -150,7 +146,6 @@ export default function CaptureView({
 
   useEffect(() => {
     if (prefix === null) {
-      fit(0)
       return
     }
 
@@ -161,13 +156,29 @@ export default function CaptureView({
       if (cancelled) return
       setOffered(names)
       setHighlight(0)
-      fit(names.length)
     })()
 
     return () => {
       cancelled = true
     }
-  }, [prefix, journal, fit])
+  }, [prefix, journal])
+
+  // Everything under the field grows the window rather than sharing the field's
+  // room, so the size is a function of what is on screen rather than something
+  // each caller has to remember to ask for.
+  //
+  // Fitting the window is the window's business, not the Note's: a Capture that
+  // could not resize still holds everything the user typed and still commits
+  // it. So a failure is logged and goes no further — but it is logged, because
+  // the only symptom is a window of the wrong size, which reads as a layout bug
+  // rather than the denied call it is.
+  useEffect(() => {
+    desktop
+      .fitCapture({ predictions: predictions.length, refused: refusals > 0 })
+      .catch((error: unknown) => {
+        console.error('could not fit the Capture window', error)
+      })
+  }, [desktop, predictions.length, refusals])
 
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (predictions.length > 0 && prefix !== null) {
@@ -209,82 +220,168 @@ export default function CaptureView({
   }
 
   return (
-    // The corners are rounded here rather than on the field: the field all but
-    // fills the window, so this is the shape the user sees. Predictions sit
-    // under the field when a marker is open; the window grows to fit them.
-    <div className="flex h-screen flex-col overflow-hidden rounded-2xl border border-border bg-background">
-      <input
-        ref={field}
-        type="text"
-        value={body}
-        onChange={(event) => setBody(event.target.value)}
-        onKeyDown={onKeyDown}
-        aria-label="What did you just do?"
-        placeholder="What did you just do?"
-        aria-describedby={refusals > 0 ? PROBLEM_ID : undefined}
-        aria-autocomplete="list"
-        aria-controls={predictions.length > 0 ? PREDICTIONS_ID : undefined}
-        aria-expanded={predictions.length > 0}
-        autoComplete="off"
-        spellCheck={false}
-        // The ring is drawn inside: the field all but fills the window, and an
-        // outset one would be clipped by the window's own edge.
-        className="h-16 w-full shrink-0 rounded-2xl bg-transparent px-5 type-field outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
-      />
-      {predictions.length > 0 && (
-        <ul
-          id={PREDICTIONS_ID}
-          role="listbox"
-          aria-label="Project Predictions"
-          className="flex flex-col border-t border-border"
-        >
-          {predictions.map((name, index) => (
-            <li key={name} role="option" aria-selected={index === highlight}>
-              <button
-                type="button"
-                // mousedown: click would blur the field first and risk a
-                // window-blur discard before the choice lands.
-                onMouseDown={(event) => {
-                  event.preventDefault()
-                  choosePrediction(name)
-                }}
-                className={
-                  index === highlight
-                    ? 'flex h-8 w-full items-center px-5 text-left type-body bg-muted'
-                    : 'flex h-8 w-full items-center px-5 text-left type-body hover:bg-muted/60'
-                }
-              >
-                <span className="font-mono type-meta text-muted-foreground">#</span>
-                {name}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {/*
-        Under the field rather than in place of it: the window does not resize
-        for refusals, so the line takes its room from the field — the Body the
-        user is being told about has to stay in sight and stay editable.
+    // The window is larger than the panel on every side: the drop shadow is
+    // drawn here rather than by the OS, and a window sized to the panel would
+    // clip it. The margin that leaves is transparent, so a press landing in it
+    // is a press outside the panel — a discard, exactly as a press on the
+    // desktop behind would have been.
+    <div
+      className="flex h-screen flex-col"
+      style={{ padding: CAPTURE_SHADOW_GUTTER }}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) void dismiss()
+      }}
+    >
+      {/* The corners are rounded here rather than on the field: the field all
+          but fills the panel, so this is the shape the user sees. Predictions
+          sit under the field when a marker is open; the window grows to fit
+          them, and to fit a refusal under those.
 
-        Keyed by the count so each refusal is a new node: a repeated one is then
-        announced again rather than passing as the same message still sitting
-        there.
-      */}
-      {refusals > 0 && (
-        <p
-          key={refusals}
-          id={PROBLEM_ID}
-          role="alert"
-          className="shrink-0 px-5 pb-2 type-meta text-destructive"
-        >
-          {CAPTURE_REFUSED}
-        </p>
-      )}
+          The shadow reaches at most `CAPTURE_SHADOW_GUTTER` past the panel —
+          offset plus blur less spread — because past that the window clips it.
+          It is heavier in the dark palette, where a near-black shadow on a
+          dark desktop would otherwise say nothing.
+
+          Never shrinks: the window is resized to fit this panel, and in the
+          moment before that lands the field must keep its whole height rather
+          than squeeze the line being typed. */}
+      <div
+        style={{ borderWidth: CAPTURE_PANEL_BORDER }}
+        className="flex shrink-0 flex-col overflow-hidden rounded-2xl border-border bg-background shadow-[0_12px_24px_-4px_rgb(0_0_0/0.28),0_2px_8px_-2px_rgb(0_0_0/0.16)] dark:shadow-[0_12px_24px_-4px_rgb(0_0_0/0.6),0_2px_8px_-2px_rgb(0_0_0/0.45)]"
+      >
+        <div className="relative shrink-0">
+          <input
+            ref={field}
+            type="text"
+            value={body}
+            onChange={(event) => setBody(event.target.value)}
+            onKeyDown={onKeyDown}
+            aria-label="What did you just do?"
+            placeholder="What did you just do?"
+            aria-describedby={
+              refusals > 0 ? `${BARGAIN_ID} ${PROBLEM_ID}` : BARGAIN_ID
+            }
+            aria-autocomplete="list"
+            aria-controls={predictions.length > 0 ? PREDICTIONS_ID : undefined}
+            aria-expanded={predictions.length > 0}
+            autoComplete="off"
+            spellCheck={false}
+            // The ring is drawn inside: the field all but fills the panel, and
+            // an outset one would be clipped by the panel's own edge. The right
+            // padding is the room the bargain takes, with enough over for a
+            // wider font than the one this was measured in.
+            style={{ height: CAPTURE_FIELD_HEIGHT }}
+            className="w-full rounded-2xl bg-transparent pl-5 pr-52 type-field outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
+          />
+          {/*
+            What Return and Escape are worth, said where they are being pressed
+            — the window otherwise teaches neither. Described to the field as
+            well as drawn beside it, so it reaches a reader who never sees it,
+            and unclickable, because reading it is all it is for.
+          */}
+          <div
+            id={BARGAIN_ID}
+            className="pointer-events-none absolute inset-y-0 right-5 flex select-none items-center gap-3 type-micro text-muted-foreground/70"
+          >
+            <Hint glyph="↵" reading="Return commits." what="commits" />
+            <Hint glyph="esc" reading="Escape abandons." what="abandons" />
+          </div>
+        </div>
+        {predictions.length > 0 && (
+          <>
+            {/* Inset rather than a rule across the panel: the Predictions
+                belong to the field above them, and a full-width line would cut
+                the panel in two. */}
+            <div
+              style={{ height: CAPTURE_HAIRLINE }}
+              className="mx-5 shrink-0 bg-border"
+              aria-hidden="true"
+            />
+            <ul
+              id={PREDICTIONS_ID}
+              role="listbox"
+              aria-label="Project Predictions"
+              className="flex flex-col"
+            >
+              {predictions.map((name, index) => (
+                <li key={name} role="option" aria-selected={index === highlight}>
+                  <button
+                    type="button"
+                    // mousedown: click would blur the field first and risk a
+                    // window-blur discard before the choice lands.
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      choosePrediction(name)
+                    }}
+                    style={{ height: CAPTURE_PREDICTION_ROW }}
+                    className={
+                      index === highlight
+                        ? 'flex w-full items-center px-5 text-left type-body bg-accent text-accent-foreground'
+                        : 'flex w-full items-center px-5 text-left type-body hover:bg-accent/50'
+                    }
+                  >
+                    <ProjectChip project={name} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        {/*
+          A fixed height under everything else, and the window grows by exactly
+          that much: the Body the user is being told about keeps the whole field
+          and stays editable.
+
+          Keyed by the count so each refusal is a new node: a repeated one is
+          then announced again rather than passing as the same message still
+          sitting there.
+        */}
+        {refusals > 0 && (
+          <p
+            key={refusals}
+            id={PROBLEM_ID}
+            role="alert"
+            style={{ height: CAPTURE_REFUSAL_HEIGHT }}
+            className="flex shrink-0 items-center px-5 type-meta text-destructive"
+          >
+            {CAPTURE_REFUSED}
+          </p>
+        )}
+      </div>
     </div>
   )
 }
 
+/**
+ * Half of the bargain: a key cap and what pressing it is worth. Said twice and
+ * never at once — a glyph beside a verb for a reader who can see the key, and
+ * the whole sentence for one who cannot, since "↵ commits" read aloud is not
+ * one.
+ */
+function Hint({
+  glyph,
+  reading,
+  what,
+}: {
+  glyph: string
+  reading: string
+  what: string
+}) {
+  return (
+    <>
+      <span className="sr-only">{reading}</span>
+      <span aria-hidden="true" className="flex items-center gap-1">
+        <kbd className="rounded-sm border border-border bg-muted px-1 py-px font-sans type-micro leading-none text-muted-foreground">
+          {glyph}
+        </kbd>
+        {what}
+      </span>
+    </>
+  )
+}
+
 const PROBLEM_ID = 'capture-problem'
+const BARGAIN_ID = 'capture-bargain'
 const PREDICTIONS_ID = 'capture-predictions'
 
 /**

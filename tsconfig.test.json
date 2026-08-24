@@ -4,7 +4,6 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
     "types": ["node"],
-    "jsx": "react-jsx",
     "skipLibCheck": true,
 
     "paths": { "@/*": ["./src/*"] },
@@ -16,6 +15,7 @@
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true,
+    "jsx": "react-jsx",
 
     /* Linting */
     "noUnusedLocals": true,
@@ -23,6 +23,7 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
+  // A view test renders into jsdom: Node, with a DOM in it.
   "include": [
     "src/**/*.test.ts",
     "src/**/*.test.tsx",

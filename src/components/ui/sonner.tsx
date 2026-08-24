@@ -1,43 +1,32 @@
-import { Toaster as Sonner, type ToasterProps } from "sonner"
-import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
+import { Toaster as Sonner, type ToasterProps } from 'sonner'
 
-// The app paints its own palette through `.dark` on the document element, and
-// every colour below is one of its variables — so the toast follows the Theme
-// without a theme provider of its own.
-const Toaster = ({ ...props }: ToasterProps) => {
+import { useTheme } from '@/components/theme-context'
+
+/**
+ * Where a window's transient confirmations land. The registry's version reads
+ * the palette from `next-themes`, which this app does not use — the Theme lives
+ * in `theme-context`, and the resolved palette is what a toast has to be
+ * painted in, since `system` here can mean either one.
+ *
+ * A toast never carries anything a window is not also saying somewhere it
+ * stays: it fades, and the answer must not fade with it.
+ */
+function Toaster({ ...props }: ToasterProps) {
+  const { resolved } = useTheme()
+
   return (
     <Sonner
+      theme={resolved}
       className="toaster group"
-      icons={{
-        success: (
-          <CircleCheckIcon className="size-4" />
-        ),
-        info: (
-          <InfoIcon className="size-4" />
-        ),
-        warning: (
-          <TriangleAlertIcon className="size-4" />
-        ),
-        error: (
-          <OctagonXIcon className="size-4" />
-        ),
-        loading: (
-          <Loader2Icon className="size-4 animate-spin" />
-        ),
-      }}
+      position="bottom-center"
       style={
         {
-          "--normal-bg": "var(--popover)",
-          "--normal-text": "var(--popover-foreground)",
-          "--normal-border": "var(--border)",
-          "--border-radius": "var(--radius)",
+          '--normal-bg': 'var(--popover)',
+          '--normal-text': 'var(--popover-foreground)',
+          '--normal-border': 'var(--border)',
+          '--border-radius': 'var(--radius)',
         } as React.CSSProperties
       }
-      toastOptions={{
-        classNames: {
-          toast: "cn-toast",
-        },
-      }}
       {...props}
     />
   )

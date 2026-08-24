@@ -60,13 +60,56 @@ export const CAPTURE_SHOWN_EVENT = 'capture://shown'
 export const COPY_YESTERDAY_DIGEST_EVENT = 'digest://yesterday'
 
 /**
- * Capture window geometry. Width and resting height must match `.inner_size`
- * in `build_capture_window` (`src-tauri/src/lib.rs`). Row height must match
- * the Prediction button (`h-8`) in `CaptureView`.
+ * What sits under the Capture field right now, and so how tall the window has
+ * to be. Both parts grow the window rather than sharing the field's room: the
+ * Body being predicted for, or refused, has to stay in sight and stay editable.
  */
-export const CAPTURE_WIDTH = 560
+export interface CaptureFit {
+  /** How many Prediction rows are open under the field. */
+  predictions: number
+  /** Whether the refusal line is showing under those. */
+  refused: boolean
+}
+
+/**
+ * Capture panel geometry, in the panel's own terms: the field, a Prediction
+ * row, the hairline above the first one, and the refusal line. `CaptureView`
+ * sizes those elements from these very numbers rather than restating them in
+ * classes, so the window and the panel inside it cannot drift apart.
+ */
+export const CAPTURE_PANEL_WIDTH = 560
 export const CAPTURE_FIELD_HEIGHT = 64
-export const CAPTURE_PREDICTION_ROW = 32
+export const CAPTURE_PREDICTION_ROW = 36
+export const CAPTURE_HAIRLINE = 1
+export const CAPTURE_REFUSAL_HEIGHT = 32
+/** The panel's own outline, on every side, and outside the widths above. */
+export const CAPTURE_PANEL_BORDER = 1
+
+/**
+ * The transparent margin the window keeps around the panel. The panel's drop
+ * shadow is drawn by the view, and a window sized to the panel would clip it —
+ * so the window is bigger than what the user sees, on every side.
+ */
+export const CAPTURE_SHADOW_GUTTER = 32
+
+/**
+ * Window width and resting height — the panel plus its gutter. Must match
+ * `.inner_size` in `build_capture_window` (`src-tauri/src/lib.rs`).
+ */
+const CAPTURE_PANEL_MARGIN = 2 * (CAPTURE_PANEL_BORDER + CAPTURE_SHADOW_GUTTER)
+export const CAPTURE_WIDTH = CAPTURE_PANEL_WIDTH + CAPTURE_PANEL_MARGIN
+const CAPTURE_HEIGHT = CAPTURE_FIELD_HEIGHT + CAPTURE_PANEL_MARGIN
+
+/** How tall the window has to be to show the field and everything under it. */
+export function captureWindowHeight(fit: CaptureFit): number {
+  const predictions =
+    fit.predictions > 0
+      ? CAPTURE_HAIRLINE + fit.predictions * CAPTURE_PREDICTION_ROW
+      : 0
+  const refusal = fit.refused ? CAPTURE_REFUSAL_HEIGHT : 0
+
+  return CAPTURE_HEIGHT + predictions + refusal
+}
 
 /**
  * The announcements the windows make to each other. These two are spoken only
@@ -163,11 +206,11 @@ export interface Desktop {
    */
   dismissCapture(): Promise<void>
   /**
-   * Fits the Capture window to the field plus any Predictions underneath.
-   * Zero Predictions is the resting height — must match the size built in
+   * Fits the Capture window to the field plus whatever sits under it. Nothing
+   * under it is the resting height — must match the size built in
    * `build_capture_window` on the Rust side.
    */
-  fitCapture(predictionCount: number): Promise<void>
+  fitCapture(fit: CaptureFit): Promise<void>
   /** A Capture is beginning: the window has just been shown. */
   onCaptureShown(handle: () => void): Promise<Unlisten>
   /** The Tray Menu wants yesterday's Digest on the clipboard. */
