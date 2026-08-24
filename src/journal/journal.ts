@@ -1156,6 +1156,20 @@ function normalizeProject(project: string | null): string | null {
   return project === null ? null : projectName(project)
 }
 
+/**
+ * Whether the journal would accept this as a Project name. The same rule
+ * `projectName` enforces, asked rather than thrown — a picker offering a name
+ * the record is going to refuse is offering a choice that is not one.
+ */
+export function isProjectName(project: string): boolean {
+  try {
+    projectName(project)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** The same rule for a name that is definitely one: a Project, or an error. */
 function projectName(project: string): string {
   const name = project.trim().toLowerCase()

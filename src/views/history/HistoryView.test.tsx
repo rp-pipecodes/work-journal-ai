@@ -1,19 +1,20 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { fakeDesktop } from '@/platform/testing/desktop'
-import { createJournal, journalDayFor, type Note } from '@/journal/journal'
-import { fixedClock, openTestDatabase } from '@/journal/testing/database'
-import HistoryView from './HistoryView'
+import { journalDayFor } from '@/journal/journal'
+import {
+  closeTestDatabases,
+  dayCell,
+  installMeasurementStubs,
+  showHistory,
+} from './testing/history-view'
 import { formatDayRange } from './range-label'
 
 // The Filter's header as the reader meets it: a click on the days, a Project
 // chosen, a term typed — over a real journal, asserting on what is on screen.
 // The list below it belongs to other tests; nothing here reads a Note row.
-
-const openDatabases: Array<() => void> = []
 
 // Base UI positions its popups against measured elements, and jsdom measures
 // nothing and ships neither observer.
@@ -21,13 +22,13 @@ beforeAll(installMeasurementStubs)
 
 afterEach(() => {
   cleanup()
-  for (const close of openDatabases.splice(0)) close()
+  closeTestDatabases()
   vi.restoreAllMocks()
 })
 
 describe('the day axis', () => {
   it('is one control reading the current range in words', async () => {
-    const { days } = await showHistory([
+    const { days } = await showFilter([
       { at: '2026-03-09T10:00:00', body: 'Monday' },
     ])
 
@@ -37,7 +38,7 @@ describe('the day axis', () => {
   })
 
   it('leaves no native picker in the header', async () => {
-    await showHistory([{ at: '2026-03-09T10:00:00', body: 'Monday' }])
+    await showFilter([{ at: '2026-03-09T10:00:00', body: 'Monday' }])
 
     const header = screen.getByRole('banner')
     expect(header.querySelector('select')).toBeNull()
@@ -46,7 +47,7 @@ describe('the day axis', () => {
 
   it('moves the Filter to the range picked on its calendar', async () => {
     const user = userEvent.setup()
-    const { days } = await showHistory([
+    const { days } = await showFilter([
       { at: '2026-03-09T10:00:00', body: 'Monday' },
       { at: '2026-03-11T10:00:00', body: 'Wednesday' },
     ])
@@ -66,7 +67,7 @@ describe('the day axis', () => {
 describe('a Preset', () => {
   it('sets the days once and is then forgotten', async () => {
     const user = userEvent.setup()
-    const { days } = await showHistory([
+    const { days } = await showFilter([
       { at: '2026-03-09T10:00:00', body: 'Monday' },
     ])
     const today = journalDayFor(new Date())
@@ -82,7 +83,7 @@ describe('a Preset', () => {
 
   it('never touches the Project constraint', async () => {
     const user = userEvent.setup()
-    const { days, project } = await showHistory([
+    const { days, project } = await showFilter([
       { at: '2026-03-09T10:00:00', body: '#alpha Monday' },
     ])
 
@@ -98,7 +99,7 @@ describe('a Preset', () => {
 describe('the Project constraint', () => {
   it('still offers the Project it is narrowed to when no Note carries it', async () => {
     const user = userEvent.setup()
-    const { project, desktop, core, notes } = await showHistory([
+    const { project, desktop, core, notes } = await showFilter([
       { at: '2026-03-09T10:00:00', body: '#alpha Monday' },
     ])
 
@@ -119,7 +120,7 @@ describe('the Project constraint', () => {
 describe('Copy Digest', () => {
   it('reports through a toast, and says so politely as well', async () => {
     const user = userEvent.setup()
-    const { desktop } = await showHistory([
+    const { desktop } = await showFilter([
       { at: '2026-03-09T10:00:00', body: 'Monday' },
     ])
 
@@ -141,7 +142,7 @@ describe('Copy Digest', () => {
 
   it('is not offered while a Search is showing', async () => {
     const user = userEvent.setup()
-    await showHistory([{ at: '2026-03-09T10:00:00', body: 'Monday' }])
+    await showFilter([{ at: '2026-03-09T10:00:00', body: 'Monday' }])
 
     await user.type(within(header()).getByLabelText('Search'), 'Mon')
 
@@ -153,7 +154,7 @@ describe('Copy Digest', () => {
 
 describe('every filter control', () => {
   it('says what it is to a screen reader', async () => {
-    await showHistory([{ at: '2026-03-09T10:00:00', body: 'Monday' }])
+    await showFilter([{ at: '2026-03-09T10:00:00', body: 'Monday' }])
 
     // Each says what it is — and the two that hold a value say that too,
     // rather than letting a label swallow it.
@@ -172,7 +173,7 @@ describe('every filter control', () => {
 describe('Escape', () => {
   it('clears a Search before it closes the window', async () => {
     const user = userEvent.setup()
-    const { desktop } = await showHistory([
+    const { desktop } = await showFilter([
       { at: '2026-03-09T10:00:00', body: 'Monday' },
     ])
     const closed = vi.spyOn(desktop, 'closeWindow')
@@ -193,7 +194,7 @@ describe('Escape', () => {
 
   it('closes an open day picker without closing the window', async () => {
     const user = userEvent.setup()
-    const { desktop, days } = await showHistory([
+    const { desktop, days } = await showFilter([
       { at: '2026-03-09T10:00:00', body: 'Monday' },
     ])
     const closed = vi.spyOn(desktop, 'closeWindow')
@@ -210,33 +211,12 @@ describe('Escape', () => {
   })
 })
 
-/** History over a real journal, opened and already showing its first list. */
-async function showHistory(captured: Array<{ at: string; body: string }>) {
-  const { driver, close } = await openTestDatabase()
-  openDatabases.push(close)
-
-  const clock = fixedClock(new Date('2026-03-09T10:00:00'))
-  const core = createJournal({ clock, driver })
-
-  const notes: Note[] = []
-  for (const { at, body } of captured) {
-    clock.set(new Date(at))
-    const note = await core.capture(body)
-    if (note === null) throw new Error('nothing was captured')
-    notes.push(note)
-  }
-
-  const desktop = fakeDesktop({ driver })
-  render(<HistoryView desktop={desktop} journal={Promise.resolve(core)} />)
-
-  // The first read has to have landed: until it does there is no Filter, and
-  // the header is not on screen at all.
-  await screen.findByRole('banner')
+/** History as this file reads it: opened, with the header's two controls. */
+async function showFilter(captured: Array<{ at: string; body: string }>) {
+  const opened = await showHistory(captured)
 
   return {
-    desktop,
-    core,
-    notes,
+    ...opened,
     // Found by what a screen reader hears: the name of the control, and then
     // what it is currently set to. Scoped to the header, because a Note row
     // has a Project of its own and this file is about the Filter.
@@ -248,41 +228,4 @@ async function showHistory(captured: Array<{ at: string; body: string }>) {
 /** The Filter's header, which is the whole of what this file is about. */
 function header(): HTMLElement {
   return screen.getByRole('banner')
-}
-
-/** A day on the open calendar, pointed at the way a reader points at one. */
-async function dayCell(journalDay: string): Promise<HTMLElement> {
-  const [year, month, day] = journalDay.split('-').map(Number)
-  const stamp = new Date(year, month - 1, day).toLocaleDateString()
-
-  return await vi.waitFor(() => {
-    const cell = document.querySelector(`[data-day="${stamp}"]`)
-    if (cell === null) throw new Error(`no ${journalDay} on the calendar`)
-    return cell as HTMLElement
-  })
-}
-
-/**
- * What jsdom does not implement and a positioned popup needs. Stubs rather
- * than a library: these tests assert on what is on screen, never on where.
- */
-function installMeasurementStubs() {
-  globalThis.ResizeObserver ??= class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  } as unknown as typeof ResizeObserver
-
-  Element.prototype.scrollIntoView ??= () => {}
-
-  globalThis.matchMedia ??= ((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: () => {},
-    removeListener: () => {},
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    dispatchEvent: () => false,
-  })) as unknown as typeof matchMedia
 }
