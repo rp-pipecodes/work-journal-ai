@@ -33,7 +33,6 @@ import {
   type ProjectConstraint,
   type Note,
 } from '@/journal/journal'
-import { copyToClipboard } from '@/lib/clipboard'
 import type { Desktop } from '@/platform/desktop'
 import type { HotkeyStatus } from '@/settings/hotkey'
 
@@ -57,7 +56,7 @@ export default function HistoryView({
   const [session] = useState(() =>
     createHistorySession({
       journal,
-      clipboard: copyToClipboard,
+      clipboard: (text) => desktop.copyToClipboard(text),
       // The tray count is kept by another window entirely, and a correction
       // here is the only way it learns that today holds one Note fewer.
       announceChange: () => void desktop.announceJournalChanged(),

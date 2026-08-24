@@ -1,0 +1,7 @@
+# The OS writes the clipboard, not the webview
+
+Every copy the app makes now goes through the clipboard plugin on the Rust side, reached as one more thing a `Desktop` can do. The webview's own `navigator.clipboard` is gone. It was enough while the only copy was a button in History, where a click grants the page user activation — but Yesterday's Digest is copied from the Tray Menu, where no window is focused and no click ever reaches a page, so the webview would simply refuse. Rejected: keeping the webview clipboard for History and adding a second, OS one for the tray — two ways to do one thing, differing only in a rule the caller has to know about; and disabling the menu item unless a window happens to be focused, which would make the Entry Point that always works the one that usually does not.
+
+## Consequences
+
+The user activation constraint is lifted everywhere, so a copy may now be computed, awaited and fetched before it is written; History's `copy()` stays synchronous for its own reason, that the Digest is held from the read that drew the list, and no longer because an `await` would lose the activation. The app takes a dependency it did not have — `tauri-plugin-clipboard-manager` on both sides — and `clipboard-manager:allow-write-text` is granted to all three windows. Writing is all that is granted: nothing in this app reads the clipboard, and a journal that could would be a journal that could read the user's passwords.

@@ -143,9 +143,11 @@ export interface HistorySession {
   editProject(id: string, project: string | null): Promise<void>
   delete(id: string): Promise<void>
   /**
-   * The whole Filter on the clipboard. Deliberately not async: the webview only
-   * allows a clipboard write while the click is still granting user activation,
-   * which no await survives, so the Digest is held rather than fetched here.
+   * The whole Filter on the clipboard. Deliberately not async: the Digest is
+   * held from the read that drew the list, so what is copied is what the reader
+   * is looking at rather than whatever the journal says a moment later — not,
+   * any longer, because a clipboard write had to outrun an await; see
+   * docs/adr/0012-the-os-writes-the-clipboard.md.
    */
   copy(): void
 }

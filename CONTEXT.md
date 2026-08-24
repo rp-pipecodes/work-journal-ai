@@ -57,7 +57,7 @@ The global keyboard shortcut that begins a Capture. The fastest Entry Point and 
 _Avoid_: Shortcut, keybinding, accelerator
 
 **Tray Menu**:
-The menu bar icon's menu. The Entry Point that always works, so it is the fallback rather than a duplicate of the Hotkey.
+The menu bar icon's menu. The Entry Point that always works, so it is the fallback rather than a duplicate of the Hotkey. Also the one place the journal is read back without opening a window: Yesterday's Digest is copied from here.
 _Avoid_: Menu bar, status item
 
 **Tray Count**:
@@ -100,6 +100,9 @@ A Journal Day that has at least one Note. What "the previous day" means in pract
 **Digest**:
 The Markdown rendering of every Note in the current Filter, oldest first, grouped under day headings when the Filter spans more than one day. When the Project constraint is a single named Project, bullets are Body only. When it is Any or Unfiled, a Note that has a Project is rendered with a `#name` prefix on the bullet so mixed paste still carries filing. The journal's only output — written to be pasted into a standup or an LLM prompt.
 _Avoid_: Export, report, summary, copy-all text
+
+**Yesterday's Digest**:
+The Digest of the previous calendar day, on the clipboard from the Tray Menu. The payoff for capturing: it goes straight into the written work log the user already owes a chat group every morning, with no window to open and nothing to tidy up. Yesterday is the calendar day before today, not the previous Occupied Day — a standup post is about a date, so a Monday that pasted Friday would be a claim about the weekend. A day with no Notes copies nothing and leaves the clipboard as it was, since a blank paste is worse than no paste. Imported Notes are in it and read exactly like Captured ones: the muted rendering in History is for scanning and deleting, not for whoever reads the post. Does not touch the Filter — copying is not navigating.
 
 **Export**:
 Every Note in the journal written to a Markdown file, each appearing exactly once, under a heading for the day it is filed under — still day-grouped, never regrouped by Project. Notes that have a Project render with a `#name` prefix on the bullet. The way out of the SQLite file, so nothing captured here is locked in — which is why it ignores the Filter entirely, and why it is a core operation rather than a convenience.
