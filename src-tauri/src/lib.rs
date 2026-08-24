@@ -177,12 +177,17 @@ fn migrations() -> Vec<Migration> {
 fn build_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     WebviewWindowBuilder::new(app, CAPTURE_WINDOW, WebviewUrl::default())
         .title("New Note")
-        .inner_size(560.0, 64.0)
+        // Larger than the panel the user sees: the view draws the panel's own
+        // drop shadow, and a window sized to the panel would clip it. Must
+        // match `CAPTURE_WIDTH` and `CAPTURE_HEIGHT` in `src/platform/desktop.ts`.
+        .inner_size(626.0, 130.0)
         .resizable(false)
         .decorations(false)
-        // The rounded corners are drawn by the view, so the window itself has
-        // to let the desktop through outside them.
+        // The rounded corners and the shadow are drawn by the view, so the
+        // window itself has to let the desktop through outside them — and must
+        // not draw a second shadow of its own around the whole frame.
         .transparent(true)
+        .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
         .center()
