@@ -173,14 +173,18 @@ describe('the launch sweep', () => {
 })
 
 describe('a sweep without the calendar', () => {
-  it('turns Import off when the permission has been revoked', async () => {
+  it('leaves the user\u2019s wish for Import alone when the permission is gone', async () => {
+    // The wish is the only evidence Settings has that it owes the user an
+    // explanation. Overwriting it here destroys that, and the line saying why
+    // could then never be shown.
     const { desktop, session } = await importSessionAt('2026-03-09T18:40:00', {
+      stored: { importMeetings: true, importCalendars: [] },
       access: 'denied',
     })
 
     await session.start()
 
-    expect(desktop.stored.importMeetings).toBe(false)
+    expect(desktop.stored.importMeetings).toBe(true)
   })
 
   it('never asks: a background sweep is not a place to raise a prompt', async () => {

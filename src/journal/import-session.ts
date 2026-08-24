@@ -88,10 +88,12 @@ export function createImportSession({
       const access = await desktop.calendarAccess()
       if (access !== 'granted') {
         // Refused or revoked — including by macOS having no record of this
-        // build, which is routine. The toggle goes back to off, and Settings
-        // says why the next time it is opened. Nothing is asked of the user
-        // here: a background sweep is not a place to raise a prompt.
-        await settings.saveImportMeetings(false)
+        // build, which is routine. Nothing is written and nothing is asked: a
+        // background sweep is not a place to raise a prompt, and the stored
+        // setting is the user's *wish* for Import rather than a record of
+        // whether it is running. Settings renders the toggle off and says why
+        // the next time it is opened, and a grant restored in System Settings
+        // resumes Import without the user having to ask for it twice.
         return
       }
 

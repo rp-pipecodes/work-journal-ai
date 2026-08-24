@@ -77,6 +77,14 @@ export default function SettingsView({
     })
   }, [desktop])
 
+  // Everything this window opens knowing, read once. What the OS allows is
+  // asked every time rather than remembered — a grant is revoked in System
+  // Settings without the app hearing of it, and a rebuilt release is a binary
+  // macOS has never seen. This is the routine path rather than the exceptional
+  // one: Import shows as off, the reason is said once, and nothing is asked of
+  // the user. One read, because the stored settings and the OS answer decide
+  // the same toggle between them, and two of these racing could leave it
+  // reading on with the reason it is not underneath.
   useEffect(() => {
     // A Dock-less app does not reliably hand focus to a new window, and Escape
     // has to reach this view for the window to close.
@@ -84,32 +92,18 @@ export default function SettingsView({
 
     void (async () => {
       try {
-        const [status, atLogin, answered, stored] = await Promise.all([
+        const [status, atLogin, answered, stored, access] = await Promise.all([
           desktop.hotkeyStatus(),
           desktop.startsAtLogin(),
           settings.hasBeenAskedAboutStartAtLogin(),
           settings.load(),
+          desktop.calendarAccess(),
         ])
         setStartAtLogin(atLogin)
         setHotkey(status)
         setAsking(!answered)
         setImportMeetings(stored.importMeetings)
         setImportCalendars(stored.importCalendars)
-      } catch (error) {
-        console.error('could not read the settings', error)
-      }
-    })()
-  }, [desktop, settings])
-
-  // What the OS allows, asked every time Settings opens rather than
-  // remembered: a grant is revoked in System Settings without the app hearing
-  // of it, and a rebuilt release is a binary macOS has never seen. This is the
-  // routine path rather than the exceptional one — Import goes back to off,
-  // the reason is said once, and nothing is asked of the user.
-  useEffect(() => {
-    void (async () => {
-      try {
-        const access = await desktop.calendarAccess()
 
         if (access === 'granted') {
           setCalendars(await desktop.calendars())
@@ -118,25 +112,16 @@ export default function SettingsView({
         }
 
         setCalendars([])
-
-        // Only worth saying to someone who had Import going: a user who has
+        // Only worth saying to someone who asked for Import: a user who has
         // never turned it on is owed no explanation for something they never
-        // asked for, and the toggle says so for itself the moment they do.
-        // Ticked calendars are the evidence, because they outlive the toggle —
-        // the background sweep may already have turned it off on finding the
-        // permission gone, and this is the window where that gets explained.
-        const stored = await settings.load()
-        if (!stored.importMeetings && stored.importCalendars.length === 0) {
-          return
-        }
-
-        setCalendarProblem(describeCalendarAccess(access))
-        if (stored.importMeetings) {
-          setImportMeetings(false)
-          await settings.saveImportMeetings(false)
-        }
+        // wanted, and the toggle says so for itself the moment they do. The
+        // stored wish is the evidence, and it survives the permission going —
+        // the sweep does not overwrite it, precisely so this can be said.
+        setCalendarProblem(
+          stored.importMeetings ? describeCalendarAccess(access) : null,
+        )
       } catch (error) {
-        console.error('could not read the calendars', error)
+        console.error('could not read the settings', error)
       }
     })()
   }, [desktop, settings])
@@ -157,6 +142,12 @@ export default function SettingsView({
       void closeRequested.then((stop) => stop())
     }
   }, [asking, desktop, settings])
+
+  // Import as the window shows it: the user's wish, less whatever macOS is
+  // withholding. The stored wish outlives a lost permission — that is what
+  // makes the reason sayable — so the toggle is off whenever there is a reason
+  // underneath it saying why.
+  const importing = importMeetings && calendarProblem === null
 
   // Escape dismisses, and dismissing closes: Settings is not kept resident.
   // While the recorder is listening, Escape belongs to it — abandoning a
@@ -217,8 +208,12 @@ export default function SettingsView({
             : await desktop.requestCalendarAccess()
 
         if (access !== 'granted') {
-          setImportMeetings(false)
+          // The wish is kept, not discarded: the toggle reads off because the
+          // reason underneath it says so, and a grant given in System Settings
+          // later resumes Import without being asked for a second time.
+          setImportMeetings(true)
           setCalendarProblem(describeCalendarAccess(access))
+          await settings.saveImportMeetings(true)
           return
         }
 
@@ -360,12 +355,12 @@ export default function SettingsView({
 
       <Section
         title="Meetings"
-        explanation="Today's meetings, added to the journal as they end. Never yesterday, and never a backfill."
+        explanation="Today's meetings, added to the journal as they end. Never a backfill."
       >
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
-            checked={importMeetings}
+            checked={importing}
             onChange={(event) => toggleImport(event.target.checked)}
             className="size-4 accent-foreground"
           />
@@ -374,7 +369,7 @@ export default function SettingsView({
 
         {calendarProblem !== null && <Problem>{calendarProblem}</Problem>}
 
-        {importMeetings && (
+        {importing && (
           <CalendarTicks
             calendars={calendars}
             ticked={importCalendars}
