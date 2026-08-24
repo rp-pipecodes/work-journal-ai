@@ -29,9 +29,13 @@ export interface Settings {
   /** Off until the user says otherwise: the app never adds itself uninvited. */
   startAtLogin: boolean
   /**
-   * Whether today's meetings are swept into the journal. Off until turned on,
-   * and turned back off by the app itself if the calendar permission is ever
-   * refused or revoked — the journal keeps working exactly as before.
+   * The user's wish for Import: whether they want today's meetings swept into
+   * the journal. Off until turned on, and only ever written by the user — a
+   * permission refused or revoked leaves it standing, which is what lets
+   * Settings say why Import is not running, and what lets a grant restored in
+   * System Settings resume it without asking a second time. Whether Import
+   * actually runs is this and the OS answer together, derived where it is
+   * needed. The journal keeps working exactly as before either way.
    */
   importMeetings: boolean
   /**

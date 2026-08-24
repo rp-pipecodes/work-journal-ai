@@ -43,7 +43,9 @@ export interface AppSettings {
    * Whether meetings are swept, remembered and announced. Announced because
    * the window that sweeps is not the window this is changed in, and a change
    * the user just made should reach the journal now rather than at the next
-   * sweep. The app turns this off itself when the calendar permission is gone.
+   * sweep. Only the user reaches this: the sweep returns when the calendar
+   * permission is gone rather than writing the wish off, so the reason
+   * Settings owes the user survives.
    */
   saveImportMeetings(importMeetings: boolean): Promise<void>
   /** Which calendars an Import reads. Announced for the same reason. */

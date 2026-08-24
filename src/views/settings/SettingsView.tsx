@@ -361,7 +361,13 @@ export default function SettingsView({
           <input
             type="checkbox"
             checked={importing}
-            onChange={(event) => toggleImport(event.target.checked)}
+            // Pressed, the box means the opposite of the wish rather than the
+            // opposite of what it reads: with the permission gone it reads off
+            // while the wish is on, and a press there is the user withdrawing
+            // it — the reason underneath goes with it. Reading the box back
+            // would ask to turn on what is already wished for, leaving no way
+            // to change their mind.
+            onChange={() => toggleImport(!importMeetings)}
             className="size-4 accent-foreground"
           />
           <span>Add today's meetings to the journal</span>

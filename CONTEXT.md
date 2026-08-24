@@ -8,6 +8,10 @@ A personal, local-first log of short work notes captured throughout the day, so 
 A single dated line of text about the user's work. The unit of everything — there is no smaller or larger record. Always has a Body from the moment it exists. May be filed under one Project; may be Unfiled. Comes into existence one of exactly two ways: a Capture or an Import.
 _Avoid_: Entry, log, item, memo
 
+**Task**:
+A work commitment the user intends to complete. A first-class record beside a Note, not a kind or state of Note: Notes recover work that happened; Tasks hold work that remains to be done.
+_Avoid_: Todo, action item, reminder, Note
+
 **Body**:
 The text content of a Note: a single line, no line breaks. Editable forever. One line is a deliberate limit — a Note is a remark, not a document — and it means every Note renders as exactly one bullet in a Digest.
 _Avoid_: Content, text, transcript
@@ -117,7 +121,7 @@ Permanent removal of a Note. There is no trash, no archive, and no recovery — 
 What the user gets to decide about the app: the Hotkey, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars — and, as the one action rather than a setting, Export. Reached from the Tray Menu, and closed on dismiss rather than kept resident.
 
 **Meeting Import**:
-Whether Import runs, and over which calendars. Off until turned on, with no calendar ticked, so enabling it sweeps nothing until the user says which calendars mean work; an unticked calendar is ignored entirely. Turning it on is also where the calendar permission is asked for, because it is the one moment the user has said they want it. Permission refused or revoked returns the toggle to off with a line saying why — a routine path rather than an exceptional one, since macOS keys the grant to the exact binary and every rebuilt release is asked about once. The app never nags, and the journal keeps working exactly as before.
+Whether Import runs, and over which calendars. Off until turned on, with no calendar ticked, so enabling it sweeps nothing until the user says which calendars mean work; an unticked calendar is ignored entirely. Turning it on is also where the calendar permission is asked for, because it is the one moment the user has said they want it. The stored setting is the user's wish for Import, and only the user writes it; whether Import runs is that wish and the OS answer together. Permission refused or revoked therefore leaves the wish standing and the toggle reading off, with a line saying why — a routine path rather than an exceptional one, since macOS keys the grant to the exact binary and every rebuilt release is asked about once. A grant restored in System Settings resumes Import without asking a second time, and pressing the toggle while it reads off withdraws the wish. The app never nags, and the journal keeps working exactly as before.
 _Avoid_: Calendar sync, integration, connection
 
 **Theme**:
