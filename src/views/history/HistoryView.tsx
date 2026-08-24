@@ -1,10 +1,26 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { CalendarRangeIcon, ClipboardCopyIcon, SearchIcon } from 'lucide-react'
+import {
+  CalendarIcon,
+  CalendarRangeIcon,
+  ClipboardCopyIcon,
+  HashIcon,
+  SearchIcon,
+  Trash2Icon,
+} from 'lucide-react'
+import { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox'
 import { toast } from 'sonner'
 import ProjectChip from '@/components/ProjectChip'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Input } from '@/components/ui/input'
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from '@/components/ui/combobox'
 import {
   Popover,
   PopoverContent,
@@ -18,6 +34,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Toaster } from '@/components/ui/sonner'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -218,114 +240,118 @@ export default function HistoryView({
   }
 
   return (
-    <div
-      ref={page}
-      tabIndex={-1}
-      onKeyDown={onKeyDown}
-      className="flex h-screen flex-col bg-background outline-none"
-    >
-      {/*
-        The header wraps rather than clips: the Filter's controls, the Search
-        field and the Digest are each the whole of something the reader needs,
-        so a narrow window gets a second row instead of a row with its end cut
-        off. Nothing up here is optional enough to hide.
-      */}
-      {filter !== null && (
-        <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-6 py-4 type-meta text-muted-foreground">
-          <DayRangeField
-            filter={filter}
-            onPick={pick}
-            onChoosePreset={applyPreset}
-          />
-          <ProjectConstraintField
-            constraint={constraintOf(filter)}
-            projects={projects}
-            onNarrow={(constraint) => void session.narrowTo(constraint)}
-          />
-          <SearchField
-            term={term}
-            onType={(typed) => void session.search(typed)}
-          />
-          {/*
-            Gone while a Search is showing: the Digest is bound to the Filter,
-            and a button that copies something not on screen is how the wrong
-            month reaches a standup thread.
-          */}
-          {!searching && (
-            <CopyDigest confirmation={confirmation} onCopy={copyDigest} />
+    // Every tooltip on the page shares one provider, so a reader moving along
+    // a row's actions is told what the next one is without waiting again.
+    <TooltipProvider delay={400}>
+      <div
+        ref={page}
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
+        className="flex h-screen flex-col bg-background outline-none"
+      >
+        {/*
+          The header wraps rather than clips: the Filter's controls, the Search
+          field and the Digest are each the whole of something the reader needs,
+          so a narrow window gets a second row instead of a row with its end cut
+          off. Nothing up here is optional enough to hide.
+        */}
+        {filter !== null && (
+          <header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-6 py-4 type-meta text-muted-foreground">
+            <DayRangeField
+              filter={filter}
+              onPick={pick}
+              onChoosePreset={applyPreset}
+            />
+            <ProjectConstraintField
+              constraint={constraintOf(filter)}
+              projects={projects}
+              onNarrow={(constraint) => void session.narrowTo(constraint)}
+            />
+            <SearchField
+              term={term}
+              onType={(typed) => void session.search(typed)}
+            />
+            {/*
+              Gone while a Search is showing: the Digest is bound to the Filter,
+              and a button that copies something not on screen is how the wrong
+              month reaches a standup thread.
+            */}
+            {!searching && (
+              <CopyDigest confirmation={confirmation} onCopy={copyDigest} />
+            )}
+          </header>
+        )}
+
+        {problem !== null && <Problem>{problem}</Problem>}
+
+        <main className="flex-1 overflow-y-auto px-6 pb-5">
+          {history.state === 'empty' && <EmptyState hotkey={hotkey} />}
+          {history.state === 'unreadable' && (
+            <Centred>The journal could not be read.</Centred>
           )}
-        </header>
-      )}
-
-      {problem !== null && <Problem>{problem}</Problem>}
-
-      <main className="flex-1 overflow-y-auto px-6 pb-5">
-        {history.state === 'empty' && <EmptyState hotkey={hotkey} />}
-        {history.state === 'unreadable' && (
-          <Centred>The journal could not be read.</Centred>
-        )}
-        {history.state === 'notes' && history.days.length === 0 && (
-          <Centred>{nothingHere(filter)}</Centred>
-        )}
-        {history.state === 'results' && history.notes.length === 0 && (
-          <Centred>No Notes say “{history.term}”.</Centred>
-        )}
-        {history.state === 'results' && history.notes.length > 0 && (
-          <ol className="flex flex-col gap-1">
-            {history.notes.map((note) => (
-              <ResultLine
-                key={note.id}
-                note={note}
-                onShow={() =>
-                  void session.moveTo(rangeForJournalDay(note.journalDay))
-                }
-              />
+          {history.state === 'notes' && history.days.length === 0 && (
+            <Centred>{nothingHere(filter)}</Centred>
+          )}
+          {history.state === 'results' && history.notes.length === 0 && (
+            <Centred>No Notes say “{history.term}”.</Centred>
+          )}
+          {history.state === 'results' && history.notes.length > 0 && (
+            <ol className="flex flex-col gap-1">
+              {history.notes.map((note) => (
+                <ResultLine
+                  key={note.id}
+                  note={note}
+                  onShow={() =>
+                    void session.moveTo(rangeForJournalDay(note.journalDay))
+                  }
+                />
+              ))}
+            </ol>
+          )}
+          {history.state === 'notes' &&
+            history.days.map((day) => (
+              <section key={day.journalDay} className="mb-6 last:mb-0">
+                <h2 className="mb-3 type-section text-muted-foreground">
+                  {formatJournalDay(day.journalDay)}
+                </h2>
+                <ol className="flex flex-col gap-1">
+                  {day.notes.map((note) => (
+                    <NoteLine
+                      key={note.id}
+                      note={note}
+                      journal={journal}
+                      editing={editing === note.id}
+                      onEdit={() => setEditing(note.id)}
+                      onCommit={(body) => commitEdit(note, body)}
+                      onAbandon={() => setEditing(null)}
+                      onRefile={(journalDay) => refile(note, journalDay)}
+                      onEditProject={(project) => editProject(note, project)}
+                      onDelete={() => setDeleting(note)}
+                    />
+                  ))}
+                </ol>
+              </section>
             ))}
-          </ol>
+        </main>
+
+        {nudgedDay !== null && (
+          <Nudge
+            journalDay={nudgedDay}
+            onShow={() => void session.moveTo(rangeForJournalDay(nudgedDay))}
+            onDismiss={() => session.dismissNudge()}
+          />
         )}
-        {history.state === 'notes' &&
-          history.days.map((day) => (
-            <section key={day.journalDay} className="mb-6 last:mb-0">
-              <h2 className="mb-3 type-section text-muted-foreground">
-                {formatJournalDay(day.journalDay)}
-              </h2>
-              <ol className="flex flex-col gap-1">
-                {day.notes.map((note) => (
-                  <NoteLine
-                    key={note.id}
-                    note={note}
-                    journal={journal}
-                    editing={editing === note.id}
-                    onEdit={() => setEditing(note.id)}
-                    onCommit={(body) => commitEdit(note, body)}
-                    onAbandon={() => setEditing(null)}
-                    onRefile={(journalDay) => refile(note, journalDay)}
-                    onEditProject={(project) => editProject(note, project)}
-                    onDelete={() => setDeleting(note)}
-                  />
-                ))}
-              </ol>
-            </section>
-          ))}
-      </main>
 
-      {nudgedDay !== null && (
-        <Nudge
-          journalDay={nudgedDay}
-          onShow={() => void session.moveTo(rangeForJournalDay(nudgedDay))}
-          onDismiss={() => session.dismissNudge()}
+        <ConfirmDelete
+          note={deleting}
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleting(null)}
         />
-      )}
 
-      <ConfirmDelete
-        note={deleting}
-        onConfirm={confirmDelete}
-        onCancel={() => setDeleting(null)}
-      />
-
-      {/* Where a copy says what it did. Nothing else toasts. */}
-      <Toaster />
-    </div>
+        {/* Where a copy says what it did. Nothing else toasts. */}
+        <Toaster />
+      </div>
+    </TooltipProvider>
   )
 }
 
@@ -362,9 +388,21 @@ function Problem({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * One Note as it reads now, and the ways to correct it. The actions stay out
- * of the way until the row is hovered or something in it has focus, so a list
- * being read back is a list of Notes rather than a list of controls.
+ * One Note as it reads now, and the ways to correct it: a leading gutter for
+ * the Captured At, the Body with its filing, and a trailing gutter for the
+ * three corrections.
+ *
+ * Both gutters are permanent. The trailing one holds its width whether or not
+ * anything is showing in it, so the Body is laid out once and never rewraps
+ * under the cursor — which is what an overlay reconstructing the row's own
+ * background used to be for.
+ *
+ * The actions are up on the row's hover, and otherwise only on their own
+ * focus: what appears at the end of a line has to be something the reader
+ * asked for, and tabbing to the Body is asking to read it. Invisible is not
+ * the same as gone, though — they stay focusable, and untouchable until they
+ * are visible, because a control nobody can see is not one to click by
+ * accident.
  */
 function NoteLine({
   note,
@@ -388,91 +426,93 @@ function NoteLine({
   onDelete: () => void
 }) {
   return (
-    <li className="group relative flex gap-3 rounded-md px-2 py-1 type-body hover:bg-muted/40 focus-within:bg-muted/40">
-      <span className="shrink-0 pt-px font-mono type-meta text-muted-foreground">
+    <li className="group flex items-start gap-3 rounded-md py-1.5 pl-2 pr-1 type-body hover:bg-muted/40 focus-within:bg-muted/40">
+      <time
+        dateTime={note.capturedAt}
+        className="w-16 shrink-0 pt-1 tabular-nums type-meta text-muted-foreground"
+      >
         {formatTimeOfDay(note.capturedAt)}
-      </span>
+      </time>
 
       {editing ? (
         <EditBody note={note} onCommit={onCommit} onAbandon={onAbandon} />
       ) : (
-        <>
-          <button
-            type="button"
-            onClick={onEdit}
-            className={`flex-1 cursor-text rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ${
-              // A Note nobody typed reads quieter than one they did, so a
-              // scan-and-delete pass down the day is fast. No icon and no
-              // label: the weight is the whole of the difference, and a Digest
-              // shows none of it — see docs/adr/0010-notes-have-two-origins.md.
-              note.origin === 'import' ? 'text-muted-foreground' : ''
-            }`}
-          >
-            <ProjectChip project={note.project} className="mr-2" />
-            {note.body}
-            {note.editedAt !== null && (
-              // Provenance for the reader: the wording is not necessarily the
-              // one that was typed at Captured At.
-              <span
-                className="ml-2 type-meta text-muted-foreground"
-                title="Changed since it was captured"
-              >
-                edited
-              </span>
-            )}
-          </button>
+        // A button, and deliberately one: pressing the Body starts a reword,
+        // which is an action and not a place to put a cursor. What it is not
+        // is a control — it is styled as the line the reader is reading, and
+        // the caret is the only thing that says it can be typed into.
+        <button
+          type="button"
+          onClick={onEdit}
+          className={`min-w-0 flex-1 cursor-text rounded-sm py-0.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ${
+            // A Note nobody typed reads quieter than one they did, so a
+            // scan-and-delete pass down the day is fast. No icon and no
+            // label: the weight is the whole of the difference, and a Digest
+            // shows none of it — see docs/adr/0010-notes-have-two-origins.md.
+            note.origin === 'import' ? 'text-muted-foreground' : ''
+          }`}
+        >
+          <ProjectChip project={note.project} className="mr-2" />
+          {note.body}
+          {note.editedAt !== null && <EditedMark />}
+        </button>
+      )}
 
-          {/*
-            Out of the way until wanted, and genuinely out of the way: an
-            invisible control is not one to click by accident. Kept focusable
-            rather than hidden, so tabbing to it reveals it.
-
-            Laid over the row's trailing edge rather than beside it, because a
-            control nobody can see should not be taking width off the Body —
-            and taking it back on hover would rewrap the line under the cursor.
-            The Body keeps the whole row and the actions cover its tail while
-            they are up, which is why the layer is opaque: the two backgrounds
-            below compose to exactly the row's own `bg-muted/40` over
-            `bg-background`.
-
-            Up on the row's hover, but only on these controls' own focus: what
-            covers the end of a line has to be something the reader asked for,
-            and tabbing to the Body is asking to read it.
-          */}
-          <div className="absolute inset-y-1 right-2 flex items-center rounded-md bg-background opacity-0 transition-opacity pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
-            <div className="flex h-full items-center gap-1 rounded-md bg-muted/40 pl-3">
-              <label className="flex items-center gap-1 type-meta text-muted-foreground">
-                <span className="sr-only">Project</span>
-                <ProjectField
-                  value={note.project}
-                  journal={journal}
-                  onPick={onEditProject}
-                  label={`File "${note.body}" under a Project`}
-                />
-              </label>
-              <label className="flex items-center gap-1 type-meta text-muted-foreground">
-                <span className="sr-only">File under</span>
-                <DayField
-                  value={note.journalDay}
-                  onPick={onRefile}
-                  label={`File "${note.body}" under another day`}
-                />
-              </label>
+      <div className="flex shrink-0 items-center gap-0.5 pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
+        <RefileField
+          value={note.journalDay}
+          onPick={onRefile}
+          label={`File “${note.body}” under another day`}
+        />
+        <ProjectField
+          value={note.project}
+          journal={journal}
+          onPick={onEditProject}
+          label={`File “${note.body}” under a Project`}
+        />
+        <Tooltip>
+          <TooltipTrigger
+            render={
               <Button
                 variant="ghost"
-                size="sm"
+                size="icon-sm"
                 onClick={onDelete}
-                aria-label={`Delete "${note.body}"`}
+                aria-label={`Delete “${note.body}”`}
+                className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
               >
-                Delete
+                <Trash2Icon />
               </Button>
-            </div>
-          </div>
-        </>
-      )}
+            }
+          />
+          <TooltipContent>Delete</TooltipContent>
+        </Tooltip>
+      </div>
     </li>
   )
 }
+
+/**
+ * Provenance for the reader: the wording is not necessarily the one that was
+ * typed at Captured At. A mark rather than the word, because it is said on
+ * every corrected Note and the Note is what the line is for — but it is still
+ * said, to whoever is listening rather than looking, and it still explains
+ * itself on hover.
+ */
+function EditedMark() {
+  return (
+    <span
+      title="Changed since it was captured"
+      className="ml-2 inline-flex items-center align-middle"
+    >
+      <span className="sr-only">edited</span>
+      <span
+        aria-hidden="true"
+        className="size-1 rounded-full bg-muted-foreground/70"
+      />
+    </span>
+  )
+}
+
 
 /**
  * One Search result: what the Note says, and the day it is filed under. The
@@ -816,69 +856,73 @@ function CopyDigest({
 }
 
 /**
- * A Journal Day being edited, which is not the same as one being typed. A date
- * input that already holds a day reports a whole, shaped value on every
- * segment a keystroke touches, so typing the year `2026` announces `0002`,
- * `0020` and `0202` first. Committing those would refile a Note three times on
- * the way to the day the reader meant.
+ * A Note being refiled onto another Journal Day. A calendar in a popup, so a
+ * day is picked whole and in one click: the value that leaves here is always a
+ * day the reader meant, which is why nothing holds a half-picked one.
  *
- * So the typing is kept here and only the settled value leaves: the picked day
- * is announced when the field is left, or when the picker itself commits one.
- * The core refuses a nonsense day regardless — that guard is the one that
- * matters — but a field that asks three times is wrong even when it is refused.
+ * The core still refuses a nonsense day, and that guard is the one that
+ * matters — but there is no longer a way for this control to offer it one.
  */
-function DayField({
+function RefileField({
   value,
   onPick,
   label,
 }: {
   value: string
-  onPick: (value: string) => void
-  label?: string
+  onPick: (journalDay: string) => void
+  label: string
 }) {
-  const [typed, setTyped] = useState(value)
-  const [settled, setSettled] = useState(value)
-
-  // The day changed underneath us — a refile landed, or the Filter moved — so
-  // what is being typed is stale and the field goes back to showing the truth.
-  if (value !== settled) {
-    setSettled(value)
-    setTyped(value)
-  }
-
-  function commit() {
-    if (typed === value) return
-
-    onPick(typed)
-    // The field goes back to the day on record, and gets there again only if
-    // the pick is accepted: a blank or refused day never lingers on screen as
-    // though it had been filed.
-    setTyped(value)
-  }
+  const [open, setOpen] = useState(false)
 
   return (
-    <input
-      type="date"
-      value={typed}
-      onChange={(event) => setTyped(event.target.value)}
-      onBlur={commit}
-      // Enter is how the keyboard says it is done without leaving the field.
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') {
-          commit()
-        }
-      }}
-      aria-label={label}
-      className="rounded-md border border-border bg-transparent px-1.5 py-0.5 type-meta text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-    />
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={label}
+                  className="text-muted-foreground"
+                >
+                  <CalendarIcon />
+                </Button>
+              }
+            />
+          }
+        />
+        <TooltipContent>File under another day</TooltipContent>
+      </Tooltip>
+      <PopoverContent align="end" className="w-auto p-2">
+        <Calendar
+          mode="single"
+          autoFocus
+          // Monday, as every Preset's week is — see ADR-0006.
+          weekStartsOn={1}
+          defaultMonth={dayAsDate(value)}
+          selected={dayAsDate(value)}
+          onSelect={(_selected, day) => {
+            setOpen(false)
+            onPick(journalDayFor(day))
+          }}
+          className="p-0"
+        />
+      </PopoverContent>
+    </Popover>
   )
 }
 
 /**
- * A Note's Project being set, changed or cleared. Explicit — not the Body —
- * so wording and filing stay separate. Offers Projects currently on Notes via
- * a datalist, and accepts a new name; emptying the field clears to Unfiled.
- * Settles on blur or Enter, like a Journal Day.
+ * A Note's Project being set, changed or cleared. Explicit — not the Body — so
+ * wording and filing stay separate. The list is the Predictions the journal
+ * already offers a Capture, asked for by what has been typed so far, and a
+ * name nothing has been filed under yet is offered as itself: filing under a
+ * new Project is how the first Note under it gets there.
+ *
+ * Nothing is filed on the way out. A Project is filed by choosing one, so
+ * Escape leaves what was typed exactly where it was typed — abandoned.
  */
 function ProjectField({
   value,
@@ -889,81 +933,135 @@ function ProjectField({
   value: string | null
   journal: Promise<Journal>
   onPick: (project: string | null) => void
-  label?: string
+  label: string
 }) {
-  const shown = value ?? ''
-  const [typed, setTyped] = useState(shown)
-  const [settled, setSettled] = useState(shown)
-  const [projects, setProjects] = useState<string[]>([])
-  // Escape sets this before blur so commit does not fire the abandoned value.
-  const abandon = useRef(false)
-  const listId = useId()
+  const [open, setOpen] = useState(false)
+  const [typed, setTyped] = useState('')
+  const [predictions, setPredictions] = useState<string[]>([])
 
-  if (shown !== settled) {
-    setSettled(shown)
-    setTyped(shown)
-  }
+  useEffect(() => {
+    if (!open) return
 
-  function commit() {
-    if (abandon.current) {
-      abandon.current = false
-      setTyped(shown)
-      return
+    let cancelled = false
+    void (async () => {
+      const names = await (await journal).projectPredictions(projectPrefix(typed))
+      if (!cancelled) setPredictions(names)
+    })()
+
+    return () => {
+      cancelled = true
     }
+  }, [open, typed, journal])
 
-    // A leading # is the display form; filing takes the bare name.
-    const name = typed.trim().replace(/^#/, '')
-    const project = name === '' ? null : name
-    if (
-      project === value ||
-      (project !== null && project.toLowerCase() === value)
-    ) {
-      setTyped(shown)
-      return
-    }
-
-    onPick(project)
-    setTyped(shown)
-  }
+  const options = projectOptions(projectPrefix(typed), predictions, value)
 
   return (
-    <>
-      <input
-        type="text"
-        value={typed}
-        list={listId}
-        spellCheck={false}
-        autoComplete="off"
-        placeholder="Unfiled"
-        onChange={(event) => setTyped(event.target.value)}
-        onFocus={() => {
-          void (async () => {
-            setProjects(await (await journal).projectPredictions(''))
-          })()
-        }}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            commit()
+    <Combobox
+      items={options}
+      // The Predictions are the journal's, matched by prefix the way a Capture
+      // matches them, so nothing is filtered again on the way to the list.
+      filter={null}
+      autoHighlight
+      open={open}
+      onOpenChange={(next: boolean) => {
+        setOpen(next)
+        if (!next) setTyped('')
+      }}
+      inputValue={typed}
+      onInputValueChange={setTyped}
+      itemToStringLabel={(option: ProjectOption) => option.label}
+      onValueChange={(option: ProjectOption | null) => {
+        if (option === null) return
+        setOpen(false)
+        onPick(option.kind === 'unfiled' ? null : option.name)
+      }}
+    >
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <ComboboxPrimitive.Trigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={label}
+                  className="text-muted-foreground"
+                >
+                  <HashIcon />
+                </Button>
+              }
+            />
           }
-          if (event.key === 'Escape') {
-            // Abandon the edit; keep the window open.
-            event.stopPropagation()
-            abandon.current = true
-            setTyped(shown)
-            event.currentTarget.blur()
-          }
-        }}
-        aria-label={label}
-        className="w-24 rounded-md border border-border bg-transparent px-1.5 py-0.5 font-mono type-meta text-foreground outline-none placeholder:font-sans placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
-      />
-      <datalist id={listId}>
-        {projects.map((name) => (
-          <option key={name} value={name} />
-        ))}
-      </datalist>
-    </>
+        />
+        <TooltipContent>File under a Project</TooltipContent>
+      </Tooltip>
+      <ComboboxContent align="end" className="w-48">
+        <ComboboxInput
+          showTrigger={false}
+          placeholder="Project"
+          aria-label="Project name"
+        />
+        <ComboboxEmpty>No Project by that name.</ComboboxEmpty>
+        <ComboboxList>
+          {options.map((option) => (
+            <ComboboxItem key={option.key} value={option}>
+              {option.label}
+            </ComboboxItem>
+          ))}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
   )
+}
+
+/**
+ * One line of the Project list: a Project already on Notes, the name being
+ * typed for the first time, or Unfiled — which is a value like any other and
+ * so is chosen like one, rather than by emptying a field.
+ */
+type ProjectOption =
+  | { kind: 'unfiled'; key: string; label: string }
+  | { kind: 'project'; key: string; label: string; name: string }
+
+/** What has been typed, as a Project name: the display `#` is not part of it. */
+function projectPrefix(typed: string): string {
+  return typed.trim().replace(/^#/, '')
+}
+
+/**
+ * The list under the field. Unfiled is offered only while nothing has been
+ * typed — once the reader is naming a Project they are not looking for the
+ * absence of one — and a new name is offered only when no Prediction already
+ * is it, so the same Project is never on screen twice.
+ */
+function projectOptions(
+  prefix: string,
+  predictions: string[],
+  filed: string | null,
+): ProjectOption[] {
+  const options: ProjectOption[] = []
+
+  if (prefix === '' && filed !== null) {
+    options.push({ kind: 'unfiled', key: 'unfiled', label: 'Unfiled' })
+  }
+
+  for (const name of predictions) {
+    options.push({ kind: 'project', key: name, label: `#${name}`, name })
+  }
+
+  const known = predictions.some(
+    (name) => name.toLowerCase() === prefix.toLowerCase(),
+  )
+  if (prefix !== '' && !known) {
+    options.push({
+      kind: 'project',
+      key: `new:${prefix}`,
+      label: `#${prefix}`,
+      name: prefix,
+    })
+  }
+
+  return options
 }
 
 /**
