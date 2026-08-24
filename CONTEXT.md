@@ -24,7 +24,7 @@ The act of turning a meeting on the user's calendar into a Note, without being a
 _Avoid_: Sync, ingest, intake
 
 **Imported Note**:
-A Note made by an Import. Its Body is the calendar event's title, verbatim, and its Captured At is when the meeting began. Always Unfiled — the calendars it comes from carry no Project meaning, so there is nothing to file it under. Ordinary in every other respect — editable, refilable and deletable like any Note. Declined and all-day events never become one.
+A Note made by an Import. Its Body is the calendar event's title, verbatim, and its Captured At is when the meeting began. Always Unfiled — the calendars it comes from carry no Project meaning, so there is nothing to file it under. Ordinary in every other respect — editable, refilable and deletable like any Note. Declined events never become one, nor do events covering the whole local day — whether or not the calendar marks them all-day, since an out-of-office block running local midnight to midnight does not, and would otherwise arrive as a meeting that began at 00:00.
 _Avoid_: Meeting note, event, calendar entry
 
 **Draft**:
