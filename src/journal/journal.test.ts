@@ -12,6 +12,7 @@ import {
   formatJournalDay,
   formatProject,
   formatTimeOfDay,
+  isProjectName,
   formatTrayCount,
   exportFileName,
   msUntilNextJournalDay,
@@ -286,6 +287,19 @@ describe('markerPrefix', () => {
 describe('applyPrediction', () => {
   it('fills the open marker with the chosen name and a trailing space', () => {
     expect(applyPrediction('habic')).toBe('#habic ')
+  })
+})
+
+describe('isProjectName', () => {
+  it('is the same rule filing a Note under a name enforces', () => {
+    expect(isProjectName('alpha')).toBe(true)
+    expect(isProjectName('Alpha-2_b')).toBe(true)
+    // Trimmed like a stored name, so a stray space is not a different answer.
+    expect(isProjectName('  alpha  ')).toBe(true)
+
+    expect(isProjectName('')).toBe(false)
+    expect(isProjectName('not a name')).toBe(false)
+    expect(isProjectName('#alpha')).toBe(false)
   })
 })
 

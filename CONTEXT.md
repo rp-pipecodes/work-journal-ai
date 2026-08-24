@@ -47,7 +47,7 @@ A Note with no Project. A real state and a real Filter value — not the same as
 _Avoid_: None, null project, untagged
 
 **Prediction**:
-A Project name offered during Capture from Projects already on Notes, matched by prefix as the user types after `#`. Choosing one or typing a new name both work; a new name becomes a Project on commit.
+A Project name offered from Projects already on Notes, matched by prefix as the user types. Offered wherever a Note is being filed — during a Capture after `#`, and when a Note already written is filed in History. Choosing one or typing a new name both work; a new name becomes a Project the moment a Note is filed under it, and a name the Project rule would refuse is never offered.
 _Avoid_: Autocomplete, suggestion chip, typeahead
 
 ## Getting in

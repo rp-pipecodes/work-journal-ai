@@ -59,7 +59,9 @@ import {
   constraintOf,
   decideKeystroke,
   formatJournalDay,
+  formatProject,
   formatTimeOfDay,
+  isProjectName,
   journalDayFor,
   projectChoice,
   projectConstraintFor,
@@ -204,8 +206,6 @@ export default function HistoryView({
   }
 
   function refile(note: Note, journalDay: string) {
-    // A cleared date input is a half-picked day, not a day to file under.
-    if (journalDay === '') return
     void session.refile(note.id, journalDay)
   }
 
@@ -458,8 +458,14 @@ function NoteLine({
         </button>
       )}
 
-      <div className="flex shrink-0 items-center gap-0.5 pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
-        <RefileField
+      {/*
+        Up on the row's hover, on these controls' own focus, and for as long as
+        one of them has a popup open: a calendar is portalled away from the
+        row, so the button the reader just pressed would otherwise fade out
+        from under the popup it opened.
+      */}
+      <div className="flex shrink-0 items-center gap-0.5 pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100 has-aria-expanded:pointer-events-auto has-aria-expanded:opacity-100">
+        <DayField
           value={note.journalDay}
           onPick={onRefile}
           label={`File “${note.body}” under another day`}
@@ -863,7 +869,7 @@ function CopyDigest({
  * The core still refuses a nonsense day, and that guard is the one that
  * matters — but there is no longer a way for this control to offer it one.
  */
-function RefileField({
+function DayField({
   value,
   onPick,
   label,
@@ -938,6 +944,9 @@ function ProjectField({
   const [open, setOpen] = useState(false)
   const [typed, setTyped] = useState('')
   const [predictions, setPredictions] = useState<string[]>([])
+  // Which line the keyboard is on, if any. Only Return on none of them is a
+  // decision this field makes for itself.
+  const highlighted = useRef<ProjectOption | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -970,6 +979,9 @@ function ProjectField({
       inputValue={typed}
       onInputValueChange={setTyped}
       itemToStringLabel={(option: ProjectOption) => option.label}
+      onItemHighlighted={(option: ProjectOption | undefined) => {
+        highlighted.current = option ?? null
+      }}
       onValueChange={(option: ProjectOption | null) => {
         if (option === null) return
         setOpen(false)
@@ -1000,6 +1012,21 @@ function ProjectField({
           showTrigger={false}
           placeholder="Project"
           aria-label="Project name"
+          onKeyDown={(event: React.KeyboardEvent<HTMLInputElement>) => {
+            // An emptied field is the reader saying the Note is under nothing
+            // — the way clearing a Project has always been said here. With a
+            // line picked out, Return takes that line instead.
+            if (
+              event.key !== 'Enter' ||
+              projectPrefix(typed) !== '' ||
+              highlighted.current !== null
+            ) {
+              return
+            }
+
+            setOpen(false)
+            onPick(null)
+          }}
         />
         <ComboboxEmpty>No Project by that name.</ComboboxEmpty>
         <ComboboxList>
@@ -1042,21 +1069,23 @@ function projectOptions(
   const options: ProjectOption[] = []
 
   if (prefix === '' && filed !== null) {
-    options.push({ kind: 'unfiled', key: 'unfiled', label: 'Unfiled' })
+    options.push({ kind: 'unfiled', key: 'unfiled', label: formatProject(null) })
   }
 
   for (const name of predictions) {
-    options.push({ kind: 'project', key: name, label: `#${name}`, name })
+    options.push({ kind: 'project', key: name, label: formatProject(name), name })
   }
 
   const known = predictions.some(
     (name) => name.toLowerCase() === prefix.toLowerCase(),
   )
-  if (prefix !== '' && !known) {
+  // Offered only if it is a name at all: the record refuses anything else, and
+  // a list holding a choice that cannot be made is not a list of choices.
+  if (!known && isProjectName(prefix)) {
     options.push({
       kind: 'project',
       key: `new:${prefix}`,
-      label: `#${prefix}`,
+      label: formatProject(prefix),
       name: prefix,
     })
   }

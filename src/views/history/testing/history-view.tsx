@@ -1,0 +1,98 @@
+import { vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import { createJournal, type Journal, type Note } from '@/journal/journal'
+import { fixedClock, openTestDatabase } from '@/journal/testing/database'
+import { fakeDesktop } from '@/platform/testing/desktop'
+import HistoryView from '../HistoryView'
+
+/**
+ * History over a real journal, for the two files that drive it: the Filter's
+ * header and the Note rows under it. Shared because both read the same screen
+ * — a second copy of the harness is a second answer to what "open History"
+ * means, and only one of them would get fixed.
+ */
+
+/** Every database a test opened, so the file can close them all afterwards. */
+const openDatabases: Array<() => void> = []
+
+/** Closes what `showHistory` opened. Call from `afterEach`. */
+export function closeTestDatabases() {
+  for (const close of openDatabases.splice(0)) close()
+}
+
+/** History opened over the given Captures, already showing its first list. */
+export async function showHistory(
+  captured: Array<{ at: string; body: string }>,
+) {
+  const { driver, close } = await openTestDatabase()
+  openDatabases.push(close)
+
+  const clock = fixedClock(new Date('2026-03-09T10:00:00'))
+  const core = createJournal({ clock, driver })
+
+  const notes: Note[] = []
+  for (const { at, body } of captured) {
+    clock.set(new Date(at))
+    const note = await core.capture(body)
+    if (note === null) throw new Error('nothing was captured')
+    notes.push(note)
+  }
+
+  const desktop = fakeDesktop({ driver })
+  render(<HistoryView desktop={desktop} journal={Promise.resolve(core)} />)
+
+  // The first read has to have landed: until it does there is no Filter, and
+  // the header is not on screen at all.
+  await screen.findByRole('banner')
+
+  return { desktop, core, notes }
+}
+
+/** One Note as the journal holds it now, whatever day it is filed under. */
+export async function noteById(
+  core: Journal,
+  id: string,
+): Promise<Note | null> {
+  const notes = await core.notesForFilter({
+    from: '2000-01-01',
+    to: '2100-01-01',
+  })
+  return notes.find((note) => note.id === id) ?? null
+}
+
+/** A day on the open calendar, pointed at the way a reader points at one. */
+export async function dayCell(journalDay: string): Promise<HTMLElement> {
+  const [year, month, day] = journalDay.split('-').map(Number)
+  const stamp = new Date(year, month - 1, day).toLocaleDateString()
+
+  return await vi.waitFor(() => {
+    const cell = document.querySelector(`[data-day="${stamp}"]`)
+    if (cell === null) throw new Error(`no ${journalDay} on the calendar`)
+    return cell as HTMLElement
+  })
+}
+
+/**
+ * What jsdom does not implement and a positioned popup needs. Stubs rather
+ * than a library: these tests assert on what is on screen, never on where.
+ */
+export function installMeasurementStubs() {
+  globalThis.ResizeObserver ??= class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver
+
+  Element.prototype.scrollIntoView ??= () => {}
+
+  globalThis.matchMedia ??= ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof matchMedia
+}

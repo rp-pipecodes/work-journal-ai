@@ -97,6 +97,7 @@ The palette is the point of this section, and the moment to watch is the one the
 
 - [ ] A row's actions are out of sight until the row is hovered, and appear when one of them is tabbed to — tabbing to the Body alone does not bring them up.
 - [ ] The Body keeps exactly the same wrapping whether or not the actions are showing.
+- [ ] An action whose calendar or Project list is open stays visible under it, even with the pointer away from the row.
 - [ ] Clicking a Note's Body turns it into a field holding that text, focused.
 - [ ] `Enter` saves the new wording; the list shows it and the Note carries the edited mark, which reads "Changed since it was captured" on hover.
 - [ ] `Escape` abandons the edit, leaves the Body as it was, and does **not** close the window.
