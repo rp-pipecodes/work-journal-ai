@@ -1,5 +1,9 @@
 # Filter Presets
 
+> The mechanism below — one select beside two day pickers — is superseded by
+> ADR-0013, which folds the Presets and both ends of the range into one
+> control. What a Preset *is* is unchanged.
+
 History offers one select of named ranges that set the Filter once and are
 forgotten: Today, Yesterday, This week, Last week, This month, Last month. The
 select snaps back to a neutral label; the day pickers remain the source of truth.

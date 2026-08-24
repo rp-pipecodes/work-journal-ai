@@ -87,7 +87,7 @@ _Avoid_: Updated at, modified, revision
 What is currently being viewed: a range of Journal Days, plus an optional Project constraint (a named Project, Unfiled, or Any). Opens on the most recent Occupied Day with Project = Any, and only changes when the user changes it — never on its own, even as new Notes arrive. Day range and Project constraint are independent axes; both must match for a Note to appear.
 
 **Preset**:
-A named civil-time range that sets the day axis of the Filter once and is forgotten: Today, Yesterday, This week, Last week, This month, Last month. One select, snaps back to a neutral label; the day pickers remain the source of truth. Does not touch the Project constraint. Week starts Monday. "This" units run from the unit start through today; "last" units are the full prior calendar unit. Yesterday is the calendar day before today, not the previous Occupied Day. An empty range is shown empty. Clock is read only when a Preset is chosen.
+A named civil-time range that sets the day axis of the Filter once and is forgotten: Today, Yesterday, This week, Last week, This month, Last month. Offered inside the one control that carries the day axis, beside the calendar; nothing holds the Preset afterwards, and the range it set is what the control reads. Does not touch the Project constraint. Week starts Monday. "This" units run from the unit start through today; "last" units are the full prior calendar unit. Yesterday is the calendar day before today, not the previous Occupied Day. An empty range is shown empty. Clock is read only when a Preset is chosen.
 _Avoid_: Quick range, date chip, relative filter, rolling window
 
 **Search**:
@@ -102,7 +102,7 @@ _Avoid_: Notification, toast, badge, alert
 A Journal Day that has at least one Note. What "the previous day" means in practice — the most recent Occupied Day, not yesterday's date, so a Monday morning shows Friday rather than an empty Sunday.
 
 **Digest**:
-The Markdown rendering of every Note in the current Filter, oldest first, grouped under day headings when the Filter spans more than one day. When the Project constraint is a single named Project, bullets are Body only. When it is Any or Unfiled, a Note that has a Project is rendered with a `#name` prefix on the bullet so mixed paste still carries filing. The journal's only output — written to be pasted into a standup or an LLM prompt.
+The Markdown rendering of every Note in the current Filter, oldest first, grouped under day headings when the Filter spans more than one day. When the Project constraint is a single named Project, bullets are Body only. When it is Any or Unfiled, a Note that has a Project is rendered with a `#name` prefix on the bullet so mixed paste still carries filing. The journal's only output — written to be pasted into a standup or an LLM prompt. A copy says what it did twice: as a message that fades, and in a live region for a reader who is not looking at the screen. A clipboard write is invisible, and a count is how the reader knows it worked before they paste.
 _Avoid_: Export, report, summary, copy-all text
 
 **Yesterday's Digest**:
