@@ -66,7 +66,9 @@ mod event_kit {
     use objc2_event_kit::{
         EKAuthorizationStatus, EKCalendar, EKEntityType, EKEvent, EKEventStore, EKParticipantStatus,
     };
-    use objc2_foundation::{NSCalendar, NSDate};
+    use objc2::msg_send;
+    use objc2::rc::Retained;
+    use objc2_foundation::{NSCalendar, NSCalendarOptions, NSCalendarUnit, NSDate, NSString};
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -149,7 +151,19 @@ mod event_kit {
         unsafe {
             let day = NSCalendar::currentCalendar();
             let start = day.startOfDayForDate(&NSDate::now());
-            let end = NSDate::dateWithTimeInterval_sinceDate(86_400.0, &start);
+            // Tomorrow's midnight by calendar arithmetic rather than by adding
+            // a day's worth of seconds: a day either side of a DST transition
+            // is 23 or 25 hours long, and a fixed 86400 would cut the last
+            // hour off the longer one — meetings nothing would ever look for
+            // again, since Import never goes back past today.
+            let end = day
+                .dateByAddingUnit_value_toDate_options(
+                    NSCalendarUnit::Day,
+                    1,
+                    &start,
+                    NSCalendarOptions::empty(),
+                )
+                .unwrap_or_else(|| NSDate::dateWithTimeInterval_sinceDate(86_400.0, &start));
 
             let predicate =
                 store.predicateForEventsWithStartDate_endDate_calendars(&start, &end, None);
@@ -178,12 +192,21 @@ mod event_kit {
                     calendar.calendarIdentifier().to_string()
                 })
                 .unwrap_or_default(),
-            title: unsafe { event.title() }.to_string(),
+            title: unsafe { title(event) },
             starts_at: milliseconds(&starts_at),
             ends_at: milliseconds(&ends_at),
             is_all_day: unsafe { event.isAllDay() },
             is_declined: unsafe { declined(event) },
         }
+    }
+
+    /// The event's title, or nothing at all. Asked for as a nullable string
+    /// rather than through the typed accessor, which models it as always
+    /// present: an event genuinely without one would take the sweep down, and
+    /// the journal gives an untitled meeting a Body of its own anyway.
+    unsafe fn title(event: &EKEvent) -> String {
+        let title: Option<Retained<NSString>> = unsafe { msg_send![event, title] };
+        title.map(|title| title.to_string()).unwrap_or_default()
     }
 
     /// Whether the user themselves declined. Read from the attendee EventKit

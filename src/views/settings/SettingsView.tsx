@@ -119,13 +119,20 @@ export default function SettingsView({
 
         setCalendars([])
 
-        // Only worth saying when it is a change: a user who has never turned
-        // Import on is not owed an explanation for something they never asked
-        // for, and the toggle says so for itself the moment they do.
+        // Only worth saying to someone who had Import going: a user who has
+        // never turned it on is owed no explanation for something they never
+        // asked for, and the toggle says so for itself the moment they do.
+        // Ticked calendars are the evidence, because they outlive the toggle —
+        // the background sweep may already have turned it off on finding the
+        // permission gone, and this is the window where that gets explained.
         const stored = await settings.load()
+        if (!stored.importMeetings && stored.importCalendars.length === 0) {
+          return
+        }
+
+        setCalendarProblem(describeCalendarAccess(access))
         if (stored.importMeetings) {
           setImportMeetings(false)
-          setCalendarProblem(describeCalendarAccess(access))
           await settings.saveImportMeetings(false)
         }
       } catch (error) {
@@ -419,14 +426,10 @@ export default function SettingsView({
  * answers are routine: a grant is keyed to the binary, so every rebuilt release
  * starts as one macOS has no record of.
  */
-function describeCalendarAccess(access: CalendarAccess): string | null {
-  if (access === 'denied') {
-    return 'macOS is not allowing Work Journal to read your calendars. Turn Calendars on for Work Journal in System Settings › Privacy & Security, then switch this back on.'
-  }
-  if (access === 'undetermined') {
-    return 'macOS did not ask about your calendars. Meetings are not being imported; everything else in the journal is unaffected.'
-  }
-  return null
+function describeCalendarAccess(access: Exclude<CalendarAccess, 'granted'>): string {
+  return access === 'denied'
+    ? 'macOS is not allowing Work Journal to read your calendars. Turn Calendars on for Work Journal in System Settings › Privacy & Security, then switch this back on.'
+    : 'macOS has not been asked about your calendars — a rebuilt Work Journal is a new app as far as it is concerned. Meetings are not being imported; everything else in the journal is unaffected.'
 }
 
 /**
