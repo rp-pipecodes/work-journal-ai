@@ -8,10 +8,19 @@
  * background, the height macOS gives a title bar, and never inside anything
  * that scrolls, so what it holds clear stays clear.
  *
+ * It also drags the window, because the title bar macOS still draws underneath
+ * only hears the mouse until the webview is clicked into — after that the drag
+ * is the webview's to ask for. The buttons' own corner is left out of it: a
+ * drag region over them swallows the press meant to close the window.
+ *
  * It is furniture rather than content: it says nothing, so it is hidden from
- * the accessibility tree. The window is dragged by the strip natively, by the
- * title bar the OS is still drawing underneath it.
+ * the accessibility tree.
  */
 export default function WindowTitleBar() {
-  return <div data-slot="window-title-bar" aria-hidden className="h-7 shrink-0" />
+  return (
+    <div data-slot="window-title-bar" aria-hidden className="flex h-7 shrink-0">
+      <div className="w-20 shrink-0" />
+      <div data-tauri-drag-region className="flex-1" />
+    </div>
+  )
 }
