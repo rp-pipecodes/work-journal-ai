@@ -1,0 +1,3 @@
+# Recurring Task transitions are transactional
+
+Tasks and Task Occurrences live in separate tables, and completing, advancing, or undoing a Recurring Task runs through a real database transaction reinforced by a constraint that permits exactly one Open occurrence per recurring Task. The journal's storage seam therefore gains a transaction operation implemented by both production and test adapters; recurrence is never expressed as a sequence of unrelated writes. This is required because a crash between “complete current” and “create next,” or between “remove next” and “reopen previous,” would otherwise violate the central one-Open invariant.

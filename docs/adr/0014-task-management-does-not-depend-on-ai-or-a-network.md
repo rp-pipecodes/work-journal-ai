@@ -1,0 +1,3 @@
+# Task management does not depend on AI or a network
+
+Creating, scheduling, completing, recurring, alerting, and filtering Tasks must work locally without AI or a network call. AI extraction may be reconsidered as an optional capability later, but it cannot decide whether free text is a Task or be required to recover structured fields. “Replace Google Tasks” means replacing the user's remaining work-task workflow, not importing or synchronizing a Google account; the first version starts fresh. This preserves Work Journal's accountless, local-only promise and makes ordinary Task behavior deterministic even when offline.
