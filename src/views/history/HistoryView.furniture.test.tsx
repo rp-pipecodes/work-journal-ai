@@ -184,6 +184,31 @@ async function showFurniture(
   }
 }
 
+describe('the window chrome', () => {
+  it('keeps a strip above everything for the traffic lights to sit in', async () => {
+    await showFurniture([{ at: '2026-03-09T10:00:00', body: 'Monday' }])
+
+    const strip = titleBarStrip()
+    // The window's own first row, ahead of the Filter's header: the title bar
+    // is an overlay, so whatever is drawn at the top of the window is drawn
+    // underneath the close, minimise and zoom buttons.
+    expect(strip.parentElement?.firstElementChild).toBe(strip)
+    expect(
+      strip.compareDocumentPosition(header()) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+})
+
+/** The room the overlay title bar's traffic lights are left. */
+function titleBarStrip(): HTMLElement {
+  const strip = document.querySelector<HTMLElement>(
+    '[data-slot="window-title-bar"]',
+  )
+  if (strip === null) throw new Error('the window left no room for the chrome')
+  return strip
+}
+
 /** The Filter's header, which the furniture is read around. */
 function header(): HTMLElement {
   return screen.getByRole('banner')
