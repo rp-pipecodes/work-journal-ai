@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ProjectChip from '@/components/ProjectChip'
+import KeyHint from '@/components/KeyHint'
 import {
   applyPrediction,
   decideKeystroke,
@@ -135,7 +136,14 @@ export default function CaptureView({
 
     const shown = desktop.onCaptureShown(begin)
     // Clicking away is a discard, not a Capture left floating over the screen.
-    const blurred = desktop.onWindowBlurred(() => void dismiss())
+    // Unless the window is already gone: the other resident window was invoked,
+    // the Rust side put this one away, and what is half-typed here is waiting
+    // for the next time rather than being thrown away behind the user's back.
+    const blurred = desktop.onWindowBlurred(() => {
+      void desktop.isWindowVisible().then((visible) => {
+        if (visible) void dismiss()
+      })
+    })
 
     return () => {
       document.body.classList.remove('capture-window')
@@ -283,8 +291,8 @@ export default function CaptureView({
             id={BARGAIN_ID}
             className="pointer-events-none absolute inset-y-0 right-5 flex select-none items-center gap-3 type-micro text-muted-foreground/70"
           >
-            <Hint glyph="↵" reading="Return commits." what="commits" />
-            <Hint glyph="esc" reading="Escape abandons." what="abandons" />
+            <KeyHint glyph="↵" reading="Return commits." what="commits" />
+            <KeyHint glyph="esc" reading="Escape abandons." what="abandons" />
           </div>
         </div>
         {predictions.length > 0 && (
@@ -352,33 +360,6 @@ export default function CaptureView({
   )
 }
 
-/**
- * Half of the bargain: a key cap and what pressing it is worth. Said twice and
- * never at once — a glyph beside a verb for a reader who can see the key, and
- * the whole sentence for one who cannot, since "↵ commits" read aloud is not
- * one.
- */
-function Hint({
-  glyph,
-  reading,
-  what,
-}: {
-  glyph: string
-  reading: string
-  what: string
-}) {
-  return (
-    <>
-      <span className="sr-only">{reading}</span>
-      <span aria-hidden="true" className="flex items-center gap-1">
-        <kbd className="rounded-sm border border-border bg-muted px-1 py-px font-sans type-micro leading-none text-muted-foreground">
-          {glyph}
-        </kbd>
-        {what}
-      </span>
-    </>
-  )
-}
 
 const PROBLEM_ID = 'capture-problem'
 const BARGAIN_ID = 'capture-bargain'

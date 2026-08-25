@@ -2273,7 +2273,7 @@ describe('exportJournal with Tasks', () => {
         '- [ ] chase the invoice',
         '',
         '## Completed',
-        '- [x] renew the certificate (completed Wed 11 Mar)',
+        '- [x] renew the certificate (completed Wed 11 Mar, 16:30)',
       ].join('\n'),
     )
     expect(exported.noteCount).toBe(1)

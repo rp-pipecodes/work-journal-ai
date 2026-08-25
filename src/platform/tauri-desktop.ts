@@ -66,6 +66,8 @@ export function createTauriDesktop(): Desktop {
         if (!focused) handle()
       }),
 
+    isWindowVisible: () => getCurrentWindow().isVisible(),
+
     async onCloseRequested(answer) {
       const window = getCurrentWindow()
       // Guards the close this makes on the user's behalf, so it cannot

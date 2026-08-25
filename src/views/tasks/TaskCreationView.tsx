@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import KeyHint from '@/components/KeyHint'
 import type { Journal } from '@/journal/journal'
 import {
   CAPTURE_FIELD_HEIGHT,
@@ -52,9 +53,8 @@ export default function TaskCreationView({
       // nothing yet, exactly as it is during a Capture.
       if (said.trim() === '') return
 
-      let task
       try {
-        task = await (await journal).createTask(said)
+        await (await journal).createTask(said)
       } catch (error) {
         // A Task that could not be stored must not vanish: leave the window
         // open with the description still in it, and say so, since a window
@@ -68,12 +68,10 @@ export default function TaskCreationView({
       // announcement has to leave before the window goes — dismissing hides the
       // whole app. It is not the Task Creation's problem either way: the Task
       // is stored regardless.
-      if (task !== null) {
-        try {
-          await desktop.announceTasksChanged()
-        } catch (error) {
-          console.error('could not announce the Task', error)
-        }
+      try {
+        await desktop.announceTasksChanged()
+      } catch (error) {
+        console.error('could not announce the Task', error)
       }
 
       await dismiss()
@@ -92,8 +90,15 @@ export default function TaskCreationView({
     // else. The window is only ever hidden with an empty field.
     const shown = desktop.onTaskCreationShown(() => field.current?.focus())
     // Clicking away is an abandon, not a Task Creation left floating over the
-    // screen.
-    const blurred = desktop.onWindowBlurred(() => void dismiss())
+    // screen. Unless the window is already gone: the capture window was
+    // invoked, the Rust side put this one away, and the description waiting
+    // here has to survive that rather than being thrown away behind the user's
+    // back.
+    const blurred = desktop.onWindowBlurred(() => {
+      void desktop.isWindowVisible().then((visible) => {
+        if (visible) void dismiss()
+      })
+    })
 
     return () => {
       document.body.classList.remove('capture-window')
@@ -155,8 +160,8 @@ export default function TaskCreationView({
             id={BARGAIN_ID}
             className="pointer-events-none absolute inset-y-0 right-5 flex select-none items-center gap-3 type-micro text-muted-foreground/70"
           >
-            <Hint glyph="↵" reading="Return creates the Task." what="creates" />
-            <Hint glyph="esc" reading="Escape abandons." what="abandons" />
+            <KeyHint glyph="↵" reading="Return creates the Task." what="creates" />
+            <KeyHint glyph="esc" reading="Escape abandons." what="abandons" />
           </div>
         </div>
         {refusals > 0 && (
@@ -175,32 +180,6 @@ export default function TaskCreationView({
   )
 }
 
-/**
- * Half of the bargain: a key cap and what pressing it is worth. Said twice and
- * never at once — a glyph beside a verb for a reader who can see the key, and
- * the whole sentence for one who cannot.
- */
-function Hint({
-  glyph,
-  reading,
-  what,
-}: {
-  glyph: string
-  reading: string
-  what: string
-}) {
-  return (
-    <>
-      <span className="sr-only">{reading}</span>
-      <span aria-hidden="true" className="flex items-center gap-1">
-        <kbd className="rounded-sm border border-border bg-muted px-1 py-px font-sans type-micro leading-none text-muted-foreground">
-          {glyph}
-        </kbd>
-        {what}
-      </span>
-    </>
-  )
-}
 
 const PROBLEM_ID = 'task-creation-problem'
 const BARGAIN_ID = 'task-creation-bargain'

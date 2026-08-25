@@ -83,7 +83,9 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 - [ ] Neither Hotkey fights VoiceOver: with VoiceOver on, `Ctrl+Opt` commands still work as documented.
 - [ ] Pressing the Note Hotkey during a Capture already in progress leaves one capture window and does not clear what has been typed; the same for the Task Hotkey and the Task Creation window.
 - [ ] With half a Note typed and the capture window dismissed with `Escape`, then half a Task typed: neither window's text ever appears in the other, and abandoning one leaves the other's next use empty.
-- [ ] With text waiting in the Task Creation window, pressing the Note Hotkey opens a Capture and leaves the Task text exactly where it was; going back to the Task Creation window shows it still there.
+- [ ] Clicking on another application while either window holds text closes it and the text is gone — the handoff below is the only thing that preserves it.
+- [ ] With text waiting in the Task Creation window, pressing the Note Hotkey puts that window away, opens a Capture, and leaves the app on screen rather than hiding it; pressing the Task Hotkey again shows the description still there.
+- [ ] The same the other way round: half a Note, then the Task Hotkey, then the Note Hotkey — the Body is still there.
 - [ ] With one Hotkey unavailable — claim `Ctrl+Shift+Cmd+T` in another app first, e.g. as a System Settings keyboard shortcut — the app still launches, the tray icon appears, and **New Task** still opens the Task Creation window while the Note Hotkey keeps working.
 - [ ] In that state the app starts normally and nothing hangs — and on a development build the terminal records the failed registration with a reason.
 - [ ] In that state **Settings** names the *Task Hotkey*, the combination and the reason, and points at **New Task** — and says nothing at all about the Note Hotkey.
@@ -186,7 +188,7 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 
 - [ ] **Export all to Markdown** writes a file to the Downloads folder and names the path it wrote to.
 - [ ] The file holds a `# Notes` section and a `# Tasks` section, each record exactly once, including Notes on days outside the Filter History was last showing.
-- [ ] Under `# Tasks`, Open Tasks read as `- [ ]` and Completed ones as `- [x]` with the day they were completed.
+- [ ] Under `# Tasks`, Open Tasks read as `- [ ]` and Completed ones as `- [x]` with the day and time they were completed.
 - [ ] The line under the button names both counts — Notes and Tasks — and matches what is in the file.
 - [ ] A journal holding only Tasks exports the Tasks section alone and reports the Task count.
 - [ ] Exporting twice leaves two files rather than overwriting the first.

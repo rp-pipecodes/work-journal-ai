@@ -290,7 +290,7 @@ export default function SettingsView({
    * on purpose: a toast, which is where the user is looking, and the line
    * under the button, which is still there once the toast has gone.
    */
-  function exportEverything() {
+  function exportJournal() {
     setExporting(true)
     setExported(null)
     void (async () => {
@@ -480,7 +480,7 @@ export default function SettingsView({
             label="Export"
             explanation="Every Note and Task as Markdown, in your Downloads folder — nothing kept here is locked in."
           >
-            <Button variant="outline" size="sm" onClick={exportEverything} disabled={exporting}>
+            <Button variant="outline" size="sm" onClick={exportJournal} disabled={exporting}>
               {exporting ? 'Exporting…' : 'Export all to Markdown'}
             </Button>
           </Row>

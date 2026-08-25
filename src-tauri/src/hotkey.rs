@@ -28,7 +28,9 @@ impl HotkeyAction {
         }
     }
 
-    /// What the action is called when a refusal has to be said out loud.
+    /// What the action is called when a refusal has to be said out loud. Must
+    /// match `label` in `HOTKEY_ACTIONS` (`src/settings/hotkey.ts`), which is
+    /// where Settings reads the same two names from.
     fn label(self) -> &'static str {
         match self {
             Self::Note => "Note Hotkey",
@@ -52,6 +54,35 @@ pub const DEFAULT_TASK_HOTKEY: &str = "Ctrl+Shift+Cmd+T";
 /// they have in their fingers. Written down explicitly on the first launch
 /// after the upgrade, so it stops being a fallback at all.
 pub const LEGACY_NOTE_HOTKEY: &str = "Ctrl+Alt+Cmd+J";
+
+/// What each Hotkey has to be written down as before either is claimed, given
+/// what the settings file already says. `None` means the file already holds an
+/// answer and nothing should be written over it.
+///
+/// Both are settled once, explicitly, so that neither is ever again decided by
+/// a fallback that could move under the user. The Note Hotkey's default changed
+/// when the Task Hotkey arrived — the old `Ctrl+Opt+Cmd` family collides with
+/// documented VoiceOver commands — so an installation that predates Tasks and
+/// never chose a combination keeps the one it has been using, persisted before
+/// the fallback moves beneath it. A genuinely new installation starts on the
+/// new pair.
+pub fn settle(
+    stored_note: Option<&str>,
+    stored_task: Option<&str>,
+    predates_tasks: bool,
+) -> (Option<&'static str>, Option<&'static str>) {
+    let note = match stored_note {
+        Some(_) => None,
+        None if predates_tasks => Some(LEGACY_NOTE_HOTKEY),
+        None => Some(DEFAULT_NOTE_HOTKEY),
+    };
+    let task = match stored_task {
+        Some(_) => None,
+        None => Some(DEFAULT_TASK_HOTKEY),
+    };
+
+    (note, task)
+}
 
 /// Whether a Hotkey is available, and if not, why. Recorded at startup and
 /// readable from anywhere afterwards — Settings reports on it later.
@@ -529,6 +560,35 @@ mod tests {
         register(HotkeyAction::Task, "Ctrl+K", &registrar);
 
         assert_eq!(registrar.calls(), vec!["register task Ctrl+K"]);
+    }
+
+    #[test]
+    fn a_first_run_settles_on_the_pair_the_app_ships_with() {
+        assert_eq!(
+            settle(None, None, false),
+            (Some(DEFAULT_NOTE_HOTKEY), Some(DEFAULT_TASK_HOTKEY))
+        );
+    }
+
+    #[test]
+    fn an_installation_predating_tasks_keeps_the_note_hotkey_it_has_been_using() {
+        assert_eq!(
+            settle(None, None, true),
+            (Some(LEGACY_NOTE_HOTKEY), Some(DEFAULT_TASK_HOTKEY))
+        );
+    }
+
+    #[test]
+    fn a_combination_the_user_chose_is_never_written_over() {
+        assert_eq!(settle(Some("Ctrl+Alt+K"), None, true).0, None);
+        assert_eq!(settle(Some("Ctrl+Alt+K"), None, false).0, None);
+        assert_eq!(settle(None, Some("Ctrl+Alt+L"), true).1, None);
+    }
+
+    #[test]
+    fn settling_twice_writes_nothing_the_second_time() {
+        let (note, task) = settle(None, None, true);
+        assert_eq!(settle(note, task, true), (None, None));
     }
 
     #[test]

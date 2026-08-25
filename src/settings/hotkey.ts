@@ -31,7 +31,11 @@ export interface HotkeyStatuses {
 /** What each Hotkey is called on screen, and what pressing it does. */
 export const HOTKEY_ACTIONS: readonly {
   action: HotkeyAction
-  /** The setting's own name in Settings. */
+  /**
+   * The setting's own name in Settings, and the name a refusal is said
+   * against. Must match `HotkeyAction::label` in `src-tauri/src/hotkey.rs`,
+   * which spells the same names into the collision it reports.
+   */
   label: string
   explanation: string
   /** The Tray Menu item that does the same thing, for when it is unavailable. */
@@ -134,12 +138,12 @@ export function describeUnavailableHotkey(
   hotkey: string,
   reason: string,
 ): string {
-  const { label, trayItem } = hotkeyAction(action)
+  const { label, trayItem } = describeHotkeyAction(action)
   return `${label} ${hotkey} could not be registered: ${reason}. Choose ${trayItem} from the Work Journal menu in the menu bar instead.`
 }
 
 /** How one of the two actions reads on screen. */
-export function hotkeyAction(action: HotkeyAction) {
+export function describeHotkeyAction(action: HotkeyAction) {
   const found = HOTKEY_ACTIONS.find((each) => each.action === action)
   if (found === undefined) {
     throw new Error(`Not a Hotkey action: ${action}.`)

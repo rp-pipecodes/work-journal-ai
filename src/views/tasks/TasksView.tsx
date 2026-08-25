@@ -26,9 +26,12 @@ import {
   createTasksSession,
   openingTasksSnapshot,
   type TasksSnapshot,
-  type TasksTab,
 } from '@/journal/tasks-session'
-import { formatTimeOfDay, type Journal, type Task } from '@/journal/journal'
+import {
+  formatTaskCompletedAt,
+  type Journal,
+  type Task,
+} from '@/journal/journal'
 import type { Desktop } from '@/platform/desktop'
 import { keysOfHotkey, type HotkeyStatuses } from '@/settings/hotkey'
 
@@ -149,7 +152,7 @@ export default function TasksView({
             // list at all — one of the two is always on screen.
             const chosen = next[0]
             if (chosen === 'open' || chosen === 'completed') {
-              void session.show(chosen as TasksTab)
+              void session.show(chosen)
             }
           }}
         >
@@ -288,7 +291,7 @@ function TaskLine({
           dateTime={task.completedAt}
           className="shrink-0 pt-1 tabular-nums type-meta text-muted-foreground"
         >
-          {formatTimeOfDay(task.completedAt)}
+          {formatTaskCompletedAt(task.completedAt)}
         </time>
       )}
 

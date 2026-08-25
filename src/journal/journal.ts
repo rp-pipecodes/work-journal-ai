@@ -950,8 +950,25 @@ function taskBullet(task: Task): string {
     return `- [ ] ${task.description}`
   }
 
-  const completed = formatDigestDay(journalDayFor(new Date(task.completedAt)))
-  return `- [x] ${task.description} (completed ${completed})`
+  return `- [x] ${task.description} (completed ${formatExportInstant(task.completedAt)})`
+}
+
+/**
+ * An instant as an export writes it: the day the way a Digest heading spells
+ * one, and the local time of day after it. Both, because Task Completed At is
+ * an instant rather than a day — an export that kept only the date would be
+ * lossier than the record it is a copy of. Pinned to `en-GB` and to 24 hours
+ * for the same reason `formatDigestDay` is: a file whose shape depends on the
+ * machine that produced it is worse than one that is merely British.
+ */
+function formatExportInstant(instant: string): string {
+  const at = new Date(instant)
+  const time = [
+    String(at.getHours()).padStart(2, '0'),
+    String(at.getMinutes()).padStart(2, '0'),
+  ].join(':')
+
+  return `${formatDigestDay(journalDayFor(at))}, ${time}`
 }
 
 /**
@@ -972,7 +989,7 @@ export function describeCopiedDigest(digest: Digest): string {
   if (digest.noteCount === 0) {
     return 'No Notes to copy.'
   }
-  return `Copied ${digest.noteCount} Note${digest.noteCount === 1 ? '' : 's'}.`
+  return `Copied ${plural(digest.noteCount, 'Note')}.`
 }
 
 /**
@@ -1239,6 +1256,21 @@ export function formatTimeOfDay(capturedAt: string): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(capturedAt))
+}
+
+/**
+ * Task Completed At as Tasks View reads it: the day and the time of day, in the
+ * reader's own locale. The day is part of it because the Completed list spans
+ * the whole journal — a bare clock time would read as today's on a Task
+ * completed a month ago.
+ */
+export function formatTaskCompletedAt(completedAt: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(completedAt))
 }
 
 /**

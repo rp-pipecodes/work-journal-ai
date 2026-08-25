@@ -44,6 +44,10 @@ export interface FakeDesktop extends Desktop {
   requestYesterdayDigest(): void
   /** The machine wakes from sleep. */
   wake(): void
+  /** Whether the caller's window is on screen, as the OS would report it. */
+  windowVisible: boolean
+  /** The window loses focus, as it does when another application takes it. */
+  blur(): void
   /** What the OS allows of the calendars; writable, as a revocation is. */
   access: CalendarAccess
   /** Whether the user was ever asked, and what they said if they were. */
@@ -81,6 +85,7 @@ export function fakeDesktop({
   events?: CalendarEvent[]
 } = {}): FakeDesktop {
   const captureShown = subscribers<void>()
+  const windowBlurred = subscribers<void>()
   const taskCreationShown = subscribers<void>()
   const tasksChanged = subscribers<void>()
   const systemWoke = subscribers<void>()
@@ -112,7 +117,10 @@ export function fakeDesktop({
     windowLabel: () => 'history',
     appIdentity: async () => appIdentity,
     closeWindow: async () => {},
-    onWindowBlurred: async () => () => {},
+    windowVisible: true,
+    blur: () => windowBlurred.announce(undefined),
+    onWindowBlurred: async (handle) => windowBlurred.add(handle),
+    isWindowVisible: async () => desktop.windowVisible,
     onCloseRequested: async () => () => {},
 
     openJournalDatabase: async () => {

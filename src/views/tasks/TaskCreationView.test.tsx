@@ -156,6 +156,34 @@ describe('a Task the record refused', () => {
 })
 
 describe('the two resident windows', () => {
+  it('discards on a blur that leaves the window on screen — the user walked away', async () => {
+    const journal = await openJournal()
+    const desktop = fakeDesktop()
+
+    showTaskCreation(desktop, journal)
+    type('half a Task')
+    desktop.blur()
+
+    await expect.poll(() => desktop.taskCreationsDismissed).toBe(1)
+    await expect.poll(() => field().value).toBe('')
+  })
+
+  it('keeps the description on a blur that came with the window being put away', async () => {
+    const journal = await openJournal()
+    const desktop = fakeDesktop()
+
+    showTaskCreation(desktop, journal)
+    type('half a Task')
+
+    // What the Rust side does when the other Entry Point is invoked: this
+    // window is hidden first, so the blur is a handoff rather than a walk-away.
+    desktop.windowVisible = false
+    desktop.blur()
+
+    await expect.poll(() => field().value).toBe('half a Task')
+    expect(desktop.taskCreationsDismissed).toBe(0)
+  })
+
   it('leaves an unfinished Capture untouched, and the other way round', async () => {
     const journal = await openJournal()
     const desktop = fakeDesktop()

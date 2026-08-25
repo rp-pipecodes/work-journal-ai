@@ -149,8 +149,8 @@ pub fn run() {
             // and the two windows are separate so that unfinished text in one
             // survives the other being used — see
             // docs/adr/0019-task-creation-has-its-own-resident-window.md.
-            build_capture_window(app.handle())?;
-            build_task_creation_window(app.handle())?;
+            build_resident_window(app.handle(), CAPTURE_WINDOW, "New Note")?;
+            build_resident_window(app.handle(), TASK_CREATION_WINDOW, "New Task")?;
             build_tray(app.handle())?;
 
             // Told to whichever window is sweeping the calendar. Set up after
@@ -202,12 +202,20 @@ fn migrations() -> Vec<Migration> {
     ]
 }
 
-fn build_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
-    WebviewWindowBuilder::new(app, CAPTURE_WINDOW, WebviewUrl::default())
-        .title("New Note")
-        // Larger than the panel the user sees: the view draws the panel's own
-        // drop shadow, and a window sized to the panel would clip it. Must
-        // match `CAPTURE_WIDTH` and `CAPTURE_HEIGHT` in `src/platform/desktop.ts`.
+/// The two resident windows: built once at startup, thereafter only shown and
+/// hidden — see docs/adr/0002-capture-window-is-hidden-never-closed.md. They
+/// are two windows rather than two modes of one so that an unfinished Capture
+/// and an unfinished Task Creation can both be waiting at once; see
+/// docs/adr/0019-task-creation-has-its-own-resident-window.md.
+///
+/// Both are the same shape, so they are built by the same function: the panel
+/// the user sees is smaller than the window on every side, because the view
+/// draws the panel's own drop shadow and a window sized to the panel would clip
+/// it. Must match `CAPTURE_WIDTH` and the resting height in
+/// `src/platform/desktop.ts`.
+fn build_resident_window(app: &tauri::AppHandle, label: &str, title: &str) -> tauri::Result<()> {
+    WebviewWindowBuilder::new(app, label, WebviewUrl::default())
+        .title(title)
         .inner_size(626.0, 130.0)
         .resizable(false)
         .decorations(false)
@@ -225,96 +233,74 @@ fn build_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// The Task Creation window, built exactly like the capture one and for the
-/// same reason. It is a second window rather than a second mode of the first:
-/// an unfinished Capture and an unfinished Task Creation must both survive the
-/// other being used — see
-/// docs/adr/0019-task-creation-has-its-own-resident-window.md.
-fn build_task_creation_window(app: &tauri::AppHandle) -> tauri::Result<()> {
-    WebviewWindowBuilder::new(app, TASK_CREATION_WINDOW, WebviewUrl::default())
-        .title("New Task")
-        // Must match `CAPTURE_WIDTH` and the resting height in
-        // `src/platform/desktop.ts`: the two panels are the same shape.
-        .inner_size(626.0, 130.0)
-        .resizable(false)
-        .decorations(false)
-        .transparent(true)
-        .shadow(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .center()
-        .visible(false)
-        .build()?;
-
-    Ok(())
+/// What every Note Entry Point does. Each of them reaches the same single
+/// place, and none can fail loudly enough to be worth more than a log: the user
+/// asked for a Capture, not for an error.
+fn start_capture(app: &tauri::AppHandle) {
+    show_resident_window(app, CAPTURE_WINDOW, CAPTURE_SHOWN_EVENT)
 }
 
-/// What every Entry Point does. Each of the three reaches the same single
-/// place, and none of them can fail loudly enough to be worth more than a log:
-/// the user asked for a Capture, not for an error.
-fn start_capture(app: &tauri::AppHandle) {
-    if let Err(error) = show_capture_window(app) {
-        log::error!("could not start a Capture: {error}");
+/// What every Task Entry Point does — the Task Hotkey, New Task in the Tray
+/// Menu, and the New Task control in Tasks View all arrive here.
+fn start_task_creation_window(app: &tauri::AppHandle) {
+    show_resident_window(app, TASK_CREATION_WINDOW, TASK_CREATION_SHOWN_EVENT)
+}
+
+fn show_resident_window(app: &tauri::AppHandle, label: &str, shown_event: &str) {
+    if let Err(error) = raise_resident_window(app, label, shown_event) {
+        log::error!("could not show the {label} window: {error}");
     }
 }
 
 /// The window is already alive, so showing it is all that is left. Focus is
 /// requested explicitly because a Dock-less app does not reliably receive it
 /// when a window becomes visible.
-fn show_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let Some(window) = app.get_webview_window(CAPTURE_WINDOW) else {
-        log::error!("the capture window is missing");
+///
+/// The other resident window is put away first, and put away by this side
+/// rather than by asking it to dismiss itself: the two panels float over
+/// everything, so both on screen at once is one too many — but whatever is
+/// half-typed in the one going away has to survive, which a dismiss would
+/// discard.
+fn raise_resident_window(
+    app: &tauri::AppHandle,
+    label: &str,
+    shown_event: &str,
+) -> tauri::Result<()> {
+    let Some(window) = app.get_webview_window(label) else {
+        log::error!("the {label} window is missing");
         return Ok(());
     };
 
-    // An Entry Point reached during a Capture already in progress is a no-op,
-    // not a fresh start: showing again would clear a line the user is halfway
-    // through typing.
+    // An Entry Point reached while its own window is already up focuses it and
+    // changes nothing else: showing again would clear a line the user is
+    // halfway through typing.
     if window.is_visible()? {
         return window.set_focus();
     }
 
-    // Dismissing a Capture hides the whole app to hand focus back, so the app
-    // itself has to be brought out of hiding before its window can be seen.
+    if let Some(other) = app.get_webview_window(other_resident_window(label)) {
+        other.hide()?;
+    }
+
+    // Dismissing either of these hides the whole app to hand focus back, so the
+    // app itself has to be brought out of hiding before its window can be seen.
     #[cfg(target_os = "macos")]
     app.show()?;
 
     window.show()?;
     window.set_focus()?;
-    window.emit(CAPTURE_SHOWN_EVENT, ())?;
+    window.emit(shown_event, ())?;
 
     Ok(())
 }
 
-/// What every Task Entry Point does — the Task Hotkey, New Task in the Tray
-/// Menu, and the New Task control in Tasks View all arrive here.
-fn start_task_creation_window(app: &tauri::AppHandle) {
-    if let Err(error) = show_task_creation_window(app) {
-        log::error!("could not start a Task Creation: {error}");
+/// The resident window that is not this one. There are exactly two.
+fn other_resident_window(label: &str) -> &'static str {
+    if label == CAPTURE_WINDOW {
+        TASK_CREATION_WINDOW
+    } else {
+        CAPTURE_WINDOW
     }
-}
-
-fn show_task_creation_window(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let Some(window) = app.get_webview_window(TASK_CREATION_WINDOW) else {
-        log::error!("the Task Creation window is missing");
-        return Ok(());
-    };
-
-    // An Entry Point reached during a Task Creation already in progress focuses
-    // the window rather than resetting it: showing again would clear a
-    // description the user is halfway through typing.
-    if window.is_visible()? {
-        return window.set_focus();
-    }
-
-    #[cfg(target_os = "macos")]
-    app.show()?;
-
-    window.show()?;
-    window.set_focus()?;
-    window.emit(TASK_CREATION_SHOWN_EVENT, ())?;
-
-    Ok(())
 }
 
 /// Opens History, building the window if it is not already open. Unlike the
@@ -550,45 +536,50 @@ fn register_hotkeys(app: &tauri::AppHandle) {
     app.manage(Mutex::new(hotkeys));
 }
 
-/// Writes both combinations down explicitly, once, so that neither is ever
-/// again decided by a fallback that could move under the user.
-///
-/// The Note Hotkey's default changed when the Task Hotkey arrived — the old
-/// `Ctrl+Opt+Cmd` family collides with documented VoiceOver commands. Anyone
-/// already running the app and relying on the old default keeps it: a settings
-/// file that exists but says nothing about the Hotkey belongs to an install
-/// that predates this, and the combination it has been using is persisted
-/// before the fallback changes beneath it. A settings file with nothing in it
-/// at all is a first run, and starts on the new default.
+/// Writes both combinations down explicitly, once. What each should be is
+/// `hotkey::settle`'s decision; all that happens here is reading the settings
+/// file, telling it whether this installation predates Tasks, and saving.
 fn settle_stored_hotkeys(app: &tauri::AppHandle) {
     let Ok(store) = app.store(SETTINGS_FILE) else {
         log::error!("could not read the settings; the Hotkeys keep their defaults");
         return;
     };
 
-    let mut written = false;
+    let stored_note = store.get(HOTKEY_KEY);
+    let stored_task = store.get(TASK_HOTKEY_KEY);
+    let (note, task) = hotkey::settle(
+        stored_note.as_ref().and_then(|value| value.as_str()),
+        stored_task.as_ref().and_then(|value| value.as_str()),
+        // A settings file with anything in it, or a journal already on disk:
+        // either is an installation that was running before Tasks existed.
+        !store.is_empty() || journal_database_exists(app),
+    );
 
-    if !store.has(HOTKEY_KEY) {
-        let existing_install = !store.is_empty();
-        let hotkey = if existing_install {
-            hotkey::LEGACY_NOTE_HOTKEY
-        } else {
-            hotkey::DEFAULT_NOTE_HOTKEY
-        };
-        store.set(HOTKEY_KEY, hotkey);
-        written = true;
+    if let Some(note) = note {
+        store.set(HOTKEY_KEY, note);
+    }
+    if let Some(task) = task {
+        store.set(TASK_HOTKEY_KEY, task);
     }
 
-    if !store.has(TASK_HOTKEY_KEY) {
-        store.set(TASK_HOTKEY_KEY, hotkey::DEFAULT_TASK_HOTKEY);
-        written = true;
-    }
-
-    if written {
+    if note.is_some() || task.is_some() {
         if let Err(error) = store.save() {
             log::error!("could not settle the Hotkeys: {error}");
         }
     }
+}
+
+/// Whether this machine already holds a journal — the evidence that the app has
+/// been run before, and the one that survives a settings file that never got
+/// written. Both directories are looked in because that is where plugin-sql
+/// resolves a relative database URL to.
+fn journal_database_exists(app: &tauri::AppHandle) -> bool {
+    let file = DATABASE_URL.trim_start_matches("sqlite:");
+
+    [app.path().app_config_dir(), app.path().app_data_dir()]
+        .into_iter()
+        .flatten()
+        .any(|directory| directory.join(file).exists())
 }
 
 /// The Hotkey as its own Tray Menu item should show it: the combination if it
@@ -785,7 +776,7 @@ fn watch_for_wake(app: &tauri::AppHandle) {
 /// only ever hidden — see docs/adr/0002-capture-window-is-hidden-never-closed.md.
 #[tauri::command]
 fn dismiss_capture(app: tauri::AppHandle) -> Result<(), String> {
-    hide_capture_window(&app).map_err(|error| error.to_string())
+    hide_resident_window(&app, CAPTURE_WINDOW).map_err(|error| error.to_string())
 }
 
 /// A Task Entry Point reached from a webview — the New Task control in Tasks
@@ -799,32 +790,20 @@ fn start_task_creation(app: tauri::AppHandle) {
 /// rather than closed, for the same reason the capture window is.
 #[tauri::command]
 fn dismiss_task_creation(app: tauri::AppHandle) -> Result<(), String> {
-    hide_task_creation_window(&app).map_err(|error| error.to_string())
+    hide_resident_window(&app, TASK_CREATION_WINDOW).map_err(|error| error.to_string())
 }
 
-fn hide_task_creation_window(app: &tauri::AppHandle) -> tauri::Result<()> {
-    if let Some(window) = app.get_webview_window(TASK_CREATION_WINDOW) {
+
+/// Puts a resident window away, whether it committed anything or not. Only
+/// ever hidden — see docs/adr/0002-capture-window-is-hidden-never-closed.md.
+fn hide_resident_window(app: &tauri::AppHandle, label: &str) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(label) {
         window.hide()?;
     }
 
     // Hiding the window leaves this app active, so the user would be left
     // typing into nothing. Hiding the app hands focus back to whatever was in
-    // front when the Task Creation began.
-    #[cfg(target_os = "macos")]
-    app.hide()?;
-
-    Ok(())
-}
-
-
-fn hide_capture_window(app: &tauri::AppHandle) -> tauri::Result<()> {
-    if let Some(window) = app.get_webview_window(CAPTURE_WINDOW) {
-        window.hide()?;
-    }
-
-    // Hiding the window leaves this app active, so the user would be left
-    // typing into nothing. Hiding the app hands focus back to whatever was in
-    // front when the Capture began.
+    // front when the Capture or Task Creation began.
     #[cfg(target_os = "macos")]
     app.hide()?;
 

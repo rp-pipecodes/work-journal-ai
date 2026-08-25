@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   describeUnavailableHotkey,
-  hotkeyAction,
+  describeHotkeyAction,
   hotkeyForKeystroke,
   HOTKEY_ACTIONS,
 } from './hotkey'
@@ -100,7 +100,7 @@ describe('describeUnavailableHotkey', () => {
 describe('HOTKEY_ACTIONS', () => {
   it('is the two actions, each with its own name and Tray Menu fallback', () => {
     expect(HOTKEY_ACTIONS.map((each) => each.action)).toEqual(['note', 'task'])
-    expect(hotkeyAction('note').label).toBe('Note Hotkey')
-    expect(hotkeyAction('task').trayItem).toBe('New Task')
+    expect(describeHotkeyAction('note').label).toBe('Note Hotkey')
+    expect(describeHotkeyAction('task').trayItem).toBe('New Task')
   })
 })

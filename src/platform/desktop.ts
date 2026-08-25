@@ -219,6 +219,14 @@ export interface Desktop {
   /** The window lost focus — for a Capture, a discard. */
   onWindowBlurred(handle: () => void): Promise<Unlisten>
   /**
+   * Whether the caller's own window is on screen. Asked by the two resident
+   * windows when they lose focus: losing it to another application is the user
+   * walking away from what they were typing, but losing it because the other
+   * resident window was invoked is a handoff, and the Rust side has already put
+   * this one away without discarding a word of it.
+   */
+  isWindowVisible(): Promise<boolean>
+  /**
    * The user is closing the window, and something has to happen first. The
    * close is held until `answer` settles, because a window closing takes its
    * webview and with it any write still in flight.
