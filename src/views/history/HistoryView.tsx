@@ -13,6 +13,7 @@ import {
 import { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox'
 import { toast } from 'sonner'
 import ProjectChip from '@/components/ProjectChip'
+import WindowTitleBar from '@/components/WindowTitleBar'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Input } from '@/components/ui/input'
@@ -253,6 +254,8 @@ export default function HistoryView({
         onKeyDown={onKeyDown}
         className="flex h-screen flex-col bg-background outline-none"
       >
+        <WindowTitleBar />
+
         {/*
           The header wraps rather than clips: the Filter's controls, the Search
           field and the Digest are each the whole of something the reader needs,

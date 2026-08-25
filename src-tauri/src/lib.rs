@@ -278,14 +278,26 @@ fn show_on_demand_window(
     // parses a line of the document, so its first frame is already right.
     let theme = resolved_theme(app);
 
-    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::default())
+    let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::default())
         .title(title)
         .inner_size(size.0, size.1)
         .min_inner_size(min_size.0, min_size.1)
         .center()
         .background_color(theme.background())
-        .initialization_script(theme.announcement())
-        .build()?;
+        .initialization_script(theme.announcement());
+
+    // The window is handed its own title bar: the traffic lights are inset over
+    // the view rather than sitting in a bar of their own, and the title is left
+    // unsaid, because every one of these windows already says what it is. The
+    // view leaves the buttons a strip to sit in — see
+    // `src/components/WindowTitleBar.tsx`. The Capture window is not built here
+    // and keeps its own chrome, which is none at all.
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
+
+    let window = builder.build()?;
 
     // A Dock-less app does not reliably receive focus when a window appears.
     window.set_focus()?;

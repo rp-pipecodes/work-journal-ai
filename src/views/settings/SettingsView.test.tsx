@@ -213,6 +213,28 @@ describe('Export', () => {
   })
 })
 
+describe('the window chrome', () => {
+  it('keeps a strip above everything for the traffic lights to sit in', async () => {
+    showSettings(fakeDesktop())
+    await screen.findByText('Hotkey')
+
+    const strip = titleBarStrip()
+    // The window's own first row, and outside whatever scrolls: a strip that
+    // scrolls away is a strip the traffic lights end up sitting on top of.
+    expect(strip.parentElement?.firstElementChild).toBe(strip)
+    expect(strip.parentElement?.className).not.toContain('overflow-y-auto')
+  })
+})
+
+/** The room the overlay title bar's traffic lights are left. */
+function titleBarStrip(): HTMLElement {
+  const strip = document.querySelector<HTMLElement>(
+    '[data-slot="window-title-bar"]',
+  )
+  if (strip === null) throw new Error('the window left no room for the chrome')
+  return strip
+}
+
 /** Escape, pressed where the user's focus is. */
 function escape(element: HTMLElement) {
   element.dispatchEvent(

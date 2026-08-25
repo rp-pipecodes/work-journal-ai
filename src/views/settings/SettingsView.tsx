@@ -19,6 +19,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useTheme } from '@/components/theme-context'
+import WindowTitleBar from '@/components/WindowTitleBar'
 import { exportFileName, type Journal } from '@/journal/journal'
 import type {
   AppIdentity,
@@ -307,177 +308,182 @@ export default function SettingsView({
       ref={page}
       tabIndex={-1}
       onKeyDown={onKeyDown}
-      className="flex h-screen flex-col overflow-y-auto bg-background px-6 py-5 type-body outline-none"
+      className="flex h-screen flex-col bg-background type-body outline-none"
     >
-      <Group>
-        <Row
-          label="Hotkey"
-          explanation="The global combination that begins a Capture from anywhere."
-        >
-          <HotkeyRecorder
-            recording={recording}
-            hotkey={hotkey}
-            onStart={() => {
-              setRecording(true)
-              setHotkeyProblem(null)
-            }}
-            onAbandon={() => setRecording(false)}
-            onRecord={remap}
-          />
-        </Row>
+      <WindowTitleBar />
 
-        {hotkey?.state === 'unavailable' && (
-          <Problem>
-            {describeUnavailableHotkey(hotkey.hotkey, hotkey.reason)}
-          </Problem>
-        )}
-        {hotkeyProblem !== null && <Problem>{hotkeyProblem}</Problem>}
-
-        <Aside>
-          A combination another application has claimed globally will be refused
-          here and reported. A combination an application uses only inside its
-          own window cannot be detected — the Hotkey will simply take precedence
-          there.
-        </Aside>
-      </Group>
-
-      <Separator />
-
-      <Group>
-        <Row
-          label="Theme"
-          explanation="Whether the app is light or dark, and whether it decides that for itself."
-        >
-          <ToggleGroup
-            aria-labelledby="theme-heading"
-            spacing={0}
-            // A segmented control the way macOS draws one: one recessed track,
-            // and the chosen segment raised out of it.
-            className="gap-0 rounded-md bg-muted p-0.5"
-            value={[theme]}
-            onValueChange={(next) => {
-              // Pressing the Theme already chosen deselects it, which is not a
-              // Theme at all — the app is always painted as something, so
-              // there is nothing to record.
-              const chosen = next[0]
-              if (isTheme(chosen)) {
-                setTheme(chosen)
-              }
-            }}
+      {/* Everything the window says scrolls; the strip above it does not. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-5">
+        <Group>
+          <Row
+            label="Hotkey"
+            explanation="The global combination that begins a Capture from anywhere."
           >
-            {THEME_SEGMENTS.map(({ theme: choice, label }) => (
-              <ToggleGroupItem
-                key={choice}
-                value={choice}
-                className="rounded-sm! px-2.5 hover:bg-transparent data-pressed:bg-background data-pressed:text-foreground data-pressed:shadow-sm"
-              >
-                {label}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-        </Row>
+            <HotkeyRecorder
+              recording={recording}
+              hotkey={hotkey}
+              onStart={() => {
+                setRecording(true)
+                setHotkeyProblem(null)
+              }}
+              onAbandon={() => setRecording(false)}
+              onRecord={remap}
+            />
+          </Row>
 
-        <Aside>
-          {theme === 'system'
-            ? `Following the system, which is currently ${resolved}. Cmd+Shift+D switches to the other one.`
-            : `Cmd+Shift+D switches between light and dark from any window.`}
-        </Aside>
-      </Group>
+          {hotkey?.state === 'unavailable' && (
+            <Problem>
+              {describeUnavailableHotkey(hotkey.hotkey, hotkey.reason)}
+            </Problem>
+          )}
+          {hotkeyProblem !== null && <Problem>{hotkeyProblem}</Problem>}
 
-      <Separator />
+          <Aside>
+            A combination another application has claimed globally will be refused
+            here and reported. A combination an application uses only inside its
+            own window cannot be detected — the Hotkey will simply take precedence
+            there.
+          </Aside>
+        </Group>
 
-      <Group>
-        <Row
-          label="Start at login"
-          explanation="Whether Work Journal launches when you log in."
-          controls="start-at-login"
-        >
-          <Switch
-            id="start-at-login"
-            checked={startAtLogin}
-            onCheckedChange={toggleStartAtLogin}
-          />
-        </Row>
-      </Group>
+        <Separator />
 
-      <Separator />
+        <Group>
+          <Row
+            label="Theme"
+            explanation="Whether the app is light or dark, and whether it decides that for itself."
+          >
+            <ToggleGroup
+              aria-labelledby="theme-heading"
+              spacing={0}
+              // A segmented control the way macOS draws one: one recessed track,
+              // and the chosen segment raised out of it.
+              className="gap-0 rounded-md bg-muted p-0.5"
+              value={[theme]}
+              onValueChange={(next) => {
+                // Pressing the Theme already chosen deselects it, which is not a
+                // Theme at all — the app is always painted as something, so
+                // there is nothing to record.
+                const chosen = next[0]
+                if (isTheme(chosen)) {
+                  setTheme(chosen)
+                }
+              }}
+            >
+              {THEME_SEGMENTS.map(({ theme: choice, label }) => (
+                <ToggleGroupItem
+                  key={choice}
+                  value={choice}
+                  className="rounded-sm! px-2.5 hover:bg-transparent data-pressed:bg-background data-pressed:text-foreground data-pressed:shadow-sm"
+                >
+                  {label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          </Row>
 
-      <Group>
-        <Row
-          label="Add today's meetings to the journal"
-          explanation="Today's meetings, added to the journal as they end. Never a backfill."
-          controls="import-meetings"
-        >
-          <Switch
-            id="import-meetings"
-            checked={importing}
-            // Pressed, the switch means the opposite of the wish rather than
-            // the opposite of what it reads: with the permission gone it reads
-            // off while the wish is on, and a press there is the user
-            // withdrawing it — the reason underneath goes with it. Reading the
-            // switch back would ask to turn on what is already wished for,
-            // leaving no way to change their mind.
-            onCheckedChange={() => toggleImport(!importMeetings)}
-          />
-        </Row>
+          <Aside>
+            {theme === 'system'
+              ? `Following the system, which is currently ${resolved}. Cmd+Shift+D switches to the other one.`
+              : `Cmd+Shift+D switches between light and dark from any window.`}
+          </Aside>
+        </Group>
 
-        {calendarProblem !== null && <Problem>{calendarProblem}</Problem>}
+        <Separator />
 
-        {importing && (
-          <CalendarTicks
-            calendars={calendars}
-            ticked={importCalendars}
-            onToggle={toggleCalendar}
-          />
+        <Group>
+          <Row
+            label="Start at login"
+            explanation="Whether Work Journal launches when you log in."
+            controls="start-at-login"
+          >
+            <Switch
+              id="start-at-login"
+              checked={startAtLogin}
+              onCheckedChange={toggleStartAtLogin}
+            />
+          </Row>
+        </Group>
+
+        <Separator />
+
+        <Group>
+          <Row
+            label="Add today's meetings to the journal"
+            explanation="Today's meetings, added to the journal as they end. Never a backfill."
+            controls="import-meetings"
+          >
+            <Switch
+              id="import-meetings"
+              checked={importing}
+              // Pressed, the switch means the opposite of the wish rather than
+              // the opposite of what it reads: with the permission gone it reads
+              // off while the wish is on, and a press there is the user
+              // withdrawing it — the reason underneath goes with it. Reading the
+              // switch back would ask to turn on what is already wished for,
+              // leaving no way to change their mind.
+              onCheckedChange={() => toggleImport(!importMeetings)}
+            />
+          </Row>
+
+          {calendarProblem !== null && <Problem>{calendarProblem}</Problem>}
+
+          {importing && (
+            <CalendarTicks
+              calendars={calendars}
+              ticked={importCalendars}
+              onToggle={toggleCalendar}
+            />
+          )}
+
+          <Aside>
+            Imported meetings are ordinary Notes: reword them, file them under a
+            Project, or delete them. Deleting one refuses that meeting for good —
+            it is never added again. Declined meetings and all-day blocks are
+            never added in the first place.
+          </Aside>
+        </Group>
+
+        <Separator />
+
+        <Group>
+          <Row
+            label="Export"
+            explanation="Every Note as Markdown, in your Downloads folder — nothing captured here is locked in."
+          >
+            <Button variant="outline" size="sm" onClick={exportAll} disabled={exporting}>
+              {exporting ? 'Exporting…' : 'Export all to Markdown'}
+            </Button>
+          </Row>
+
+          {/* The toast is where the user is looking; this is where the answer
+              stays. It is here before there is anything to say, so that what it
+              says next is announced rather than merely appearing. */}
+          <p
+            role="status"
+            aria-live="polite"
+            className="type-meta text-muted-foreground"
+          >
+            {exported}
+          </p>
+        </Group>
+
+        {appIdentity !== null && (
+          <>
+            <Separator className="mt-auto" />
+            <footer
+              aria-label="Application version"
+              className="flex items-center justify-center gap-2 py-3 type-meta text-muted-foreground"
+            >
+              <span>{appIdentity.version}</span>
+              {appIdentity.isDevelopment && <Badge variant="outline">Dev</Badge>}
+            </footer>
+          </>
         )}
 
-        <Aside>
-          Imported meetings are ordinary Notes: reword them, file them under a
-          Project, or delete them. Deleting one refuses that meeting for good —
-          it is never added again. Declined meetings and all-day blocks are
-          never added in the first place.
-        </Aside>
-      </Group>
-
-      <Separator />
-
-      <Group>
-        <Row
-          label="Export"
-          explanation="Every Note as Markdown, in your Downloads folder — nothing captured here is locked in."
-        >
-          <Button variant="outline" size="sm" onClick={exportAll} disabled={exporting}>
-            {exporting ? 'Exporting…' : 'Export all to Markdown'}
-          </Button>
-        </Row>
-
-        {/* The toast is where the user is looking; this is where the answer
-            stays. It is here before there is anything to say, so that what it
-            says next is announced rather than merely appearing. */}
-        <p
-          role="status"
-          aria-live="polite"
-          className="type-meta text-muted-foreground"
-        >
-          {exported}
-        </p>
-      </Group>
-
-      {appIdentity !== null && (
-        <>
-          <Separator className="mt-auto" />
-          <footer
-            aria-label="Application version"
-            className="flex items-center justify-center gap-2 py-3 type-meta text-muted-foreground"
-          >
-            <span>{appIdentity.version}</span>
-            {appIdentity.isDevelopment && <Badge variant="outline">Dev</Badge>}
-          </footer>
-        </>
-      )}
-
-      <FirstRunQuestion open={asking} onAnswer={answerStartAtLogin} />
-      <Toaster />
+        <FirstRunQuestion open={asking} onAnswer={answerStartAtLogin} />
+        <Toaster />
+      </div>
     </div>
   )
 }
