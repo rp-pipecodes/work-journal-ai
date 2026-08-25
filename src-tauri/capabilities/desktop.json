@@ -7,7 +7,9 @@
   ],
   "windows": [
     "capture",
+    "task-creation",
     "history",
+    "tasks",
     "settings"
   ],
   "permissions": [

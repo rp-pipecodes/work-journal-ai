@@ -15,6 +15,43 @@ export type HotkeyStatus =
   | { state: 'unavailable'; hotkey: string; reason: string }
 
 /**
+ * The two things a global combination can do, each with its own Hotkey. They
+ * are independently remappable and independently registrable — see
+ * docs/adr/0018-note-and-task-have-independent-accessible-hotkeys.md — so
+ * every Hotkey in the app is qualified by which action it begins.
+ */
+export type HotkeyAction = 'note' | 'task'
+
+/** Both Hotkeys as they stand, which is how the Rust side reports them. */
+export interface HotkeyStatuses {
+  note: HotkeyStatus
+  task: HotkeyStatus
+}
+
+/** What each Hotkey is called on screen, and what pressing it does. */
+export const HOTKEY_ACTIONS: readonly {
+  action: HotkeyAction
+  /** The setting's own name in Settings. */
+  label: string
+  explanation: string
+  /** The Tray Menu item that does the same thing, for when it is unavailable. */
+  trayItem: string
+}[] = [
+  {
+    action: 'note',
+    label: 'Note Hotkey',
+    explanation: 'The global combination that begins a Capture from anywhere.',
+    trayItem: 'New Note',
+  },
+  {
+    action: 'task',
+    label: 'Task Hotkey',
+    explanation: 'The global combination that begins a Task Creation from anywhere.',
+    trayItem: 'New Task',
+  },
+]
+
+/**
  * The modifiers a global Hotkey can carry, in the one order the app spells
  * them, so the same combination is always the same string. `Alt` is how the OS
  * spells Option and `Cmd` how it spells Command.
@@ -84,16 +121,30 @@ function keyForCode(code: string): string | null {
 }
 
 /**
- * A Hotkey that could not be registered, said plainly. It names the
- * combination and the reason, and points at the Tray Menu — the Entry Point
- * that always works — so a refused registration reads as one way in being
- * unavailable rather than as a broken app.
+ * A Hotkey that could not be registered, said plainly. It names the action, the
+ * combination and the reason, and points at the Tray Menu item that does the
+ * same thing — the Entry Point that always works — so a refused registration
+ * reads as one way in being unavailable rather than as a broken app.
+ *
+ * Qualified by action because there are two of them: telling someone whose Task
+ * Hotkey was refused to start a Capture instead is the wrong instruction.
  */
 export function describeUnavailableHotkey(
+  action: HotkeyAction,
   hotkey: string,
   reason: string,
 ): string {
-  return `${hotkey} could not be registered: ${reason}. Start a Capture from the Work Journal menu in the menu bar instead.`
+  const { label, trayItem } = hotkeyAction(action)
+  return `${label} ${hotkey} could not be registered: ${reason}. Choose ${trayItem} from the Work Journal menu in the menu bar instead.`
+}
+
+/** How one of the two actions reads on screen. */
+export function hotkeyAction(action: HotkeyAction) {
+  const found = HOTKEY_ACTIONS.find((each) => each.action === action)
+  if (found === undefined) {
+    throw new Error(`Not a Hotkey action: ${action}.`)
+  }
+  return found
 }
 
 /**

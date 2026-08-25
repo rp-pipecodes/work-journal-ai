@@ -3,6 +3,8 @@ import type { Desktop } from './platform/desktop'
 import type { AppSettings } from './settings/app-settings'
 import CaptureView from './views/capture/CaptureView'
 import HistoryView from './views/history/HistoryView'
+import TaskCreationView from './views/tasks/TaskCreationView'
+import TasksView from './views/tasks/TasksView'
 import SettingsView from './views/settings/SettingsView'
 import { viewForLabel } from './views/route'
 
@@ -34,8 +36,16 @@ export default function App({
     return <CaptureView desktop={desktop} journal={journal} />
   }
 
+  if (view === 'task-creation') {
+    return <TaskCreationView desktop={desktop} journal={journal} />
+  }
+
   if (view === 'history') {
     return <HistoryView desktop={desktop} journal={journal} />
+  }
+
+  if (view === 'tasks') {
+    return <TasksView desktop={desktop} journal={journal} />
   }
 
   if (view === 'settings') {

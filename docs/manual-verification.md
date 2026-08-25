@@ -18,7 +18,7 @@ open "src-tauri/target/release/bundle/macos/Work Journal.app"
 
 Three things are worth knowing before you begin.
 
-**Where the app keeps its state.** `~/Library/Application Support/com.pipecodes.work-journal` — `settings.json` holds the Hotkey, the Theme and the Start at Login answer, and `work-journal.db` holds the Notes. Deleting the whole directory returns the app to a first run.
+**Where the app keeps its state.** `~/Library/Application Support/com.pipecodes.work-journal` — `settings.json` holds both Hotkeys, the Theme and the Start at Login answer, and `work-journal.db` holds the Notes and the Tasks. Deleting the whole directory returns the app to a first run.
 
 ```bash
 rm -rf ~/Library/Application\ Support/com.pipecodes.work-journal
@@ -41,9 +41,11 @@ Everything else is checked against the release build.
 - [ ] The app launches and stays running with no Dock icon.
 - [ ] `Cmd+Tab` does not list the app.
 - [ ] A tray icon appears in the menu bar.
-- [ ] Clicking the tray icon opens a menu holding **New Note**, **View Notes**, **Settings** and **Quit**, and nothing else.
-- [ ] **New Note** opens a capture window.
+- [ ] Clicking the tray icon opens a menu holding **New Note**, **New Task**, **View Notes**, **View Tasks**, **Copy Yesterday's Digest**, **Settings** and **Quit**, and nothing else.
+- [ ] **New Note** opens a capture window, with the Note Hotkey spelled out beside the item.
+- [ ] **New Task** opens the Task Creation window, with the Task Hotkey spelled out beside the item.
 - [ ] **View Notes** opens the history window.
+- [ ] **View Tasks** opens the tasks window, and both can be open at once.
 - [ ] **Settings** opens the settings window.
 - [ ] **Quit** ends the process — the tray icon disappears and nothing is left running.
 - [ ] Launching the app a second time while it is running — from Spotlight, and again from the Finder — leaves exactly one tray icon and one process each time, and opens a capture window rather than a second app.
@@ -70,16 +72,24 @@ The palette is the point of this section, and the moment to watch is the one the
 - [ ] Re-opening **New Note** straight after committing a Note shows an empty field too — the committed text is not still sitting there.
 - [ ] Notes committed before quitting are still there after relaunching the app, and after a restart of the machine.
 
-## The Hotkey and relaunch
+## The two Hotkeys and relaunch
 
-- [ ] `Ctrl+Opt+Cmd+J` starts a Capture from a browser, from an editor, and from the Finder — the field is focused and empty each time.
-- [ ] The keystroke does not reach the application that was in front (it is intercepted, not passed through).
-- [ ] Holding the Hotkey down starts exactly one Capture.
-- [ ] Pressing the Hotkey during a Capture already in progress leaves one capture window and does not clear what has been typed.
-- [ ] With the Hotkey unavailable — claim `Ctrl+Opt+Cmd+J` in another app first, e.g. as a System Settings keyboard shortcut — the app still launches, the tray icon appears, and **New Note** still starts a Capture.
+Run these on a first run — with no `settings.json` — so the defaults are the ones a new user gets.
+
+- [ ] `Ctrl+Shift+Cmd+J` starts a Capture from a browser, from an editor, and from the Finder — the field is focused and empty each time.
+- [ ] `Ctrl+Shift+Cmd+T` starts a Task Creation from those same three applications, and never a Capture.
+- [ ] Neither keystroke reaches the application that was in front (they are intercepted, not passed through).
+- [ ] Holding either combination down starts exactly one window — one action per press, never a stream of them.
+- [ ] Neither Hotkey fights VoiceOver: with VoiceOver on, `Ctrl+Opt` commands still work as documented.
+- [ ] Pressing the Note Hotkey during a Capture already in progress leaves one capture window and does not clear what has been typed; the same for the Task Hotkey and the Task Creation window.
+- [ ] With half a Note typed and the capture window dismissed with `Escape`, then half a Task typed: neither window's text ever appears in the other, and abandoning one leaves the other's next use empty.
+- [ ] With text waiting in the Task Creation window, pressing the Note Hotkey opens a Capture and leaves the Task text exactly where it was; going back to the Task Creation window shows it still there.
+- [ ] With one Hotkey unavailable — claim `Ctrl+Shift+Cmd+T` in another app first, e.g. as a System Settings keyboard shortcut — the app still launches, the tray icon appears, and **New Task** still opens the Task Creation window while the Note Hotkey keeps working.
 - [ ] In that state the app starts normally and nothing hangs — and on a development build the terminal records the failed registration with a reason.
-- [ ] In that state **Settings** shows a message naming the combination and the reason, and pointing at the Tray Menu — not a silent or broken-looking Hotkey section.
-- [ ] Releasing the combination in the other app and relaunching Work Journal makes the Hotkey work again and the message go away.
+- [ ] In that state **Settings** names the *Task Hotkey*, the combination and the reason, and points at **New Task** — and says nothing at all about the Note Hotkey.
+- [ ] Releasing the combination in the other app and relaunching Work Journal makes that Hotkey work again and the message go away.
+- [ ] An installation that predates Tasks — a `settings.json` with no `hotkey` key but other settings in it — keeps `Ctrl+Opt+Cmd+J` for Notes after the upgrade, and gains `Ctrl+Shift+Cmd+T` for Tasks.
+- [ ] Hand-editing `settings.json` so both keys hold the same combination and relaunching leaves the Note Hotkey working, the Task Hotkey reported unavailable in Settings, and **New Task** still reachable from the Tray Menu.
 
 ## The Filter and the Nudge
 
@@ -141,19 +151,44 @@ The palette is the point of this section, and the moment to watch is the one the
 
 - [ ] Capturing at, say, 01:00 files the Note under today's local calendar day, not yesterday.
 
-## The Hotkey, remapped
+## The Hotkeys, remapped
 
-- [ ] **Change**, then pressing a combination, rebinds the Hotkey — the new one starts a Capture and the old one no longer does.
-- [ ] The remapped Hotkey still works after quitting and relaunching the app.
-- [ ] `Escape` while recording abandons it and leaves the Hotkey as it was.
-- [ ] Choosing a combination another application has registered globally (for example `Ctrl+Opt+Cmd+Space` while another tool holds it) reports the refusal, names the combination, and points at the Work Journal menu — and the previous Hotkey still works.
+- [ ] **Change** beside **Note Hotkey**, then pressing a combination, rebinds it — the new one starts a Capture and the old one no longer does. The Task Hotkey is untouched and still starts a Task Creation.
+- [ ] The same for **Task Hotkey**, with the Note Hotkey untouched.
+- [ ] The Tray Menu shows each remapped combination beside its own item straight away.
+- [ ] Both remapped Hotkeys still work after quitting and relaunching the app.
+- [ ] `Escape` while recording abandons it and leaves that Hotkey as it was.
+- [ ] Recording the combination the *other* Hotkey already holds is refused, says which one holds it, and leaves both Hotkeys working exactly as before.
+- [ ] Choosing a combination another application has registered globally (for example `Ctrl+Opt+Cmd+Space` while another tool holds it) reports the refusal, names the combination and the action, and points at the Work Journal menu — and the previous Hotkey still works.
 - [ ] Pressing a bare key, or only modifiers, records nothing.
-- [ ] Settings says in as many words that a conflict with an application's own in-window shortcut cannot be detected.
+- [ ] Settings says in as many words that a conflict with an application's own in-window shortcut cannot be detected, and that the two Hotkeys may never be the same.
+
+## Tasks
+
+- [ ] **New Task** opens the Task Creation window with the field focused — typing lands in it without clicking first.
+- [ ] Typing a line and pressing `Enter` closes the window, and focus returns to the application that was in front.
+- [ ] `Escape` closes the window and the text is gone; the next **New Task** opens empty.
+- [ ] Clicking on another application closes the window and the text is gone.
+- [ ] `Enter` on an empty field, and on a field holding only spaces, creates nothing and closes nothing.
+- [ ] Two Tasks with exactly the same description are both created and both listed.
+- [ ] **View Tasks** opens on **Open**, newest first, and a Task created while it is open appears with no manual refresh.
+- [ ] A Task's checkbox completes it immediately, with no confirmation, and it leaves the Open list at once.
+- [ ] **Completed** lists it, newest completed first; its checkbox reopens it and it returns to **Open**.
+- [ ] Clicking a Task's description opens the Editor; **Save** commits the new wording, and the list shows it.
+- [ ] **Cancel** and `Escape` both discard the edit — and `Escape` does not close the window.
+- [ ] Opening the Editor with text waiting in the Task Creation window leaves that text untouched.
+- [ ] **New Task** inside Tasks View opens the same resident Task Creation window the Hotkey does, with whatever was already typed in it.
+- [ ] **Delete** opens a confirmation naming the Task; **Cancel** leaves it there, confirming removes it for good.
+- [ ] Tasks created before quitting are still there after relaunching the app, and after a restart of the machine.
+- [ ] Tasks View and the history window can be open at the same time, and neither changes the other.
 
 ## Export
 
 - [ ] **Export all to Markdown** writes a file to the Downloads folder and names the path it wrote to.
-- [ ] The file holds every Note in the journal, each exactly once, including Notes on days outside the Filter History was last showing.
+- [ ] The file holds a `# Notes` section and a `# Tasks` section, each record exactly once, including Notes on days outside the Filter History was last showing.
+- [ ] Under `# Tasks`, Open Tasks read as `- [ ]` and Completed ones as `- [x]` with the day they were completed.
+- [ ] The line under the button names both counts — Notes and Tasks — and matches what is in the file.
+- [ ] A journal holding only Tasks exports the Tasks section alone and reports the Task count.
 - [ ] Exporting twice leaves two files rather than overwriting the first.
 - [ ] Exporting an empty journal writes a file and says so, rather than failing.
 

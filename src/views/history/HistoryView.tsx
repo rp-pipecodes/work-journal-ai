@@ -80,7 +80,7 @@ import {
   type Note,
 } from '@/journal/journal'
 import type { Desktop } from '@/platform/desktop'
-import { keysOfHotkey, type HotkeyStatus } from '@/settings/hotkey'
+import { keysOfHotkey, type HotkeyStatuses } from '@/settings/hotkey'
 import { formatDayRange } from './range-label'
 
 /**
@@ -128,7 +128,7 @@ export default function HistoryView({
   const [deleting, setDeleting] = useState<Note | null>(null)
   // Only the empty state reads this, and only to teach the fastest way in.
   // Null until the OS has been asked, and after a question it refused.
-  const [hotkey, setHotkey] = useState<HotkeyStatus | null>(null)
+  const [hotkeys, setHotkeys] = useState<HotkeyStatuses | null>(null)
   // A copy the reader asked for and has not been told about yet. What makes a
   // toast is that a copy was asked for, not that the confirmation reads
   // differently: copying the same Filter twice says the same words both times,
@@ -154,11 +154,11 @@ export default function HistoryView({
   }, [snapshot])
 
   useEffect(() => {
-    desktop.hotkeyStatus().then(setHotkey, (error: unknown) => {
+    desktop.hotkeyStatus().then(setHotkeys, (error: unknown) => {
       // The Hotkey is not what this window is for: a status that cannot be
       // read leaves the empty state on the Tray Menu wording rather than
       // saying anything about it.
-      console.error('could not read the hotkey', error)
+      console.error('could not read the hotkeys', error)
     })
   }, [desktop])
 
@@ -292,7 +292,7 @@ export default function HistoryView({
         {problem !== null && <Problem>{problem}</Problem>}
 
         <main className="flex-1 overflow-y-auto px-6 pb-5">
-          {history.state === 'empty' && <NoNotesYet hotkey={hotkey} />}
+          {history.state === 'empty' && <NoNotesYet hotkeys={hotkeys} />}
           {history.state === 'unreadable' && (
             <EmptyState
               icon={TriangleAlertIcon}
@@ -1162,16 +1162,18 @@ function Nudge({
  * unavailable or unknown: an empty state that taught a combination doing
  * nothing would be worse than the slow way in.
  */
-function NoNotesYet({ hotkey }: { hotkey: HotkeyStatus | null }) {
+function NoNotesYet({ hotkeys }: { hotkeys: HotkeyStatuses | null }) {
+  const note = hotkeys?.note
+
   return (
     <EmptyState icon={NotebookPenIcon} heading="No Notes yet">
-      {hotkey?.state === 'registered' ? (
+      {note?.state === 'registered' ? (
         <>
           {/* The same keycaps Settings reads the Hotkey back in, so what is
               taught here is what is read back there. */}
           Press{' '}
           <KbdGroup className="align-baseline">
-            {keysOfHotkey(hotkey.hotkey).map((key) => (
+            {keysOfHotkey(note.hotkey).map((key) => (
               <Kbd key={key}>{key}</Kbd>
             ))}
           </KbdGroup>

@@ -9,7 +9,7 @@
  */
 
 import type { CalendarEvent, SqlDriver } from '@/journal/journal'
-import type { HotkeyStatus } from '@/settings/hotkey'
+import type { HotkeyAction, HotkeyStatuses } from '@/settings/hotkey'
 import type { SettingsStore } from '@/settings/settings'
 import type { Theme } from '@/settings/theme'
 
@@ -18,11 +18,14 @@ export type Unlisten = () => void
 
 /**
  * The window labels. One Vite build serves every window and the label is the
- * only thing that says which — must match `CAPTURE_WINDOW`, `HISTORY_WINDOW`
- * and `SETTINGS_WINDOW` in `src-tauri/src/lib.rs`.
+ * only thing that says which — must match `CAPTURE_WINDOW`,
+ * `TASK_CREATION_WINDOW`, `HISTORY_WINDOW`, `TASKS_WINDOW` and
+ * `SETTINGS_WINDOW` in `src-tauri/src/lib.rs`.
  */
 export const CAPTURE_WINDOW = 'capture'
+export const TASK_CREATION_WINDOW = 'task-creation'
 export const HISTORY_WINDOW = 'history'
+export const TASKS_WINDOW = 'tasks'
 export const SETTINGS_WINDOW = 'settings'
 
 /** Must match `SETTINGS_FILE` in `src-tauri/src/lib.rs`. */
@@ -50,6 +53,15 @@ export const DATABASE_URL = 'sqlite:work-journal.db'
 
 /** Must match `CAPTURE_SHOWN_EVENT` in `src-tauri/src/lib.rs`. */
 export const CAPTURE_SHOWN_EVENT = 'capture://shown'
+
+/**
+ * A Task Creation is beginning. Like the capture window, the Task Creation
+ * window is built at startup and only ever shown and hidden — see
+ * docs/adr/0019-task-creation-has-its-own-resident-window.md — so it is told
+ * on being shown rather than on being built. Must match
+ * `TASK_CREATION_SHOWN_EVENT` in `src-tauri/src/lib.rs`.
+ */
+export const TASK_CREATION_SHOWN_EVENT = 'task-creation://shown'
 
 /**
  * The Tray Menu asked for yesterday's Digest. Spoken by the Rust side, which
@@ -100,6 +112,16 @@ const CAPTURE_PANEL_MARGIN = 2 * (CAPTURE_PANEL_BORDER + CAPTURE_SHADOW_GUTTER)
 export const CAPTURE_WIDTH = CAPTURE_PANEL_WIDTH + CAPTURE_PANEL_MARGIN
 const CAPTURE_HEIGHT = CAPTURE_FIELD_HEIGHT + CAPTURE_PANEL_MARGIN
 
+/**
+ * The Task Creation panel is the Capture panel's shape — one field, the same
+ * width and the same gutter — because they are the same gesture over a
+ * different record. It has nothing under the field but a refusal, so its whole
+ * geometry is that one question.
+ */
+export function taskCreationWindowHeight(refused: boolean): number {
+  return CAPTURE_HEIGHT + (refused ? CAPTURE_REFUSAL_HEIGHT : 0)
+}
+
 /** How tall the window has to be to show the field and everything under it. */
 export function captureWindowHeight(fit: CaptureFit): number {
   const predictions =
@@ -149,6 +171,14 @@ export const SYSTEM_WOKE_EVENT = 'system://woke'
  * count taken before it is now out of date.
  */
 export const JOURNAL_CHANGED_EVENT = 'journal://changed'
+
+/**
+ * The Tasks are no longer what they were: one was created, reworded, completed,
+ * reopened or deleted. Separate from `JOURNAL_CHANGED_EVENT` because the two
+ * records are separate: a window listing Tasks has nothing to re-read when a
+ * Note is corrected, and vice versa.
+ */
+export const TASKS_CHANGED_EVENT = 'tasks://changed'
 
 /** Where an export ended up — the Rust side's `ExportedFile`. */
 export interface ExportedFile {
@@ -213,6 +243,30 @@ export interface Desktop {
   fitCapture(fit: CaptureFit): Promise<void>
   /** A Capture is beginning: the window has just been shown. */
   onCaptureShown(handle: () => void): Promise<Unlisten>
+
+  /**
+   * Every Task Entry Point — the Task Hotkey, New Task in the Tray Menu, and
+   * the New Task control in Tasks View — reaches the same resident window. It
+   * is focused rather than reset, so unfinished text survives being asked for
+   * again, and an unfinished Capture is untouched either way.
+   */
+  beginTaskCreation(): Promise<void>
+  /**
+   * Ends a Task Creation, committed or abandoned. Hiding the window is the Rust
+   * side's job: it also has to hand focus back to whatever was in front.
+   */
+  dismissTaskCreation(): Promise<void>
+  /** A Task Creation is beginning: the window has just been shown. */
+  onTaskCreationShown(handle: () => void): Promise<Unlisten>
+  /**
+   * Fits the Task Creation window to the field plus the refusal under it, if
+   * there is one. Nothing under it is the resting height — must match the size
+   * built in `build_task_creation_window` on the Rust side.
+   */
+  fitTaskCreation(refused: boolean): Promise<void>
+
+  announceTasksChanged(): Promise<void>
+  onTasksChanged(handle: () => void): Promise<Unlisten>
   /** The Tray Menu wants yesterday's Digest on the clipboard. */
   onYesterdayDigestRequested(handle: () => void): Promise<Unlisten>
 
@@ -247,14 +301,15 @@ export interface Desktop {
   announceTheme(theme: Theme): Promise<void>
   onThemeChanged(handle: (theme: Theme) => void): Promise<Unlisten>
 
-  /** The Hotkey as it stands, registered or not. */
-  hotkeyStatus(): Promise<HotkeyStatus>
+  /** Both Hotkeys as they stand, each registered or not. */
+  hotkeyStatus(): Promise<HotkeyStatuses>
   /**
-   * Moves the Hotkey. Rejects with the reason the OS gave, in which case the
-   * combination in force is unchanged — the Rust side puts the old one back
-   * rather than leaving the user with none.
+   * Moves one of the two Hotkeys. Rejects with the reason the OS gave — or with
+   * the collision, since the two may never share a combination — in which case
+   * both combinations in force are unchanged: the Rust side puts the old one
+   * back rather than leaving the user with none.
    */
-  setHotkey(hotkey: string): Promise<HotkeyStatus>
+  setHotkey(action: HotkeyAction, hotkey: string): Promise<HotkeyStatuses>
 
   /**
    * Whether the app actually starts at login, asked of the OS rather than of
@@ -273,7 +328,7 @@ export interface Desktop {
   copyToClipboard(text: string): Promise<void>
 
   /** Writes a rendered export to a file, and says where it went. */
-  exportNotes(markdown: string, fileName: string): Promise<ExportedFile>
+  exportJournal(markdown: string, fileName: string): Promise<ExportedFile>
 
   /**
    * Puts a short piece of text beside the menu bar glyph. Rendered by the

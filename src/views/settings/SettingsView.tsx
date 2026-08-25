@@ -20,7 +20,11 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useTheme } from '@/components/theme-context'
 import WindowTitleBar from '@/components/WindowTitleBar'
-import { exportFileName, type Journal } from '@/journal/journal'
+import {
+  describeExport,
+  exportFileName,
+  type Journal,
+} from '@/journal/journal'
 import type {
   AppIdentity,
   CalendarAccess,
@@ -32,8 +36,11 @@ import { isTheme, type Theme } from '@/settings/theme'
 import {
   describeUnavailableHotkey,
   hotkeyForKeystroke,
+  HOTKEY_ACTIONS,
   keysOfHotkey,
+  type HotkeyAction,
   type HotkeyStatus,
+  type HotkeyStatuses,
 } from '@/settings/hotkey'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 
@@ -74,10 +81,16 @@ export default function SettingsView({
   journal: Promise<Journal>
 }) {
   const [startAtLogin, setStartAtLogin] = useState(DEFAULT_SETTINGS.startAtLogin)
-  const [hotkey, setHotkey] = useState<HotkeyStatus | null>(null)
-  // The reason the last remap was refused, if it was. Cleared by the next one.
-  const [hotkeyProblem, setHotkeyProblem] = useState<string | null>(null)
-  const [recording, setRecording] = useState(false)
+  const [hotkeys, setHotkeys] = useState<HotkeyStatuses | null>(null)
+  // The reason the last remap of each action was refused, if it was. Cleared by
+  // the next one, and kept per action: a Task Hotkey the OS refused says
+  // nothing about the Note Hotkey sitting above it.
+  const [hotkeyProblem, setHotkeyProblem] = useState<
+    Partial<Record<HotkeyAction, string>>
+  >({})
+  // Which recorder is listening, if either. One at a time: a keystroke can only
+  // belong to one of them.
+  const [recording, setRecording] = useState<HotkeyAction | null>(null)
   const [exported, setExported] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [appIdentity, setAppIdentity] = useState<AppIdentity | null>(null)
@@ -128,7 +141,7 @@ export default function SettingsView({
           desktop.calendarAccess(),
         ])
         setStartAtLogin(atLogin)
-        setHotkey(status)
+        setHotkeys(status)
         setAsking(!answered)
         setImportMeetings(stored.importMeetings)
         setImportCalendars(stored.importCalendars)
@@ -181,7 +194,7 @@ export default function SettingsView({
   // While the recorder is listening, Escape belongs to it — abandoning a
   // half-pressed combination must not take the window with it.
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
-    if (event.key === 'Escape' && !recording && !asking) {
+    if (event.key === 'Escape' && recording === null && !asking) {
       void desktop.closeWindow()
     }
   }
@@ -201,15 +214,18 @@ export default function SettingsView({
   }
 
   const remap = useCallback(
-    (next: string) => {
-      setRecording(false)
-      desktop.setHotkey(next).then(
+    (action: HotkeyAction, next: string) => {
+      setRecording(null)
+      desktop.setHotkey(action, next).then(
         (status) => {
-          setHotkey(status)
-          setHotkeyProblem(null)
+          setHotkeys(status)
+          setHotkeyProblem((problems) => ({ ...problems, [action]: undefined }))
         },
         (reason: unknown) => {
-          setHotkeyProblem(describeUnavailableHotkey(next, String(reason)))
+          setHotkeyProblem((problems) => ({
+            ...problems,
+            [action]: describeUnavailableHotkey(action, next, String(reason)),
+          }))
         },
       )
     },
@@ -274,22 +290,17 @@ export default function SettingsView({
    * on purpose: a toast, which is where the user is looking, and the line
    * under the button, which is still there once the toast has gone.
    */
-  function exportAll() {
+  function exportEverything() {
     setExporting(true)
     setExported(null)
     void (async () => {
       try {
-        const digest = await (await journal).exportAll()
-        const file = await desktop.exportNotes(
-          digest.markdown,
+        const exportedJournal = await (await journal).exportJournal()
+        const file = await desktop.exportJournal(
+          exportedJournal.markdown,
           exportFileName(new Date()),
         )
-        const said =
-          digest.noteCount === 0
-            ? `Exported an empty journal to ${file.path}.`
-            : `Exported ${digest.noteCount} Note${
-                digest.noteCount === 1 ? '' : 's'
-              } to ${file.path}.`
+        const said = describeExport(exportedJournal, file.path)
         setExported(said)
         toast.success(said)
       } catch (error) {
@@ -317,34 +328,50 @@ export default function SettingsView({
           the strip rather than from the top of the window. */}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pt-5 pb-5">
         <Group>
-          <Row
-            label="Hotkey"
-            explanation="The global combination that begins a Capture from anywhere."
-          >
-            <HotkeyRecorder
-              recording={recording}
-              hotkey={hotkey}
-              onStart={() => {
-                setRecording(true)
-                setHotkeyProblem(null)
-              }}
-              onAbandon={() => setRecording(false)}
-              onRecord={remap}
-            />
-          </Row>
+          {HOTKEY_ACTIONS.map(({ action, label, explanation }) => {
+            const status = hotkeys?.[action] ?? null
+            const refused = hotkeyProblem[action]
 
-          {hotkey?.state === 'unavailable' && (
-            <Problem>
-              {describeUnavailableHotkey(hotkey.hotkey, hotkey.reason)}
-            </Problem>
-          )}
-          {hotkeyProblem !== null && <Problem>{hotkeyProblem}</Problem>}
+            return (
+              <div key={action} className="flex flex-col gap-2">
+                <Row label={label} explanation={explanation}>
+                  <HotkeyRecorder
+                    label={label}
+                    recording={recording === action}
+                    hotkey={status}
+                    onStart={() => {
+                      setRecording(action)
+                      setHotkeyProblem((problems) => ({
+                        ...problems,
+                        [action]: undefined,
+                      }))
+                    }}
+                    onAbandon={() => setRecording(null)}
+                    onRecord={(next) => remap(action, next)}
+                  />
+                </Row>
+
+                {status?.state === 'unavailable' && (
+                  <Problem>
+                    {describeUnavailableHotkey(
+                      action,
+                      status.hotkey,
+                      status.reason,
+                    )}
+                  </Problem>
+                )}
+                {refused !== undefined && <Problem>{refused}</Problem>}
+              </div>
+            )
+          })}
 
           <Aside>
-            A combination another application has claimed globally will be refused
-            here and reported. A combination an application uses only inside its
-            own window cannot be detected — the Hotkey will simply take precedence
-            there.
+            The two Hotkeys are independent, and may never be the same
+            combination — one that is already the other will be refused here. A
+            combination another application has claimed globally will be refused
+            and reported too. A combination an application uses only inside its
+            own window cannot be detected — the Hotkey will simply take
+            precedence there.
           </Aside>
         </Group>
 
@@ -451,9 +478,9 @@ export default function SettingsView({
         <Group>
           <Row
             label="Export"
-            explanation="Every Note as Markdown, in your Downloads folder — nothing captured here is locked in."
+            explanation="Every Note and Task as Markdown, in your Downloads folder — nothing kept here is locked in."
           >
-            <Button variant="outline" size="sm" onClick={exportAll} disabled={exporting}>
+            <Button variant="outline" size="sm" onClick={exportEverything} disabled={exporting}>
               {exporting ? 'Exporting…' : 'Export all to Markdown'}
             </Button>
           </Row>
@@ -548,12 +575,15 @@ function CalendarTicks({
  * they are held down.
  */
 function HotkeyRecorder({
+  label,
   recording,
   hotkey,
   onStart,
   onAbandon,
   onRecord,
 }: {
+  /** Which Hotkey this is, so the two recorders are told apart out loud. */
+  label: string
   recording: boolean
   hotkey: HotkeyStatus | null
   onStart: () => void
@@ -594,13 +624,13 @@ function HotkeyRecorder({
 
   return (
     <div className="flex items-center gap-2">
-      <KbdGroup role="group" aria-label="Current Hotkey">
+      <KbdGroup role="group" aria-label={`Current ${label}`}>
         {/* Nothing yet while the Rust side is still being asked. */}
         {(hotkey === null ? ['…'] : keysOfHotkey(hotkey.hotkey)).map((key) => (
           <Kbd key={key}>{key}</Kbd>
         ))}
       </KbdGroup>
-      <Button variant="outline" size="sm" onClick={onStart}>
+      <Button variant="outline" size="sm" onClick={onStart} aria-label={`Change ${label}`}>
         Change
       </Button>
     </div>

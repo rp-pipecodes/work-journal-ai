@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { describeUnavailableHotkey, hotkeyForKeystroke } from './hotkey'
+import {
+  describeUnavailableHotkey,
+  hotkeyAction,
+  hotkeyForKeystroke,
+  HOTKEY_ACTIONS,
+} from './hotkey'
 
 describe('hotkeyForKeystroke', () => {
   const keystroke = {
@@ -69,12 +74,33 @@ describe('hotkeyForKeystroke', () => {
 describe('describeUnavailableHotkey', () => {
   it('says what failed, why, and where to go instead', () => {
     const message = describeUnavailableHotkey(
-      'Ctrl+Alt+Cmd+J',
+      'note',
+      'Ctrl+Shift+Cmd+J',
       'the combination belongs to another application',
     )
 
-    expect(message).toContain('Ctrl+Alt+Cmd+J')
+    expect(message).toContain('Ctrl+Shift+Cmd+J')
     expect(message).toContain('the combination belongs to another application')
     expect(message).toMatch(/menu bar|tray|work journal menu/i)
+  })
+
+  it('names the action, so the fallback it points at is the right one', () => {
+    expect(describeUnavailableHotkey('note', 'Ctrl+K', 'refused')).toContain(
+      'New Note',
+    )
+    expect(describeUnavailableHotkey('task', 'Ctrl+K', 'refused')).toContain(
+      'New Task',
+    )
+    expect(describeUnavailableHotkey('task', 'Ctrl+K', 'refused')).toContain(
+      'Task Hotkey',
+    )
+  })
+})
+
+describe('HOTKEY_ACTIONS', () => {
+  it('is the two actions, each with its own name and Tray Menu fallback', () => {
+    expect(HOTKEY_ACTIONS.map((each) => each.action)).toEqual(['note', 'task'])
+    expect(hotkeyAction('note').label).toBe('Note Hotkey')
+    expect(hotkeyAction('task').trayItem).toBe('New Task')
   })
 })

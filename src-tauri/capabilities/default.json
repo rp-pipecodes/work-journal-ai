@@ -4,7 +4,9 @@
   "description": "enables the default permissions",
   "windows": [
     "capture",
+    "task-creation",
     "history",
+    "tasks",
     "settings"
   ],
   "permissions": [

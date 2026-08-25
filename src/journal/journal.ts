@@ -52,6 +52,37 @@ export interface Note {
 }
 
 /**
+ * A work commitment the user intends, or intended, to complete — a record
+ * beside a Note rather than a kind of one: Notes recover work that happened,
+ * Tasks hold work that remains or preserve that it was done. See
+ * docs/adr/0014-tasks-are-first-class-work-commitments.md.
+ *
+ * A Task has no Project, no category and no relation to a Note. It is Open or
+ * Completed, and editable in either state.
+ */
+export interface Task {
+  id: string
+  /**
+   * The required single line that says what the Task is. Trimmed at the ends,
+   * verbatim within — including whatever Unicode the user wrote, and including
+   * words that look like a schedule, which nothing here interprets.
+   */
+  description: string
+  /** UTC ISO-8601. The instant it came into existence, and never changes. */
+  createdAt: string
+  /**
+   * When the commitment was completed, or null while it is Open. Reopening
+   * clears it: that is the whole of what reopening is.
+   */
+  completedAt: string | null
+}
+
+/** Whether a Task is still a commitment, or a record that one was kept. */
+export function isOpen(task: Task): boolean {
+  return task.completedAt === null
+}
+
+/**
  * One event on the user's calendar, as the machine hands it over — see
  * `Desktop.todaysCalendarEvents`. Nothing here is a decision: which of these
  * become Notes is the core's, below.
@@ -130,6 +161,18 @@ export interface Digest {
   markdown: string
   /** Exactly the number of bullets in `markdown`. */
   noteCount: number
+}
+
+/**
+ * The whole journal as one Markdown file, with what went into it. Notes and
+ * Tasks are separate top-level sections, and both counts are reported: an
+ * export of a journal holding only Tasks has to say so rather than read as an
+ * export of nothing.
+ */
+export interface JournalExport {
+  markdown: string
+  noteCount: number
+  taskCount: number
 }
 
 /** What a keystroke during a Capture means. */
@@ -226,16 +269,50 @@ export interface Journal {
    */
   digest(filter: Filter): Promise<Digest>
   /**
-   * Every Note in the journal as Markdown, under a heading for each day — the
-   * way out of the SQLite file, so nothing captured here is locked in. Every
-   * Note appears exactly once, whatever Filter the reader last looked at.
+   * The whole journal as Markdown — the way out of the SQLite file, so nothing
+   * kept here is locked in. Notes sit under a heading for each day and Tasks
+   * under Open and Completed, as two top-level sections: they are separate
+   * records, and a file that mixed them would say they are not.
    *
-   * An Export is rendered exactly as a Digest is, and so has the same shape,
-   * but it is not one: a Digest is bound to the Filter on screen and an Export
-   * ignores the Filter entirely. It is never about one Project, so a Note with
-   * one always keeps its `#name` prefix.
+   * The Notes half is rendered exactly as a Digest is, but it is not one: a
+   * Digest is bound to the Filter on screen and an export ignores the Filter
+   * entirely. It is never about one Project, so a Note with one always keeps
+   * its `#name` prefix.
    */
-  exportAll(): Promise<Digest>
+  exportJournal(): Promise<JournalExport>
+  /**
+   * Commits one Task. The description is trimmed at its ends and otherwise
+   * kept verbatim; an empty one is refused rather than stored, because a Task
+   * that says nothing is not a commitment. Duplicates are ordinary — two days
+   * can owe the same thing — so nothing is checked against what is already
+   * there.
+   */
+  createTask(description: string): Promise<Task>
+  /**
+   * The commitments that remain, newest first. In this slice every Open Task
+   * is Unscheduled, so Task Created At is the whole of the order.
+   */
+  openTasks(): Promise<Task[]>
+  /** The commitments that were kept, most recently completed first. */
+  completedTasks(): Promise<Task[]>
+  /**
+   * Rewords a Task. Task Created At is untouched, and so is the state: a Task
+   * remains editable whether it is Open or Completed.
+   */
+  editTaskDescription(id: string, description: string): Promise<Task>
+  /**
+   * Marks the commitment kept, recording when. Never asks first — completing
+   * is reversible, and a confirmation on the most ordinary action in the app
+   * would be in the way every single time.
+   */
+  completeTask(id: string): Promise<Task>
+  /** Puts the commitment back: Task Completed At is removed, not kept. */
+  reopenTask(id: string): Promise<Task>
+  /**
+   * Removes a Task permanently. There is no trash, no archive and no undo —
+   * which is why this one is the only Task action that is confirmed.
+   */
+  deleteTask(id: string): Promise<void>
   /**
    * Project names currently on Notes, matched by case-insensitive prefix.
    * Distinct and sorted — there is no registry, so a name with no remaining
@@ -273,6 +350,66 @@ interface NoteRow {
   edited_at: string | null
   origin: string
 }
+
+interface TaskRow {
+  id: string
+  description: string
+  created_at: string
+  completed_at: string | null
+}
+
+const INSERT_TASK = `
+  INSERT INTO tasks (id, description, created_at, completed_at)
+  VALUES (?, ?, ?, NULL)
+`
+
+/** Every read returns a whole Task; only the predicate and the order differ. */
+const SELECT_TASKS = `
+  SELECT id, description, created_at, completed_at
+  FROM tasks
+`
+
+const SELECT_TASK = `
+  ${SELECT_TASKS}
+  WHERE id = ?
+`
+
+/** Newest commitment first: every Open Task here is Unscheduled. */
+const SELECT_OPEN_TASKS = `
+  ${SELECT_TASKS}
+  WHERE completed_at IS NULL
+  ORDER BY created_at DESC, id DESC
+`
+
+/** Most recently kept first — a different question, and a different order. */
+const SELECT_COMPLETED_TASKS = `
+  ${SELECT_TASKS}
+  WHERE completed_at IS NOT NULL
+  ORDER BY completed_at DESC, id DESC
+`
+
+/** Oldest first, both states together: the order an export reads in. */
+const SELECT_ALL_TASKS_FOR_EXPORT = `
+  ${SELECT_TASKS}
+  ORDER BY created_at ASC, id ASC
+`
+
+/**
+ * The description is the only changeable column. `created_at` is never in an
+ * UPDATE anywhere in the app, and `completed_at` moves only through completing
+ * and reopening — which are states, not edits.
+ */
+const UPDATE_TASK_DESCRIPTION = `
+  UPDATE tasks SET description = ? WHERE id = ?
+`
+
+const UPDATE_TASK_COMPLETED_AT = `
+  UPDATE tasks SET completed_at = ? WHERE id = ?
+`
+
+const DELETE_TASK = `
+  DELETE FROM tasks WHERE id = ?
+`
 
 const INSERT_NOTE = `
   INSERT INTO notes (id, body, project, captured_at, journal_day, edited_at, origin)
@@ -615,15 +752,93 @@ export function createJournal({
       })
     },
 
-    async exportAll() {
-      const rows = await driver.select<NoteRow>(SELECT_ALL_NOTES_FOR_EXPORT, [])
+    async exportJournal() {
+      const [noteRows, taskRows] = await Promise.all([
+        driver.select<NoteRow>(SELECT_ALL_NOTES_FOR_EXPORT, []),
+        driver.select<TaskRow>(SELECT_ALL_TASKS_FOR_EXPORT, []),
+      ])
       // An export always spans whatever the journal holds, so every day is
       // named — a file with unlabelled bullets is not a journal — and it is
       // never about one Project, so filing is written on the bullet.
-      return renderDigest(rows.map(toNote), {
+      const notes = renderDigest(noteRows.map(toNote), {
         headings: true,
         projectPrefixes: true,
       })
+
+      return renderExport(notes, taskRows.map(toTask))
+    },
+
+    async createTask(description) {
+      const said = taskDescription(description)
+      const task: Task = {
+        id: crypto.randomUUID(),
+        description: said,
+        createdAt: clock.now().toISOString(),
+        completedAt: null,
+      }
+
+      await driver.execute(INSERT_TASK, [
+        task.id,
+        task.description,
+        task.createdAt,
+      ])
+
+      return task
+    },
+
+    async openTasks() {
+      const rows = await driver.select<TaskRow>(SELECT_OPEN_TASKS, [])
+      return rows.map(toTask)
+    },
+
+    async completedTasks() {
+      const rows = await driver.select<TaskRow>(SELECT_COMPLETED_TASKS, [])
+      return rows.map(toTask)
+    },
+
+    async editTaskDescription(id, description) {
+      const said = taskDescription(description)
+      const task = await readTask(driver, id)
+
+      if (said === task.description) {
+        return task
+      }
+
+      await driver.execute(UPDATE_TASK_DESCRIPTION, [said, id])
+
+      return { ...task, description: said }
+    },
+
+    async completeTask(id) {
+      const task = await readTask(driver, id)
+
+      // Completing what is already completed must not move the instant it was
+      // completed at: the Completed list is ordered by it.
+      if (!isOpen(task)) {
+        return task
+      }
+
+      const completedAt = clock.now().toISOString()
+      await driver.execute(UPDATE_TASK_COMPLETED_AT, [completedAt, id])
+
+      return { ...task, completedAt }
+    },
+
+    async reopenTask(id) {
+      const task = await readTask(driver, id)
+
+      if (isOpen(task)) {
+        return task
+      }
+
+      await driver.execute(UPDATE_TASK_COMPLETED_AT, [null, id])
+
+      return { ...task, completedAt: null }
+    },
+
+    async deleteTask(id) {
+      await readTask(driver, id)
+      await driver.execute(DELETE_TASK, [id])
     },
 
     async projectPredictions(prefix) {
@@ -685,6 +900,61 @@ function renderDigest(
 }
 
 /**
+ * The whole journal as one file: the Notes already rendered, and the Tasks
+ * under Open and Completed beside them. Two top-level sections, because a Note
+ * and a Task are separate records and a file that ran them together would say
+ * they are not.
+ *
+ * A section with nothing in it is left out entirely rather than written as an
+ * empty heading, so a journal of Tasks alone exports as Tasks rather than as
+ * Notes that are not there — and an empty journal exports as nothing at all.
+ *
+ * `tasks` must be in export order: oldest first, both states together.
+ */
+function renderExport(notes: Digest, tasks: Task[]): JournalExport {
+  const open = tasks.filter(isOpen)
+  const completed = tasks.filter((task) => !isOpen(task))
+
+  const sections: string[] = []
+
+  if (notes.noteCount > 0) {
+    sections.push(`# Notes\n\n${notes.markdown}`)
+  }
+
+  if (tasks.length > 0) {
+    const parts: string[] = ['# Tasks']
+    if (open.length > 0) {
+      parts.push(`## Open\n${open.map(taskBullet).join('\n')}`)
+    }
+    if (completed.length > 0) {
+      parts.push(`## Completed\n${completed.map(taskBullet).join('\n')}`)
+    }
+    sections.push(parts.join('\n\n'))
+  }
+
+  return {
+    markdown: sections.join('\n\n'),
+    noteCount: notes.noteCount,
+    taskCount: tasks.length,
+  }
+}
+
+/**
+ * One Task as Markdown reads a commitment: a checkbox saying which state it is
+ * in, the description as written, and — only when there is one — the day it was
+ * completed. Absent metadata is omitted rather than written as a blank, so a
+ * line says nothing the journal does not know.
+ */
+function taskBullet(task: Task): string {
+  if (task.completedAt === null) {
+    return `- [ ] ${task.description}`
+  }
+
+  const completed = formatDigestDay(journalDayFor(new Date(task.completedAt)))
+  return `- [x] ${task.description} (completed ${completed})`
+}
+
+/**
  * What a bullet says before the Body: `#name ` when the Note has a Project and
  * the rendering is not already about one, and nothing otherwise. An Unfiled
  * Note is never labelled — a bullet with no marker is one nobody filed.
@@ -703,6 +973,33 @@ export function describeCopiedDigest(digest: Digest): string {
     return 'No Notes to copy.'
   }
   return `Copied ${digest.noteCount} Note${digest.noteCount === 1 ? '' : 's'}.`
+}
+
+/**
+ * What an export is worth saying back: both counts and where the file went. A
+ * journal holding only Tasks says so, rather than reporting no Notes and
+ * reading as an export that carried nothing.
+ */
+export function describeExport(
+  exported: JournalExport,
+  path: string,
+): string {
+  const { noteCount, taskCount } = exported
+
+  if (noteCount === 0 && taskCount === 0) {
+    return `Exported an empty journal to ${path}.`
+  }
+
+  const counted = [
+    noteCount > 0 ? plural(noteCount, 'Note') : null,
+    taskCount > 0 ? plural(taskCount, 'Task') : null,
+  ].filter((part) => part !== null)
+
+  return `Exported ${counted.join(' and ')} to ${path}.`
+}
+
+function plural(count: number, thing: string): string {
+  return `${count} ${thing}${count === 1 ? '' : 's'}`
 }
 
 /**
@@ -1134,6 +1431,51 @@ async function read(driver: SqlDriver, id: string): Promise<Note> {
   }
 
   return toNote(row)
+}
+
+/**
+ * The Task an operation was asked to change. Every Task correction starts
+ * here, so changing one that is no longer there fails loudly rather than
+ * silently updating nothing.
+ */
+async function readTask(driver: SqlDriver, id: string): Promise<Task> {
+  const [row] = await driver.select<TaskRow>(SELECT_TASK, [id])
+
+  if (row === undefined) {
+    throw new Error(`No such Task: ${id}.`)
+  }
+
+  return toTask(row)
+}
+
+/**
+ * A Task Description as the journal stores it: trimmed at its ends, and
+ * otherwise exactly what was written — internal whitespace and every kind of
+ * Unicode survive verbatim, and nothing in it is read for meaning. There is no
+ * length limit; the only rule is that it says something, on one line.
+ */
+function taskDescription(description: string): string {
+  if (/[\n\r]/.test(description)) {
+    throw new Error(
+      'A Task Description is one line: it cannot contain a line break.',
+    )
+  }
+
+  const said = description.trim()
+  if (said === '') {
+    throw new Error('A Task Description cannot be empty.')
+  }
+
+  return said
+}
+
+function toTask(row: TaskRow): Task {
+  return {
+    id: row.id,
+    description: row.description,
+    createdAt: row.created_at,
+    completedAt: row.completed_at,
+  }
 }
 
 /**

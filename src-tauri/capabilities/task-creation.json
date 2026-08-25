@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "task-creation",
+  "description": "Task Creation grows by one row when a Task is refused; like Capture it must never gain core:window:allow-close",
+  "windows": [
+    "task-creation"
+  ],
+  "permissions": [
+    "core:window:allow-set-size"
+  ]
+}

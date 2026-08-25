@@ -1,0 +1,209 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { Journal } from '@/journal/journal'
+import {
+  CAPTURE_FIELD_HEIGHT,
+  CAPTURE_PANEL_BORDER,
+  CAPTURE_REFUSAL_HEIGHT,
+  CAPTURE_SHADOW_GUTTER,
+  type Desktop,
+} from '@/platform/desktop'
+
+/**
+ * One line, one keystroke — a Task rather than a Note. The window behind this
+ * view is created at startup and only ever shown and hidden, and it is its own
+ * window rather than a mode of the capture one so that an unfinished Capture
+ * and an unfinished Task Creation can both be sitting there at once; see
+ * docs/adr/0019-task-creation-has-its-own-resident-window.md.
+ *
+ * The field is reset when a Task Creation *ends* rather than when one begins:
+ * an Entry Point reached while the window is already up focuses it and changes
+ * nothing, so what was typed survives being asked for again, and Escape or a
+ * commit is what leaves the next one empty.
+ *
+ * Nothing here is rendered into a portal, and nothing here may be: the window
+ * is transparent, undecorated and only as tall as this view asks for, so
+ * anything drawn outside the panel is clipped by the window's own edge.
+ */
+export default function TaskCreationView({
+  desktop,
+  journal,
+}: {
+  desktop: Desktop
+  journal: Promise<Journal>
+}) {
+  const [description, setDescription] = useState('')
+  // How many times this Task Creation has been refused. Counted rather than
+  // flagged so a second refusal is a second thing on screen: the message
+  // invites another Enter, and one that changed nothing would read as the
+  // silence it replaced.
+  const [refusals, setRefusals] = useState(0)
+  const field = useRef<HTMLInputElement>(null)
+
+  const dismiss = useCallback(async () => {
+    // The next Task Creation starts empty, whether this one committed or not.
+    setDescription('')
+    setRefusals(0)
+    await desktop.dismissTaskCreation()
+  }, [desktop])
+
+  const commit = useCallback(
+    async (said: string) => {
+      // Nothing to commit is not a refusal: it is a keystroke that means
+      // nothing yet, exactly as it is during a Capture.
+      if (said.trim() === '') return
+
+      let task
+      try {
+        task = await (await journal).createTask(said)
+      } catch (error) {
+        // A Task that could not be stored must not vanish: leave the window
+        // open with the description still in it, and say so, since a window
+        // that merely stayed open reads as a missed keystroke.
+        console.error('could not commit the Task', error)
+        setRefusals((refused) => refused + 1)
+        return
+      }
+
+      // A Tasks View already on screen has no other way to learn of it, and the
+      // announcement has to leave before the window goes — dismissing hides the
+      // whole app. It is not the Task Creation's problem either way: the Task
+      // is stored regardless.
+      if (task !== null) {
+        try {
+          await desktop.announceTasksChanged()
+        } catch (error) {
+          console.error('could not announce the Task', error)
+        }
+      }
+
+      await dismiss()
+    },
+    [desktop, journal, dismiss],
+  )
+
+  useEffect(() => {
+    // The page behind the window has to give way to the rounded corners drawn
+    // below; only this window's document is marked, since the bundle is shared.
+    document.body.classList.add('capture-window')
+
+    field.current?.focus()
+
+    // Shown again after having been hidden: take focus, and change nothing
+    // else. The window is only ever hidden with an empty field.
+    const shown = desktop.onTaskCreationShown(() => field.current?.focus())
+    // Clicking away is an abandon, not a Task Creation left floating over the
+    // screen.
+    const blurred = desktop.onWindowBlurred(() => void dismiss())
+
+    return () => {
+      document.body.classList.remove('capture-window')
+      void shown.then((stop) => stop())
+      void blurred.then((stop) => stop())
+    }
+  }, [desktop, dismiss])
+
+  // The refusal grows the window rather than sharing the field's room, so the
+  // description the user is being told about stays in sight and stays editable.
+  // A window of the wrong size is worth logging and nothing more: the Task is
+  // unaffected either way.
+  useEffect(() => {
+    desktop.fitTaskCreation(refusals > 0).catch((error: unknown) => {
+      console.error('could not fit the Task Creation window', error)
+    })
+  }, [desktop, refusals])
+
+  function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Escape') {
+      void dismiss()
+      return
+    }
+    if (event.key === 'Enter') {
+      void commit(description)
+    }
+  }
+
+  return (
+    <div
+      className="flex h-screen flex-col"
+      style={{ padding: CAPTURE_SHADOW_GUTTER }}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) void dismiss()
+      }}
+    >
+      <div
+        style={{ borderWidth: CAPTURE_PANEL_BORDER }}
+        className="flex shrink-0 flex-col overflow-hidden rounded-2xl border-border bg-background shadow-[0_12px_24px_-4px_rgb(0_0_0/0.28),0_2px_8px_-2px_rgb(0_0_0/0.16)] dark:shadow-[0_12px_24px_-4px_rgb(0_0_0/0.6),0_2px_8px_-2px_rgb(0_0_0/0.45)]"
+      >
+        <div className="relative shrink-0">
+          <input
+            ref={field}
+            type="text"
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            onKeyDown={onKeyDown}
+            aria-label="What do you need to do?"
+            placeholder="What do you need to do?"
+            aria-describedby={
+              refusals > 0 ? `${BARGAIN_ID} ${PROBLEM_ID}` : BARGAIN_ID
+            }
+            autoComplete="off"
+            spellCheck={false}
+            style={{ height: CAPTURE_FIELD_HEIGHT }}
+            className="w-full rounded-2xl bg-transparent pl-5 pr-52 type-field outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
+          />
+          <div
+            id={BARGAIN_ID}
+            className="pointer-events-none absolute inset-y-0 right-5 flex select-none items-center gap-3 type-micro text-muted-foreground/70"
+          >
+            <Hint glyph="↵" reading="Return creates the Task." what="creates" />
+            <Hint glyph="esc" reading="Escape abandons." what="abandons" />
+          </div>
+        </div>
+        {refusals > 0 && (
+          <p
+            key={refusals}
+            id={PROBLEM_ID}
+            role="alert"
+            style={{ height: CAPTURE_REFUSAL_HEIGHT }}
+            className="flex shrink-0 items-center px-5 type-meta text-destructive"
+          >
+            {TASK_REFUSED}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Half of the bargain: a key cap and what pressing it is worth. Said twice and
+ * never at once — a glyph beside a verb for a reader who can see the key, and
+ * the whole sentence for one who cannot.
+ */
+function Hint({
+  glyph,
+  reading,
+  what,
+}: {
+  glyph: string
+  reading: string
+  what: string
+}) {
+  return (
+    <>
+      <span className="sr-only">{reading}</span>
+      <span aria-hidden="true" className="flex items-center gap-1">
+        <kbd className="rounded-sm border border-border bg-muted px-1 py-px font-sans type-micro leading-none text-muted-foreground">
+          {glyph}
+        </kbd>
+        {what}
+      </span>
+    </>
+  )
+}
+
+const PROBLEM_ID = 'task-creation-problem'
+const BARGAIN_ID = 'task-creation-bargain'
+
+/** What a refused Task Creation says, in the app's voice rather than the error's. */
+const TASK_REFUSED = 'That Task could not be stored. Press Enter to retry.'
