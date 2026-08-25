@@ -312,8 +312,10 @@ export default function SettingsView({
     >
       <WindowTitleBar />
 
-      {/* Everything the window says scrolls; the strip above it does not. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pb-5">
+      {/* Everything the window says scrolls; the strip above it does not. The
+          first row keeps the clear space it always had, measured from under
+          the strip rather than from the top of the window. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pt-5 pb-5">
         <Group>
           <Row
             label="Hotkey"

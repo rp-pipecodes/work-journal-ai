@@ -193,7 +193,10 @@ describe('the window chrome', () => {
     // is an overlay, so whatever is drawn at the top of the window is drawn
     // underneath the close, minimise and zoom buttons.
     expect(strip.parentElement?.firstElementChild).toBe(strip)
-    expect(strip.parentElement?.contains(header())).toBe(true)
+    expect(
+      strip.compareDocumentPosition(header()) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
   })
 })
 
