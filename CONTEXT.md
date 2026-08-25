@@ -9,8 +9,71 @@ A single dated line of text about the user's work. The unit of everything — th
 _Avoid_: Entry, log, item, memo
 
 **Task**:
-A work commitment the user intends to complete. A first-class record beside a Note, not a kind or state of Note: Notes recover work that happened; Tasks hold work that remains to be done.
+A record of a work commitment the user intends, or intended, to complete. A first-class record beside a Note, not a kind or state of Note: Notes recover work that happened; Tasks hold work that remains to be done or preserve that it was completed. A Task is never filed under a Project or category, and remains editable in either state.
 _Avoid_: Todo, action item, reminder, Note
+
+**Task Description**:
+The required single line of free text that says what a Task is. Leading and trailing whitespace is removed, while internal whitespace and all Unicode are preserved verbatim whether precise or vague; schedule words in it are never interpreted or removed automatically. Two Tasks may have the same Task Description, and there is no arbitrary domain length limit.
+_Avoid_: Body, title, AI prompt
+
+**Task Creation**:
+The explicit act of writing a Task Description and optionally choosing Scheduled For and recurrence in its own always-ready window. `Enter` from the description or the Create action commits one Task; an empty description fails, while Escape or closing hides the window, commits nothing, and the next Task Creation starts empty. Date is the prerequisite for time and recurrence; clearing it also clears time, and asks before stopping an existing recurrence.
+_Avoid_: Capture, task inference, draft
+
+**Open Task**:
+A Task whose commitment has not been completed. It may be Unscheduled or have a Scheduled For; once that moment passes, it is overdue but remains open.
+_Avoid_: Active todo, pending item
+
+**Completed Task**:
+A Task whose commitment was completed. It remains a Task and does not become or automatically create a Note; its Task Description remains editable, while Scheduled For and recurrence may change only after it is reopened. Reopening preserves its former schedule, which may make it immediately overdue.
+_Avoid_: Done Note, archived task
+
+**Task Created At**:
+The immutable instant a Task first came into existence. Used to order Unscheduled Tasks newest first, never as a substitute for Scheduled For.
+_Avoid_: Created date, task date
+
+**Task Completed At**:
+The instant a Task or Task Occurrence was completed. Used to order Completed Tasks newest first; removed when an ordinary Task is reopened or the latest recurring completion is undone.
+_Avoid_: Done date, archived at
+
+**Scheduled For**:
+The optional local calendar date when the user intends to act on a Task, with an optional minute-precise time. Its civil-time components are the source of truth and follow the user across timezone changes rather than preserving an original UTC instant. A past value is valid and makes an Open Task overdue; a date and time may produce a future Task Alert, while a date alone may not and never implies a hidden default time.
+_Avoid_: Due At, deadline, reminder time
+
+**Unscheduled Task**:
+An Open Task with no Scheduled For. It is still a complete Task, not a draft waiting for a date.
+
+**Task Alert**:
+A local operating-system alert and sound derived from the journal's authoritative Open Task state for a future Scheduled For that includes a time. Only that one Open Task Occurrence is registered with macOS; completion or recurrence edits cancel it and register its successor. It shows the full Task Description and presents even while Work Journal is active, leaving preview and sound suppression to macOS. Clicking it opens Tasks View focused on that Task; it has no Complete or Snooze actions, and an already-past schedule never produces a retroactive Alert. A nonexistent daylight-saving time fires at the first valid instant afterward that day; a repeated time fires once at its first occurrence. Failed operating-system scheduling never rolls back the Task; future Alerts are reconciled on launch, wake, permission restoration, and schedule changes. It is not a remote push message and is never required for the Task itself to work.
+_Avoid_: Push notification, reminder
+
+**Task Alert Permission**:
+The operating-system grant that allows Task Alerts. Asked for in context when the first Task with a date and time is saved; refusal leaves the Task intact and is shown in Settings with the manual path to Work Journal's notification permission and an action that opens System Settings. It must be reversed by the user because the app cannot force or repeat the system prompt. Restoring it schedules future Alerts but never replays past ones.
+_Avoid_: Notifications toggle, alert setting
+
+**Recurring Task**:
+A Task whose Scheduled For follows a fixed daily, weekly, monthly, yearly, or every-N-units calendar cadence until the recurrence is stopped. A weekly cadence may select multiple weekdays while retaining exactly one Open Task Occurrence: Monday-based weeks are counted from the week containing the series start, selected days before that start are ignored, and completion advances to the next selected day rather than producing simultaneous Tasks. Editing the starting date, selected days, or cadence immediately reanchors the series and replaces its Open occurrence without recording a completion. A series created from a past starting date opens on its latest elapsed slot, and completing an overdue occurrence advances to the next future slot, so missed slots never form a backlog. Monthly and yearly cadence retains its intended calendar anchor through shorter months: January 31 falls back to February's last day then returns to March 31, and February 29 returns in leap years after falling back to February 28.
+_Avoid_: Repeating todo, generated tasks
+
+**Task Occurrence**:
+One scheduled commitment within a Recurring Task. Completed occurrences remain in an expandable history attached to that Task rather than appearing among ordinary Completed Tasks, while the Recurring Task continues with its next Open occurrence.
+_Avoid_: Task copy, child task
+
+**Undo Completion**:
+Restore the most recently completed Task Occurrence as the one Open occurrence and remove the occurrence that completion advanced to, but only while that successor remains Open and unchanged. Older completions, or any completion whose successor was edited or completed, stay historical because undoing them would either create two Open occurrences or destroy later decisions.
+_Avoid_: Reopen occurrence, roll back series
+
+**Stop Recurrence**:
+Remove the recurrence rule from a Recurring Task while retaining its current Task and completed Task Occurrences. There are no one-occurrence exceptions: recurrence edits affect the continuing series, while Deletion removes the Task and its occurrence history.
+_Avoid_: End series, cancel repeat
+
+**Tasks View**:
+The dedicated, independently openable window for creating and managing Tasks; it may coexist with History because Tasks are organized prospectively by state and schedule, while Notes are organized retrospectively by Journal Day. Opens on Open Tasks grouped as Overdue, Today, Upcoming, and Unscheduled; Completed Tasks are a separate view, with no arbitrary filters or Search. A checkbox completes a Task immediately without confirmation; Recurring Tasks advance and expose Undo Completion while safe. Scheduled groups sort earliest first, Unscheduled sorts newest Task Created At first, and Completed sorts newest Task Completed At first. Every Task surface observes the same journal state immediately, and group membership refreshes at local midnight and whenever the app wakes or regains focus.
+_Avoid_: Task History, Notes filter
+
+**Task Editor**:
+The sheet inside Tasks View that changes an existing Task. Save commits the changes; Cancel or closing discards them. It never reuses the resident Task Creation window, whose unfinished new Task therefore remains untouched.
+_Avoid_: Task Creation, edit window
 
 **Body**:
 The text content of a Note: a single line, no line breaks. Editable forever. One line is a deliberate limit — a Note is a remark, not a document — and it means every Note renders as exactly one bullet in a Digest.
@@ -53,19 +116,27 @@ _Avoid_: Autocomplete, suggestion chip, typeahead
 ## Getting in
 
 **Entry Point**:
-A way to begin a Capture. There are three, and each works when the others cannot: the Hotkey, the Tray Menu, and launching the app while it is already running.
-_Avoid_: Trigger, invocation
+A way to begin either a Capture or Task creation. Notes and Tasks have distinct Entry Points so choosing one is always explicit.
+_Avoid_: Trigger, invocation, inference
 
-**Hotkey**:
-The global keyboard shortcut that begins a Capture. The fastest Entry Point and the only one that can be unavailable — macOS may withhold the permission it needs, or the user may be on a managed machine.
-_Avoid_: Shortcut, keybinding, accelerator
+**Note Hotkey**:
+The global keyboard shortcut that begins a Capture. Defaults to `Ctrl+Shift+Cmd+J` for a new user and never replaces a combination an existing user chose. One of the Note Entry Points beside the Tray Menu and launching the app while it is already running.
+_Avoid_: Hotkey, shortcut, keybinding, accelerator
+
+**Task Hotkey**:
+The global keyboard shortcut that begins Task Creation. Defaults to `Ctrl+Shift+Cmd+T` for a new user and never replaces a combination an existing user chose. One of the Task Entry Points beside the Tray Menu and the New Task control in Tasks View; distinct from the Note Hotkey so the record type is explicit before any text is entered.
+_Avoid_: Hotkey, shortcut, keybinding, accelerator
+
+**Hotkey Assignment**:
+The independently stored combination and registration status of either Note Hotkey or Task Hotkey. The two may never share a combination: a refused remap leaves both previous registrations intact, while duplicate stored values at launch give precedence to Note Hotkey and leave Task Hotkey unavailable with its Tray Menu fallback. Invoking either while its input window exists focuses that window without resetting it, and invoking one never discards text waiting in the other.
+_Avoid_: Shortcut setting, key binding
 
 **Tray Menu**:
-The menu bar icon's menu. The Entry Point that always works, so it is the fallback rather than a duplicate of the Hotkey. Also the one place the journal is read back without opening a window: Yesterday's Digest is copied from here.
+The menu bar icon's menu. The Entry Point that always works, offering both New Note and New Task so it is the fallback when either configured combination is unavailable. Also the one place the journal is read back without opening a window: Yesterday's Digest is copied from here.
 _Avoid_: Menu bar, status item
 
 **Tray Count**:
-How many Captured Notes today's Journal Day holds, shown beside the menu bar glyph. The app solicits nothing — no prompts, no scheduled nudges — so this is the only reminder to journal there is, and the only reason the app is noticed on a day nothing has been written. Captured Notes only: a count inflated by Imported Notes would reassure precisely on the days nothing was typed. A day with none reads as a blank rather than as a zero, because a total reads as a day already accounted for.
+How many Captured Notes today's Journal Day holds, shown beside the menu bar glyph. The app solicits nothing about journalling — no prompts or scheduled nudges — so this is the only reminder to journal there is, and the only reason the app is noticed on a day nothing has been written. Captured Notes only: Imported Notes and Tasks would make the number mean two incompatible things. A day with none reads as a blank rather than as a zero, because a total reads as a day already accounted for.
 _Avoid_: Badge, counter, notification
 
 ## Time
@@ -109,16 +180,16 @@ _Avoid_: Export, report, summary, copy-all text
 The Digest of the previous calendar day, on the clipboard from the Tray Menu. The payoff for capturing: it goes straight into the written work log the user already owes a chat group every morning, with no window to open and nothing to tidy up. Yesterday is the calendar day before today, not the previous Occupied Day — a standup post is about a date, so a Monday that pasted Friday would be a claim about the weekend. A day with no Notes copies nothing and leaves the clipboard as it was, since a blank paste is worse than no paste. Imported Notes are in it and read exactly like Captured ones: the muted rendering in History is for scanning and deleting, not for whoever reads the post. Does not touch the Filter — copying is not navigating.
 
 **Export**:
-Every Note in the journal written to a Markdown file, each appearing exactly once, under a heading for the day it is filed under — still day-grouped, never regrouped by Project. Notes that have a Project render with a `#name` prefix on the bullet. The way out of the SQLite file, so nothing captured here is locked in — which is why it ignores the Filter entirely, and why it is a core operation rather than a convenience.
+Every Note and Task written to a Markdown file in separate sections, each appearing exactly once. Notes remain day-grouped and use a `#name` prefix when filed under a Project. Tasks are separated into Open and Completed and retain their Task Description, Scheduled For, recurrence rule, and completed Task Occurrence history. The way out of the SQLite file, so nothing kept here is locked in — which is why it ignores the Filter and Tasks View entirely, and why it is a core operation rather than a convenience.
 _Avoid_: Backup, dump, save as
 
 **Deletion**:
-Permanent removal of a Note. There is no trash, no archive, and no recovery — a deleted Note is gone. Deleting an Imported Note also refuses its meeting: that meeting is never imported again.
+Confirmed permanent removal of a Note or Task. There is no trash, no archive, no recovery, and no bulk deletion of Completed Tasks. Deleting an Imported Note also refuses its meeting so it is never imported again; deleting a Recurring Task also removes its completed Task Occurrence history and says so before confirmation.
 
 ## Settings
 
 **Settings**:
-What the user gets to decide about the app: the Hotkey, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars — and, as the one action rather than a setting, Export. Reached from the Tray Menu, and closed on dismiss rather than kept resident.
+What the user gets to decide about the app: the Note and Task Hotkeys, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars, and how to recover unavailable Task Alert Permission — plus Export as its one action rather than a setting. Reached from the Tray Menu, and closed on dismiss rather than kept resident.
 
 **Meeting Import**:
 Whether Import runs, and over which calendars. Off until turned on, with no calendar ticked, so enabling it sweeps nothing until the user says which calendars mean work; an unticked calendar is ignored entirely. Turning it on is also where the calendar permission is asked for, because it is the one moment the user has said they want it. The stored setting is the user's wish for Import, and only the user writes it; whether Import runs is that wish and the OS answer together. Permission refused or revoked therefore leaves the wish standing and the toggle reading off, with a line saying why — a routine path rather than an exceptional one, since macOS keys the grant to the exact binary and every rebuilt release is asked about once. A grant restored in System Settings resumes Import without asking a second time, and pressing the toggle while it reads off withdraws the wish. The app never nags, and the journal keeps working exactly as before.

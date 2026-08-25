@@ -1,0 +1,3 @@
+# Task Creation has its own resident window
+
+Task Creation has a dedicated window built at startup and hidden rather than destroyed between uses, while Tasks View is a separate on-demand window that may coexist with History. The resident window keeps Task Hotkey immediate and, unlike reusing Note Capture, permits unfinished Note and Task text to survive while the other Entry Point is used. Rejected: switching one quick-entry window between record types, which would either discard live text or make the invoked Hotkey context-dependent, and placing creation only inside Tasks View, which makes the global Hotkey pay window-construction latency.

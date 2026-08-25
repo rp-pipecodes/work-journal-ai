@@ -67,7 +67,9 @@ describe('a refused Capture', () => {
     pressEnter()
 
     await screen.findByRole('alert')
-    expect(desktop.fits.at(-1)).toEqual({ predictions: 0, refused: true })
+    await expect
+      .poll(() => desktop.fits.at(-1))
+      .toEqual({ predictions: 0, refused: true })
     // The Body is still there, and still the user's to fix and retry.
     expect(field().value).toBe('shipped the importer')
   })
