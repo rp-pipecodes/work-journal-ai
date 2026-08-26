@@ -75,11 +75,42 @@ export interface Task {
    * clears it: that is the whole of what reopening is.
    */
   completedAt: string | null
+  /**
+   * `YYYY-MM-DD`, or null when the Task is Unscheduled. A local calendar date
+   * rather than an instant — see
+   * docs/adr/0021-task-schedules-are-stored-as-civil-time.md.
+   */
+  scheduledDate: string | null
+  /**
+   * `HH:mm`, or null for a date-only schedule. Never set without a date: the
+   * date is the prerequisite, and a date alone never implies a default time.
+   */
+  scheduledTime: string | null
+}
+
+/**
+ * Scheduled For as anything that sets one hands it over: a local calendar date,
+ * and optionally a wall-clock time on it. Null everywhere one of these is
+ * accepted means Unscheduled — clearing the date clears the time with it,
+ * because a time without a day is not a schedule.
+ */
+export interface TaskSchedule {
+  /** `YYYY-MM-DD`, in the user's own calendar. */
+  date: string
+  /** `HH:mm`, minute-precise, or null for a date-only schedule. */
+  time: string | null
 }
 
 /** Whether a Task is still a commitment, or a record that one was kept. */
 export function isOpen(task: Task): boolean {
   return task.completedAt === null
+}
+
+/** Scheduled For as one value, or null when the Task is Unscheduled. */
+export function scheduleOf(task: Task): TaskSchedule | null {
+  return task.scheduledDate === null
+    ? null
+    : { date: task.scheduledDate, time: task.scheduledTime }
 }
 
 /**
@@ -287,10 +318,12 @@ export interface Journal {
    * can owe the same thing — so nothing is checked against what is already
    * there.
    */
-  createTask(description: string): Promise<Task>
+  createTask(description: string, schedule?: TaskSchedule | null): Promise<Task>
   /**
-   * The commitments that remain, newest first. In this slice every Open Task
-   * is Unscheduled, so Task Created At is the whole of the order.
+   * The commitments that remain: the scheduled ones earliest Scheduled For
+   * first, and the Unscheduled ones after them, newest created first. Which of
+   * the four groups each one falls in is `groupOpenTasks`, asked of the same
+   * list — the order here is already the order inside every group.
    */
   openTasks(): Promise<Task[]>
   /** The commitments that were kept, most recently completed first. */
@@ -300,6 +333,20 @@ export interface Journal {
    * remains editable whether it is Open or Completed.
    */
   editTaskDescription(id: string, description: string): Promise<Task>
+  /**
+   * Moves Scheduled For, or clears it. Null is Unscheduled, and a schedule
+   * whose time is null is date-only; a time is never stored without a date,
+   * because clearing the date clears the time with it.
+   *
+   * Refused while the Task is Completed: only the Task Description is editable
+   * there, so a schedule is changed by reopening first — which preserves the
+   * former one, and may make the Task Overdue the moment it comes back.
+   *
+   * A date in the past is accepted exactly like any other. It is a real
+   * commitment that was missed, and it becomes Overdue rather than being
+   * refused or quietly moved.
+   */
+  setTaskSchedule(id: string, schedule: TaskSchedule | null): Promise<Task>
   /**
    * Marks the commitment kept, recording when. Never asks first — completing
    * is reversible, and a confirmation on the most ordinary action in the app
@@ -356,16 +403,18 @@ interface TaskRow {
   description: string
   created_at: string
   completed_at: string | null
+  scheduled_date: string | null
+  scheduled_time: string | null
 }
 
 const INSERT_TASK = `
-  INSERT INTO tasks (id, description, created_at, completed_at)
-  VALUES (?, ?, ?, NULL)
+  INSERT INTO tasks (id, description, created_at, completed_at, scheduled_date, scheduled_time)
+  VALUES (?, ?, ?, NULL, ?, ?)
 `
 
 /** Every read returns a whole Task; only the predicate and the order differ. */
 const SELECT_TASKS = `
-  SELECT id, description, created_at, completed_at
+  SELECT id, description, created_at, completed_at, scheduled_date, scheduled_time
   FROM tasks
 `
 
@@ -374,11 +423,25 @@ const SELECT_TASK = `
   WHERE id = ?
 `
 
-/** Newest commitment first: every Open Task here is Unscheduled. */
+/**
+ * The scheduled commitments first, earliest Scheduled For first, and the
+ * Unscheduled ones after them newest created first. Two orders in one read
+ * because they answer two different questions: a schedule is a place in the
+ * future, and a Task without one has nothing but when it was written down.
+ *
+ * A date-only Task sorts before a timed one on the same date: the whole day is
+ * as early as that day gets.
+ */
 const SELECT_OPEN_TASKS = `
   ${SELECT_TASKS}
   WHERE completed_at IS NULL
-  ORDER BY created_at DESC, id DESC
+  ORDER BY
+    scheduled_date IS NULL,
+    scheduled_date ASC,
+    scheduled_time IS NOT NULL,
+    scheduled_time ASC,
+    created_at DESC,
+    id DESC
 `
 
 /** Most recently kept first — a different question, and a different order. */
@@ -405,6 +468,15 @@ const UPDATE_TASK_DESCRIPTION = `
 
 const UPDATE_TASK_COMPLETED_AT = `
   UPDATE tasks SET completed_at = ? WHERE id = ?
+`
+
+/**
+ * Both halves of Scheduled For move together, always: a time is never written
+ * without a date, and clearing the date clears the time in the same statement
+ * rather than leaving an orphan behind.
+ */
+const UPDATE_TASK_SCHEDULE = `
+  UPDATE tasks SET scheduled_date = ?, scheduled_time = ? WHERE id = ?
 `
 
 const DELETE_TASK = `
@@ -768,19 +840,24 @@ export function createJournal({
       return renderExport(notes, taskRows.map(toTask))
     },
 
-    async createTask(description) {
+    async createTask(description, schedule = null) {
       const said = taskDescription(description)
+      const scheduled = taskSchedule(schedule)
       const task: Task = {
         id: crypto.randomUUID(),
         description: said,
         createdAt: clock.now().toISOString(),
         completedAt: null,
+        scheduledDate: scheduled?.date ?? null,
+        scheduledTime: scheduled?.time ?? null,
       }
 
       await driver.execute(INSERT_TASK, [
         task.id,
         task.description,
         task.createdAt,
+        task.scheduledDate,
+        task.scheduledTime,
       ])
 
       return task
@@ -807,6 +884,27 @@ export function createJournal({
       await driver.execute(UPDATE_TASK_DESCRIPTION, [said, id])
 
       return { ...task, description: said }
+    },
+
+    async setTaskSchedule(id, schedule) {
+      const scheduled = taskSchedule(schedule)
+      const task = await readTask(driver, id)
+
+      // A Completed Task keeps the schedule it was completed with. Reopening
+      // is the way back to changing it, and it is a decision the user makes
+      // rather than one this silently makes for them.
+      if (!isOpen(task)) {
+        throw new Error(
+          'A Completed Task keeps its Scheduled For: reopen it to change one.',
+        )
+      }
+
+      const date = scheduled?.date ?? null
+      const time = scheduled?.time ?? null
+
+      await driver.execute(UPDATE_TASK_SCHEDULE, [date, time, id])
+
+      return { ...task, scheduledDate: date, scheduledTime: time }
     },
 
     async completeTask(id) {
@@ -941,16 +1039,31 @@ function renderExport(notes: Digest, tasks: Task[]): JournalExport {
 
 /**
  * One Task as Markdown reads a commitment: a checkbox saying which state it is
- * in, the description as written, and — only when there is one — the day it was
- * completed. Absent metadata is omitted rather than written as a blank, so a
- * line says nothing the journal does not know.
+ * in, the description as written, and whatever else the journal knows about it
+ * — when it is meant to be done, and when it was. Absent metadata is omitted
+ * rather than written as a blank, so a line says nothing the journal does not
+ * know, and an Unscheduled Task exports exactly as it always did.
+ *
+ * Scheduled For is written as the civil time it is stored as rather than as an
+ * instant: it is a day and a minute in the user's own calendar, and an export
+ * that resolved it to a moment would say something the record does not.
  */
 function taskBullet(task: Task): string {
-  if (task.completedAt === null) {
-    return `- [ ] ${task.description}`
+  const metadata: string[] = []
+  const schedule = scheduleOf(task)
+
+  if (schedule !== null) {
+    metadata.push(
+      `scheduled ${schedule.date}${schedule.time === null ? '' : ` ${schedule.time}`}`,
+    )
+  }
+  if (task.completedAt !== null) {
+    metadata.push(`completed ${formatExportInstant(task.completedAt)}`)
   }
 
-  return `- [x] ${task.description} (completed ${formatExportInstant(task.completedAt)})`
+  const said = metadata.length > 0 ? ` (${metadata.join('; ')})` : ''
+
+  return `- [${task.completedAt === null ? ' ' : 'x'}] ${task.description}${said}`
 }
 
 /**
@@ -1274,6 +1387,304 @@ export function formatTaskCompletedAt(completedAt: string): string {
 }
 
 /**
+ * The timezone the machine is in right now — asked every time rather than
+ * remembered, because the user travels and Scheduled For follows them.
+ */
+function localTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone
+}
+
+/** One day, as a fixed span of milliseconds. Only ever used to step over one. */
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * How far ahead of UTC a timezone is at one instant, in minutes. Read from the
+ * OS's own timezone database through `Intl` rather than from a table of rules
+ * kept here: the rules change, and the machine's copy is the one macOS will
+ * deliver a Task Alert by.
+ */
+function zoneOffsetMinutes(instant: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(instant))
+
+  const read = (type: string) =>
+    Number(parts.find((part) => part.type === type)?.value ?? '0')
+
+  const wall = Date.UTC(
+    read('year'),
+    read('month') - 1,
+    read('day'),
+    // `en-US` with `hour12: false` writes midnight as 24 in some engines.
+    read('hour') % 24,
+    read('minute'),
+    read('second'),
+  )
+
+  return Math.round((wall - instant) / 60_000)
+}
+
+/** The local calendar date one instant falls on, `YYYY-MM-DD`. */
+function civilDateIn(instant: Date, timeZone: string): string {
+  const offset = zoneOffsetMinutes(instant.getTime(), timeZone)
+  return new Date(instant.getTime() + offset * 60_000)
+    .toISOString()
+    .slice(0, 10)
+}
+
+/**
+ * The instant a Scheduled For actually falls at, worked out from its civil
+ * components and the timezone the user is in now — never stored, because the
+ * civil time is the source of truth and the instant follows the traveller; see
+ * docs/adr/0021-task-schedules-are-stored-as-civil-time.md.
+ *
+ * A date-only schedule resolves to the start of its day: what a whole day
+ * becomes when a single moment is needed for ordering. It never becomes a Task
+ * Alert, which is a different question entirely.
+ *
+ * The two awkward days of the year are decided here rather than left to
+ * whatever `new Date` does with them. A wall-clock time that does not exist —
+ * the hour a spring transition skips — resolves to the first instant that does,
+ * which is the transition itself. A wall-clock time that happens twice —
+ * autumn — resolves to the first of the two.
+ */
+export function scheduledInstant(
+  schedule: TaskSchedule,
+  timeZone: string = localTimeZone(),
+): Date {
+  const [year, month, day] = schedule.date.split('-').map(Number)
+  const [hour, minute] = (schedule.time ?? '00:00').split(':').map(Number)
+  const wall = Date.UTC(year, month - 1, day, hour, minute)
+
+  // The offsets in force either side of any transition near this wall time.
+  // A day is wider than any transition, and no zone has two in one day.
+  const offsets = [
+    zoneOffsetMinutes(wall - DAY_MS, timeZone),
+    zoneOffsetMinutes(wall + DAY_MS, timeZone),
+  ]
+
+  const candidates = offsets.map((offset) => wall - offset * 60_000)
+  // A candidate is real only if reading it back in that zone gives the wall
+  // clock the user actually wrote. Both being real is the repeated hour.
+  const real = candidates.filter(
+    (instant) =>
+      zoneOffsetMinutes(instant, timeZone) ===
+      Math.round((wall - instant) / 60_000),
+  )
+
+  if (real.length > 0) {
+    return new Date(Math.min(...real))
+  }
+
+  // Neither is real: the user wrote a time the clocks skipped over. The first
+  // valid instant afterwards is the transition itself, found between the two.
+  return new Date(
+    transitionBetween(
+      Math.min(...candidates),
+      Math.max(...candidates),
+      timeZone,
+    ),
+  )
+}
+
+/**
+ * The instant a timezone's offset changes, somewhere between two instants that
+ * straddle it, to the minute — which is as fine as any transition is and as
+ * fine as Scheduled For goes.
+ */
+function transitionBetween(
+  before: number,
+  after: number,
+  timeZone: string,
+): number {
+  const offsetBefore = zoneOffsetMinutes(before, timeZone)
+  let low = before
+  let high = after
+
+  while (high - low > 60_000) {
+    const middle = low + Math.floor((high - low) / 2)
+    if (zoneOffsetMinutes(middle, timeZone) === offsetBefore) {
+      low = middle
+    } else {
+      high = middle
+    }
+  }
+
+  return high
+}
+
+/**
+ * The four groups Tasks View opens on. Overdue first because it is the one
+ * that is already costing the user something, and Unscheduled last because it
+ * is the only one that is not about time at all.
+ */
+export type TaskGroupName = 'overdue' | 'today' | 'upcoming' | 'unscheduled'
+
+export interface TaskGroup {
+  name: TaskGroupName
+  tasks: Task[]
+}
+
+/** In the order Tasks View shows them, empty ones included. */
+export const TASK_GROUPS: readonly TaskGroupName[] = [
+  'overdue',
+  'today',
+  'upcoming',
+  'unscheduled',
+]
+
+/**
+ * Which group each Open Task falls in, right now. A pure reading of the same
+ * list `openTasks` returns, so a window that has been open since yesterday
+ * re-groups by asking again rather than by re-reading the database — which is
+ * what local midnight, a wake and a regained focus each do.
+ *
+ * A Task whose moment has passed is Overdue, whether it was scheduled for last
+ * year or for an hour ago; a date-only Task is Overdue only once its whole day
+ * is behind the user. Order inside each group is the order given, which is
+ * already the order Tasks View wants.
+ */
+export function groupOpenTasks(
+  tasks: Task[],
+  now: Date,
+  timeZone: string = localTimeZone(),
+): TaskGroup[] {
+  const today = civilDateIn(now, timeZone)
+
+  return TASK_GROUPS.map((name) => ({
+    name,
+    tasks: tasks.filter(
+      (task) => groupOf(task, now, today, timeZone) === name,
+    ),
+  }))
+}
+
+function groupOf(
+  task: Task,
+  now: Date,
+  today: string,
+  timeZone: string,
+): TaskGroupName {
+  const schedule = scheduleOf(task)
+
+  if (schedule === null) return 'unscheduled'
+  if (schedule.date < today) return 'overdue'
+  if (schedule.date > today) return 'upcoming'
+  // Today, and the only question left is whether its minute has been and gone.
+  if (schedule.time === null) return 'today'
+
+  return scheduledInstant(schedule, timeZone).getTime() <= now.getTime()
+    ? 'overdue'
+    : 'today'
+}
+
+/**
+ * Scheduled For as Tasks View reads it: the day in the reader's own locale, and
+ * the time of day after it when there is one. Nothing at all when the Task is
+ * Unscheduled — a blank says it better than the word would.
+ */
+export function formatScheduledFor(task: Task): string | null {
+  const schedule = scheduleOf(task)
+  if (schedule === null) return null
+
+  const at = scheduledInstant(schedule)
+  const day = new Intl.DateTimeFormat(undefined, {
+    day: 'numeric',
+    month: 'short',
+  }).format(at)
+
+  if (schedule.time === null) return day
+
+  return `${day}, ${new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(at)}`
+}
+
+/**
+ * One Task Alert as the OS is asked to hold it: the civil components macOS
+ * matches its own clock against, and the whole Task Description to show. Must
+ * match `TaskAlert` in `src-tauri/src/alerts.rs`.
+ */
+export interface TaskAlert {
+  /**
+   * The pending request's identifier, derived from the Task so that the same
+   * Task always claims the same one — which is what makes registering again
+   * replace rather than duplicate, and cancelling possible from the id alone.
+   */
+  id: string
+  /** Shown in full: a truncated commitment is not the commitment. */
+  description: string
+  /** The local calendar date and minute macOS is asked to match. */
+  year: number
+  month: number
+  day: number
+  hour: number
+  minute: number
+}
+
+/** The one identifier a Task's pending request ever has. */
+export function taskAlertId(taskId: string): string {
+  return `task:${taskId}`
+}
+
+/** And back: which Task an Alert the user clicked belongs to. */
+export function taskIdOfAlert(alertId: string): string | null {
+  return alertId.startsWith('task:') ? alertId.slice('task:'.length) : null
+}
+
+/**
+ * Every Task Alert that should be pending with macOS right now, derived from
+ * the journal's own Open Tasks — the database is authoritative and the OS's
+ * pending requests are a copy of this answer.
+ *
+ * Only a future Open Task with both a date and a time has one. A date-only
+ * Task never does: it would have to invent a time nobody chose. A Task whose
+ * moment has already passed never does either — it is Overdue on screen, which
+ * is the whole of what the journal has to say about it, and an Alert fired
+ * after the fact would be a reminder to do something at a time that is gone.
+ */
+export function taskAlerts(
+  tasks: Task[],
+  now: Date,
+  timeZone: string = localTimeZone(),
+): TaskAlert[] {
+  return tasks.flatMap((task) => {
+    const schedule = scheduleOf(task)
+
+    if (!isOpen(task) || schedule === null || schedule.time === null) {
+      return []
+    }
+
+    if (scheduledInstant(schedule, timeZone).getTime() <= now.getTime()) {
+      return []
+    }
+
+    const [year, month, day] = schedule.date.split('-').map(Number)
+    const [hour, minute] = schedule.time.split(':').map(Number)
+
+    return [
+      {
+        id: taskAlertId(task.id),
+        description: task.description,
+        year,
+        month,
+        day,
+        hour,
+        minute,
+      },
+    ]
+  })
+}
+
+/**
  * A Note's Project as it reads on screen: `#name`, or Unfiled when there is
  * none. The filing label History shows next to every Body.
  */
@@ -1501,12 +1912,66 @@ function taskDescription(description: string): string {
   return said
 }
 
+/**
+ * Scheduled For as the journal stores it: a real calendar date, and a real
+ * minute of the day on it. Null passes through as Unscheduled, and a schedule
+ * whose time is null is date-only — the two are different answers, and neither
+ * is a default for the other.
+ *
+ * A past date is not checked for: a commitment that was missed is still a
+ * commitment, and refusing it here would lose the one thing the user is
+ * telling the journal.
+ */
+function taskSchedule(schedule: TaskSchedule | null): TaskSchedule | null {
+  if (schedule === null) {
+    return null
+  }
+
+  if (!isCalendarDate(schedule.date)) {
+    throw new Error(
+      `Scheduled For is a calendar date: ${schedule.date} is not one.`,
+    )
+  }
+
+  if (schedule.time !== null && !isWallClockTime(schedule.time)) {
+    throw new Error(
+      `Scheduled For is a minute of the day: ${schedule.time} is not one.`,
+    )
+  }
+
+  return { date: schedule.date, time: schedule.time }
+}
+
+/**
+ * `YYYY-MM-DD`, and a day that actually exists: the shape alone would accept
+ * the 31st of February. The year is bounded like a Journal Day's, so a
+ * half-typed year on the way to `2026` never reaches the database.
+ */
+function isCalendarDate(date: string): boolean {
+  if (!/^[2-9]\d{3}-\d{2}-\d{2}$/.test(date)) {
+    return false
+  }
+
+  // Round-tripped through UTC, where no day is 23 or 25 hours long: a date
+  // that survives is one the calendar has.
+  return new Date(`${date}T00:00:00.000Z`).toISOString().slice(0, 10) === date
+}
+
+/** `HH:mm` on a 24-hour clock, minute-precise and nothing finer. */
+function isWallClockTime(time: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(time)
+}
+
 function toTask(row: TaskRow): Task {
   return {
     id: row.id,
     description: row.description,
     createdAt: row.created_at,
     completedAt: row.completed_at,
+    scheduledDate: row.scheduled_date,
+    // A time without a date is not a schedule; a row that somehow holds one is
+    // read as the date-only schedule it actually is.
+    scheduledTime: row.scheduled_date === null ? null : row.scheduled_time,
   }
 }
 

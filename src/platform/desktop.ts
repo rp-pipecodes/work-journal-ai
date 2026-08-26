@@ -8,7 +8,7 @@
  * "must match" pair are one screen apart rather than four files apart.
  */
 
-import type { CalendarEvent, SqlDriver } from '@/journal/journal'
+import type { CalendarEvent, SqlDriver, TaskAlert } from '@/journal/journal'
 import type { HotkeyAction, HotkeyStatuses } from '@/settings/hotkey'
 import type { SettingsStore } from '@/settings/settings'
 import type { Theme } from '@/settings/theme'
@@ -180,6 +180,14 @@ export const JOURNAL_CHANGED_EVENT = 'journal://changed'
  */
 export const TASKS_CHANGED_EVENT = 'tasks://changed'
 
+/**
+ * The user clicked a Task Alert. Spoken by the Rust side, which is the only
+ * part of the app macOS hands the click to, and carried to Tasks View so it can
+ * open focused on that Task. Must match `TASK_ALERT_OPENED_EVENT` in
+ * `src-tauri/src/lib.rs`.
+ */
+export const TASK_ALERT_OPENED_EVENT = 'task-alert://opened'
+
 /** Where an export ended up — the Rust side's `ExportedFile`. */
 export interface ExportedFile {
   path: string
@@ -200,6 +208,18 @@ export interface AppIdentity {
  */
 export type CalendarAccess = 'granted' | 'denied' | 'undetermined'
 
+/**
+ * What the OS is currently allowing the app to deliver as Task Alerts.
+ * `undetermined` is the state before the user has been asked — which is where
+ * every install starts, because the app asks in context when the first timed
+ * Task is saved rather than at first launch.
+ *
+ * After a denial macOS will not prompt again, whatever the app does, which is
+ * why Settings shows the status and the way back rather than a button that
+ * would silently do nothing.
+ */
+export type TaskAlertPermission = 'granted' | 'denied' | 'undetermined'
+
 /** One of the user's calendars, as Settings lists it to be ticked. */
 export interface CalendarInfo {
   /** Stable enough to remember a tick against; opaque to the journal. */
@@ -218,6 +238,12 @@ export interface Desktop {
   closeWindow(): Promise<void>
   /** The window lost focus — for a Capture, a discard. */
   onWindowBlurred(handle: () => void): Promise<Unlisten>
+  /**
+   * The window regained focus. A list grouped as Overdue, Today and Upcoming
+   * stops being true while nobody is looking at it, so the window that is
+   * looked at again asks the question afresh.
+   */
+  onWindowFocused(handle: () => void): Promise<Unlisten>
   /**
    * Whether the caller's own window is on screen. Asked by the two resident
    * windows when they lose focus: losing it to another application is the user
@@ -275,6 +301,43 @@ export interface Desktop {
 
   announceTasksChanged(): Promise<void>
   onTasksChanged(handle: () => void): Promise<Unlisten>
+
+  /**
+   * What macOS allows the app to deliver right now, asked rather than
+   * remembered: a grant is revoked in System Settings without the app hearing
+   * of it. Never prompts.
+   */
+  taskAlertPermission(): Promise<TaskAlertPermission>
+  /**
+   * Asks for alert and sound authorization, through the OS, and answers with
+   * what it came to. Asked in context when the first timed Task is saved and
+   * never at first launch; asking again after a refusal does not re-prompt,
+   * because macOS answers for the user.
+   */
+  requestTaskAlertPermission(): Promise<TaskAlertPermission>
+  /**
+   * Makes the OS's pending requests say exactly this and nothing else: whatever
+   * is here is registered, and every other Task Alert the app owns is
+   * cancelled. One call rather than a schedule and a cancel, because the
+   * journal is authoritative and the pending requests are a copy of its answer
+   * — reconciling is the only operation that can be repeated safely on launch,
+   * on wake and after every change.
+   *
+   * Rejects when the OS refuses. That never rolls back a Task: the schedule is
+   * already stored, and the Alert is derived from it.
+   */
+  reconcileTaskAlerts(alerts: TaskAlert[]): Promise<void>
+  /**
+   * The user clicked a Task Alert. Carries the Task it was about, so Tasks View
+   * can open focused on it.
+   */
+  onTaskAlertOpened(handle: (taskId: string) => void): Promise<Unlisten>
+  /**
+   * Opens System Settings at Notifications — the only way back after a denial,
+   * since macOS will not show its prompt a second time. The pane is opened by
+   * its documented identifier; the app never guesses a per-app deep link.
+   */
+  openNotificationSettings(): Promise<void>
   /** The Tray Menu wants yesterday's Digest on the clipboard. */
   onYesterdayDigestRequested(handle: () => void): Promise<Unlisten>
 

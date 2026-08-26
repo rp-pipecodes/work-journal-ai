@@ -1,7 +1,9 @@
+mod alerts;
 mod calendar;
 mod export;
 mod hotkey;
 
+use alerts::{Permission, TaskAlert};
 use calendar::{Access, CalendarEvent, CalendarInfo};
 use export::ExportedFile;
 use hotkey::{HotkeyAction, Hotkeys};
@@ -85,6 +87,11 @@ const COPY_YESTERDAY_DIGEST_EVENT: &str = "digest://yesterday";
 /// in `src/platform/desktop.ts`.
 const SYSTEM_WOKE_EVENT: &str = "system://woke";
 
+/// The user clicked a Task Alert. macOS hands the click to this side, which is
+/// the only part of the app it talks to; Tasks View opens focused on the Task.
+/// Must match `TASK_ALERT_OPENED_EVENT` in `src/platform/desktop.ts`.
+const TASK_ALERT_OPENED_EVENT: &str = "task-alert://opened";
+
 /// Relative, so plugin-sql resolves it inside the app's data directory and the
 /// journal survives a restart of the app and of the machine.
 const DATABASE_URL: &str = "sqlite:work-journal.db";
@@ -125,7 +132,11 @@ pub fn run() {
             calendar_access,
             request_calendar_access,
             calendars,
-            todays_calendar_events
+            todays_calendar_events,
+            task_alert_permission,
+            request_task_alert_permission,
+            reconcile_task_alerts,
+            open_notification_settings
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -157,6 +168,11 @@ pub fn run() {
             // the capture window, because that is the window that hears it.
             #[cfg(target_os = "macos")]
             watch_for_wake(app.handle());
+
+            // Before launching finishes: a click on a Task Alert that macOS
+            // delivered while Work Journal was not running arrives as the app
+            // starts, and a delegate set any later would never hear it.
+            watch_for_task_alerts(app.handle());
 
             // Start at login is offered once, and only once: the app must
             // never add itself to the login items without being asked, and
@@ -197,6 +213,12 @@ fn migrations() -> Vec<Migration> {
             version: 4,
             description: "create tasks",
             sql: include_str!("../migrations/0004_create_tasks.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 5,
+            description: "task schedule",
+            sql: include_str!("../migrations/0005_task_schedule.sql"),
             kind: MigrationKind::Up,
         },
     ]
@@ -733,6 +755,66 @@ fn calendars() -> Vec<CalendarInfo> {
 #[tauri::command(async)]
 fn todays_calendar_events() -> Vec<CalendarEvent> {
     calendar::todays_events()
+}
+
+/// What the OS allows the app to deliver as Task Alerts. Asked rather than
+/// remembered: a grant is revoked in System Settings without the app hearing of
+/// it. Never prompts.
+#[tauri::command(async)]
+fn task_alert_permission() -> Permission {
+    alerts::permission()
+}
+
+/// Asks the user, through the OS, and answers with what it came to. Off the
+/// main thread: the dialog is the system's, and the app must not sit frozen
+/// behind it while the user reads it.
+#[tauri::command(async)]
+fn request_task_alert_permission() -> Permission {
+    alerts::request_permission()
+}
+
+/// Makes the OS's pending requests say exactly what the journal says. A failure
+/// is reported back and goes no further: the Task it was about is already
+/// stored, and a Task Alert is derived from it — see
+/// docs/adr/0017-the-os-schedules-task-alerts.md.
+#[tauri::command(async)]
+fn reconcile_task_alerts(alerts: Vec<TaskAlert>) -> Result<(), String> {
+    alerts::reconcile(&alerts)
+}
+
+/// Opens System Settings at Notifications. The only way back after a denial,
+/// because macOS never shows its own prompt a second time.
+#[tauri::command(async)]
+fn open_notification_settings() -> Result<(), String> {
+    alerts::open_settings()
+}
+
+/// Listens for clicks on Task Alerts, and turns each one into an open Tasks
+/// View focused on that Task. The identifier is passed through untouched: which
+/// Task it names is the journal's to say, in `taskIdOfAlert`.
+fn watch_for_task_alerts(app: &tauri::AppHandle) {
+    let handle = app.clone();
+
+    alerts::watch_for_clicks(alerts::Clicks {
+        opened: Box::new(move |identifier| {
+            open_tasks(&handle);
+            // Addressed rather than broadcast: only Tasks View has anything to
+            // do with it. Sent after the window is asked for, so a window built
+            // by this very click is listening by the time it arrives — it
+            // re-reads on being shown either way.
+            if let Err(error) = handle.emit_to(TASKS_WINDOW, TASK_ALERT_OPENED_EVENT, TaskAlertOpened { task_id: identifier }) {
+                log::warn!("could not pass on the Task Alert: {error}");
+            }
+        }),
+    });
+}
+
+/// Which Task an Alert the user clicked was about. Must match the payload
+/// `onTaskAlertOpened` reads in `src/platform/tauri-desktop.ts`.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskAlertOpened {
+    task_id: String,
 }
 
 /// Passes on the one thing the OS says that the webviews cannot hear for

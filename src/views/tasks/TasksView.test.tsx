@@ -34,9 +34,44 @@ async function showTasks(descriptions: string[] = []) {
   }
 
   const desktop = fakeDesktop({ driver })
-  render(<TasksView desktop={desktop} journal={Promise.resolve(core)} />)
+  render(
+    <TasksView desktop={desktop} journal={Promise.resolve(core)} clock={clock} />,
+  )
 
   return { desktop, core, clock, created }
+}
+
+/**
+ * A Task changed behind the view's back, then the row for it once the view has
+ * caught up — the Editor is opened from the row, and a row read before the
+ * change would carry the schedule it used to have.
+ */
+async function openEditorFor(
+  desktop: { announceTasksChanged: () => Promise<void> },
+  description: string,
+  group: string,
+) {
+  await desktop.announceTasksChanged()
+  await expect.poll(() => rowsUnder(group)).toContain(description)
+  fireEvent.click(screen.getByText(description))
+  return screen.findByRole('dialog', { name: 'Edit Task' })
+}
+
+/** Which group heading each row sits under, in the order they are on screen. */
+function groupHeadings(): string[] {
+  return [...document.querySelectorAll('main section h2')].map(
+    (heading) => heading.textContent ?? '',
+  )
+}
+
+/** The rows under one group heading. */
+function rowsUnder(heading: string): string[] {
+  const section = [...document.querySelectorAll('main section')].find(
+    (each) => each.querySelector('h2')?.textContent === heading,
+  )
+  return [...(section?.querySelectorAll('li button[type="button"]') ?? [])]
+    .filter((button) => button.getAttribute('aria-label') === null)
+    .map((button) => button.textContent ?? '')
 }
 
 /** The list as it reads on screen, in the order the rows are in. */
@@ -244,5 +279,210 @@ describe('the window chrome', () => {
     )
     expect(strip).not.toBeNull()
     expect(strip!.parentElement?.firstElementChild).toBe(strip)
+  })
+})
+
+describe('the four groups', () => {
+  /** One Task in each group, seen from a fixed morning. */
+  async function grouped() {
+    const built = await showTasks()
+    const { core } = built
+
+    await core.createTask('last week', { date: '2026-03-02', time: null })
+    await core.createTask('this evening', { date: '2026-03-09', time: '17:00' })
+    await core.createTask('next week', { date: '2026-03-16', time: '09:00' })
+    await core.createTask('someday')
+    await built.desktop.announceTasksChanged()
+    await screen.findByText('someday')
+
+    return built
+  }
+
+  it('shows Overdue, Today, Upcoming and Unscheduled, in that order', async () => {
+    await grouped()
+
+    await expect
+      .poll(groupHeadings)
+      .toEqual(['Overdue', 'Today', 'Upcoming', 'Unscheduled'])
+    expect(rowsUnder('Overdue')).toEqual(['last week'])
+    expect(rowsUnder('Today')).toEqual(['this evening'])
+    expect(rowsUnder('Upcoming')).toEqual(['next week'])
+    expect(rowsUnder('Unscheduled')).toEqual(['someday'])
+  })
+
+  it('leaves out a group with nothing in it', async () => {
+    await showTasks(['someday'])
+
+    await expect.poll(groupHeadings).toEqual(['Unscheduled'])
+  })
+
+  it('moves a Task between groups when the day is looked at again', async () => {
+    const { clock, desktop } = await grouped()
+    await expect.poll(() => rowsUnder('Today')).toEqual(['this evening'])
+
+    clock.set(new Date('2026-03-10T09:00:00'))
+    desktop.focus()
+
+    await expect
+      .poll(() => rowsUnder('Overdue'))
+      .toEqual(['last week', 'this evening'])
+    expect(groupHeadings()).not.toContain('Today')
+  })
+
+  it('shows the Completed Tasks as one ungrouped list', async () => {
+    const { core, created } = await showTasks(['renew the cert'])
+    await core.completeTask(created[0].id)
+    fireEvent.click(tab('Completed'))
+
+    await screen.findByText('renew the cert')
+    expect(groupHeadings()).toEqual([])
+  })
+})
+
+describe('the schedule controls', () => {
+  it('has no time until there is a date for it to be a minute of', async () => {
+    await showTasks(['renew the cert'])
+    fireEvent.click(await screen.findByText('renew the cert'))
+
+    expect((screen.getByLabelText('Time') as HTMLInputElement).disabled).toBe(
+      true,
+    )
+    expect(screen.getByLabelText('Scheduled For').textContent).toContain(
+      'Add a date',
+    )
+  })
+
+  it('saves the date and the time chosen', async () => {
+    const { core, created, desktop } = await showTasks(['renew the cert'])
+    await core.setTaskSchedule(created[0].id, {
+      date: '2026-03-16',
+      time: null,
+    })
+    await openEditorFor(desktop, 'renew the cert', 'Upcoming')
+
+    fireEvent.change(screen.getByLabelText('Time'), {
+      target: { value: '14:30' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await expect
+      .poll(async () => (await core.openTasks())[0].scheduledTime)
+      .toBe('14:30')
+    expect((await core.openTasks())[0].scheduledDate).toBe('2026-03-16')
+  })
+
+  it('clears the time along with the date', async () => {
+    const { core, created, desktop } = await showTasks(['renew the cert'])
+    await core.setTaskSchedule(created[0].id, {
+      date: '2026-03-16',
+      time: '14:00',
+    })
+    await openEditorFor(desktop, 'renew the cert', 'Upcoming')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the schedule' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await expect
+      .poll(async () => (await core.openTasks())[0].scheduledDate)
+      .toBeNull()
+    expect((await core.openTasks())[0].scheduledTime).toBeNull()
+  })
+
+  it('leaves the Task Description exactly as typed, schedule words and all', async () => {
+    const { core, created } = await showTasks(['ship it'])
+    fireEvent.click(await screen.findByText('ship it'))
+
+    const input = screen.getByLabelText('Task Description') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'ship it tomorrow at 9am' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await expect
+      .poll(async () => (await core.openTasks())[0].description)
+      .toBe('ship it tomorrow at 9am')
+    expect((await core.openTasks())[0].scheduledDate).toBeNull()
+    expect(created).toHaveLength(1)
+  })
+
+  it('offers no schedule controls at all while a Task is Completed', async () => {
+    const { core, created } = await showTasks(['renew the cert'])
+    await core.completeTask(created[0].id)
+    fireEvent.click(tab('Completed'))
+    fireEvent.click(await screen.findByText('renew the cert'))
+
+    expect(screen.queryByLabelText('Time')).toBeNull()
+    expect(screen.queryByLabelText('Scheduled For')).toBeNull()
+    expect(
+      screen.getByText(/Reopen it to change when it is meant to be done/),
+    ).toBeTruthy()
+  })
+})
+
+describe('asking about Task Alerts', () => {
+  it('asks the first time a Task with a time is saved, and never before', async () => {
+    const { core, created, desktop } = await showTasks(['renew the cert'])
+    desktop.alertPermission = 'undetermined'
+    await core.setTaskSchedule(created[0].id, {
+      date: '2026-03-16',
+      time: null,
+    })
+    await openEditorFor(desktop, 'renew the cert', 'Upcoming')
+    expect(desktop.alertPrompted).toBe(false)
+
+    fireEvent.change(screen.getByLabelText('Time'), {
+      target: { value: '14:30' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await expect.poll(() => desktop.alertPrompted).toBe(true)
+  })
+
+  it('keeps the Task when macOS refuses, and says the Task is unaffected', async () => {
+    const { core, created, desktop } = await showTasks(['renew the cert'])
+    desktop.alertPermission = 'denied'
+    await core.setTaskSchedule(created[0].id, {
+      date: '2026-03-16',
+      time: null,
+    })
+    await openEditorFor(desktop, 'renew the cert', 'Upcoming')
+
+    fireEvent.change(screen.getByLabelText('Time'), {
+      target: { value: '14:30' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await screen.findByText(/macOS is not allowing Work Journal to alert you/)
+    expect((await core.openTasks())[0].scheduledTime).toBe('14:30')
+  })
+})
+
+describe('a clicked Task Alert', () => {
+  it('shows the Open list with that Task singled out', async () => {
+    const { desktop, core, created } = await showTasks([
+      'renew the cert',
+      'chase the invoice',
+    ])
+    await core.setTaskSchedule(created[0].id, {
+      date: '2026-03-16',
+      time: '14:00',
+    })
+    await screen.findByText('renew the cert')
+    fireEvent.click(tab('Completed'))
+
+    desktop.openTaskAlert(`task:${created[0].id}`)
+
+    await expect
+      .poll(() =>
+        screen
+          .queryByText('renew the cert')
+          ?.closest('li')
+          ?.getAttribute('aria-current'),
+      )
+      .toBe('true')
+    expect(
+      screen
+        .getByText('chase the invoice')
+        .closest('li')
+        ?.getAttribute('aria-current'),
+    ).toBeNull()
   })
 })

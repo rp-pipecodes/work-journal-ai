@@ -7,6 +7,7 @@ import ThemeProvider from './components/ThemeProvider.tsx'
 import { createAppJournal } from './journal/app-journal.ts'
 import { systemClock } from './journal/journal.ts'
 import { createImportSession } from './journal/import-session.ts'
+import { createTaskAlertsSession } from './journal/task-alerts-session.ts'
 import { createTrayCount } from './journal/tray-count.ts'
 import { createYesterdayDigest } from './journal/yesterday-digest.ts'
 import { CAPTURE_WINDOW } from './platform/desktop.ts'
@@ -50,6 +51,19 @@ if (desktop.windowLabel() === CAPTURE_WINDOW) {
     // that cannot run leaves everything else working exactly as before.
     .catch((error: unknown) => {
       console.error('could not import today’s meetings', error)
+    })
+
+  // The OS's pending Task Alerts, kept equal to what the journal says. Here
+  // for the same reason as the count: the reconciliation has to keep happening
+  // while nothing is on screen, and this is the one window that lives as long
+  // as the app. It never prompts — permission is asked for in the Task Editor,
+  // when the user saves the first timed Task.
+  void createTaskAlertsSession({ journal, desktop, clock: systemClock })
+    .start()
+    // A Task Alert is derived from a Task that is already stored: an OS that
+    // will not hold one leaves every Task exactly as it was.
+    .catch((error: unknown) => {
+      console.error('could not reconcile the Task Alerts', error)
     })
 
   // Yesterday's Digest, copied from the Tray Menu. Kept here for the same

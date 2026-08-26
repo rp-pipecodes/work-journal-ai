@@ -30,6 +30,7 @@ import type {
   CalendarAccess,
   CalendarInfo,
   Desktop,
+  TaskAlertPermission,
 } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
 import { isTheme, type Theme } from '@/settings/theme'
@@ -104,6 +105,10 @@ export default function SettingsView({
   // Why Import is not on, when the reason is the OS rather than the user.
   // Nothing until there is something to say.
   const [calendarProblem, setCalendarProblem] = useState<string | null>(null)
+  // What macOS allows of Task Alerts. Read every time the window opens rather
+  // than remembered: it is changed in System Settings, which the app never
+  // hears about. Null until the OS has answered.
+  const [alerts, setAlerts] = useState<TaskAlertPermission | null>(null)
   // The first-run question, asked once and never again — whichever way it is
   // answered. False until the store has been asked whether it was answered.
   const [asking, setAsking] = useState(false)
@@ -133,14 +138,17 @@ export default function SettingsView({
 
     void (async () => {
       try {
-        const [status, atLogin, answered, stored, access] = await Promise.all([
-          desktop.hotkeyStatus(),
-          desktop.startsAtLogin(),
-          settings.hasBeenAskedAboutStartAtLogin(),
-          settings.load(),
-          desktop.calendarAccess(),
-        ])
+        const [status, atLogin, answered, stored, access, alertPermission] =
+          await Promise.all([
+            desktop.hotkeyStatus(),
+            desktop.startsAtLogin(),
+            settings.hasBeenAskedAboutStartAtLogin(),
+            settings.load(),
+            desktop.calendarAccess(),
+            desktop.taskAlertPermission(),
+          ])
         setStartAtLogin(atLogin)
+        setAlerts(alertPermission)
         setHotkeys(status)
         setAsking(!answered)
         setImportMeetings(stored.importMeetings)
@@ -270,6 +278,18 @@ export default function SettingsView({
         setImportMeetings(!next)
       }
     })()
+  }
+
+  /**
+   * The way back after macOS was told no. There is no button here that asks
+   * again: after a denial the system prompt never appears a second time,
+   * whatever the app does, so the only honest offer is to open the place where
+   * the user can change it themselves.
+   */
+  function openNotificationSettings() {
+    desktop.openNotificationSettings().catch((error: unknown) => {
+      console.error('could not open System Settings', error)
+    })
   }
 
   /** Ticking a calendar, or unticking it — an unticked one is ignored. */
@@ -477,6 +497,38 @@ export default function SettingsView({
 
         <Group>
           <Row
+            label="Task Alerts"
+            explanation="Whether macOS may alert you when a Task with a time comes due."
+          >
+            <span className="type-meta text-muted-foreground">
+              {alerts === null ? '—' : ALERT_STATUS[alerts]}
+            </span>
+          </Row>
+
+          {alerts !== 'granted' && (
+            <>
+              <Aside>
+                {alerts === 'undetermined'
+                  ? 'Work Journal has not asked yet. It asks the first time you save a Task with a time — never before.'
+                  : 'macOS is not allowing Work Journal to alert you, and it will not ask again. Turn Work Journal on under System Settings › Notifications › Work Journal. Tasks and their schedules are unaffected either way.'}
+              </Aside>
+              <div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={openNotificationSettings}
+                >
+                  Open System Settings
+                </Button>
+              </div>
+            </>
+          )}
+        </Group>
+
+        <Separator />
+
+        <Group>
+          <Row
             label="Export"
             explanation="Every Note and Task as Markdown, in your Downloads folder — nothing kept here is locked in."
           >
@@ -515,6 +567,13 @@ export default function SettingsView({
       </div>
     </div>
   )
+}
+
+/** What macOS currently allows of Task Alerts, in the fewest words that say it. */
+const ALERT_STATUS: Record<TaskAlertPermission, string> = {
+  granted: 'Allowed',
+  denied: 'Not allowed',
+  undetermined: 'Not asked yet',
 }
 
 /**

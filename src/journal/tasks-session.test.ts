@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createJournal, type Journal, type Task } from './journal'
 import {
+  ALERT_REFUSED,
   createTasksSession,
   openingTasksSnapshot,
   type TasksSession,
   type TasksSnapshot,
 } from './tasks-session'
 import { fixedClock, openTestDatabase } from './testing/database'
+import { fakeDesktop, type FakeDesktop } from '../platform/testing/desktop'
 
 // Every test drives a real journal over real SQL. Nothing here asserts that a
 // particular query ran.
@@ -17,7 +19,10 @@ afterEach(() => {
   for (const close of openDatabases.splice(0)) close()
 })
 
-async function tasksSession(descriptions: string[] = []) {
+async function tasksSession(
+  descriptions: string[] = [],
+  { alertPermission = 'granted' as FakeDesktop['alertPermission'] } = {},
+) {
   const { driver, close } = await openTestDatabase()
   openDatabases.push(close)
 
@@ -32,9 +37,12 @@ async function tasksSession(descriptions: string[] = []) {
 
   let snapshot: TasksSnapshot = openingTasksSnapshot
   const announced: number[] = []
+  const desktop = fakeDesktop({ driver, alertPermission })
+  void desktop.onTasksChanged(() => announced.push(1))
   const session: TasksSession = createTasksSession({
     journal: Promise.resolve(core),
-    announceChange: () => announced.push(1),
+    desktop,
+    clock,
     onChange: (next) => {
       snapshot = next
     },
@@ -46,8 +54,19 @@ async function tasksSession(descriptions: string[] = []) {
     clock,
     created,
     announced,
+    desktop,
     now: () => snapshot,
   }
+}
+
+/** Which group each Task ended up in, by description. */
+function groupsOf(snapshot: TasksSnapshot): Record<string, string[]> {
+  if (snapshot.tasks.state !== 'tasks') return {}
+  return Object.fromEntries(
+    snapshot.tasks.groups
+      .filter((group) => group.tasks.length > 0)
+      .map((group) => [group.name, group.tasks.map((task) => task.description)]),
+  )
 }
 
 function descriptionsOf(snapshot: TasksSnapshot): string[] {
@@ -71,14 +90,16 @@ describe('opening Tasks View', () => {
 
     await session.open()
 
-    expect(now().tasks).toEqual({ state: 'tasks', tasks: [] })
+    expect(now().tasks).toMatchObject({ state: 'tasks', tasks: [] })
+    expect(groupsOf(now())).toEqual({})
   })
 
   it('says the Tasks could not be read rather than loading forever', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const session = createTasksSession({
       journal: Promise.reject(new Error('no database')) as Promise<Journal>,
-      announceChange: () => {},
+      desktop: fakeDesktop(),
+      clock: fixedClock('2026-03-09T09:00:00'),
       onChange: () => {},
     })
 
@@ -153,7 +174,10 @@ describe('editing a Task', () => {
     const { session, created, announced, now } = await tasksSession(['renew it'])
     await session.open()
 
-    await session.editDescription(created[0].id, 'renew the TLS certificate')
+    await session.save(created[0].id, {
+      description: 'renew the TLS certificate',
+      schedule: null,
+    })
 
     expect(descriptionsOf(now())).toEqual(['renew the TLS certificate'])
     expect(announced).toHaveLength(1)
@@ -165,9 +189,9 @@ describe('editing a Task', () => {
     const { session, created, announced, now } = await tasksSession(['renew it'])
     await session.open()
 
-    await session.editDescription(created[0].id, '   ')
+    await session.save(created[0].id, { description: '   ', schedule: null })
 
-    expect(now().problem).toBe('That Task could not be reworded.')
+    expect(now().problem).toBe('That Task could not be saved.')
     expect(descriptionsOf(now())).toEqual(['renew it'])
     expect(announced).toHaveLength(0)
   })
@@ -176,11 +200,178 @@ describe('editing a Task', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const { session, created, now } = await tasksSession(['renew it'])
     await session.open()
-    await session.editDescription(created[0].id, '')
+    await session.save(created[0].id, { description: '', schedule: null })
 
-    await session.editDescription(created[0].id, 'renewed')
+    await session.save(created[0].id, {
+      description: 'renewed',
+      schedule: null,
+    })
 
     expect(now().problem).toBeNull()
+  })
+})
+
+describe('scheduling a Task from the Editor', () => {
+  it('saves the wording and the schedule together', async () => {
+    const { session, core, created, now } = await tasksSession(['renew it'])
+    await session.open()
+
+    await session.save(created[0].id, {
+      description: 'renew the certificate',
+      schedule: { date: '2026-03-16', time: '14:00' },
+    })
+
+    const [task] = await core.openTasks()
+    expect(task.description).toBe('renew the certificate')
+    expect(task.scheduledDate).toBe('2026-03-16')
+    expect(task.scheduledTime).toBe('14:00')
+    expect(now().problem).toBeNull()
+  })
+
+  it('moves the Task into its new group without a second read', async () => {
+    const { session, created, now } = await tasksSession(['renew it'])
+    await session.open()
+    expect(groupsOf(now())).toEqual({ unscheduled: ['renew it'] })
+
+    await session.save(created[0].id, {
+      description: 'renew it',
+      schedule: { date: '2026-03-09', time: '17:00' },
+    })
+
+    expect(groupsOf(now())).toEqual({ today: ['renew it'] })
+  })
+
+  it('leaves the schedule of a Completed Task alone', async () => {
+    const { session, core, created, now } = await tasksSession(['renew it'])
+    await core.setTaskSchedule(created[0].id, {
+      date: '2026-03-16',
+      time: '14:00',
+    })
+    await core.completeTask(created[0].id)
+    await session.show('completed')
+
+    await session.save(created[0].id, {
+      description: 'renewed it',
+      schedule: null,
+    })
+
+    const [task] = await core.completedTasks()
+    expect(task.description).toBe('renewed it')
+    expect(task.scheduledDate).toBe('2026-03-16')
+    expect(now().problem).toBeNull()
+  })
+})
+
+describe('asking about Task Alerts', () => {
+  it('asks in context the first time a Task with a time is saved', async () => {
+    const { session, created, desktop, now } = await tasksSession(['renew it'], {
+      alertPermission: 'undetermined',
+    })
+    await session.open()
+
+    await session.save(created[0].id, {
+      description: 'renew it',
+      schedule: { date: '2026-03-16', time: '14:00' },
+    })
+
+    expect(desktop.alertPrompted).toBe(true)
+    expect(now().alertRefusal).toBeNull()
+  })
+
+  it('never asks for a Task with a date and no time', async () => {
+    const { session, created, desktop } = await tasksSession(['renew it'], {
+      alertPermission: 'undetermined',
+    })
+    await session.open()
+
+    await session.save(created[0].id, {
+      description: 'renew it',
+      schedule: { date: '2026-03-16', time: null },
+    })
+
+    expect(desktop.alertPrompted).toBe(false)
+  })
+
+  it('never asks again once macOS has an answer on file', async () => {
+    const { session, created, desktop } = await tasksSession(['renew it'], {
+      alertPermission: 'granted',
+    })
+    await session.open()
+
+    await session.save(created[0].id, {
+      description: 'renew it',
+      schedule: { date: '2026-03-16', time: '14:00' },
+    })
+
+    expect(desktop.alertPrompted).toBe(false)
+  })
+
+  it('saves the Task anyway when the permission is refused, and says so', async () => {
+    const { session, core, created, now } = await tasksSession(['renew it'], {
+      alertPermission: 'denied',
+    })
+    await session.open()
+
+    await session.save(created[0].id, {
+      description: 'renew it',
+      schedule: { date: '2026-03-16', time: '14:00' },
+    })
+
+    expect(now().alertRefusal).toBe(ALERT_REFUSED)
+    const [task] = await core.openTasks()
+    expect(task.scheduledTime).toBe('14:00')
+  })
+})
+
+describe('grouping the Open Tasks', () => {
+  async function scheduled() {
+    const built = await tasksSession()
+    const { core } = built
+
+    await core.createTask('last week', { date: '2026-03-02', time: null })
+    await core.createTask('this evening', { date: '2026-03-09', time: '17:00' })
+    await core.createTask('next week', { date: '2026-03-16', time: '09:00' })
+    await core.createTask('someday')
+
+    return built
+  }
+
+  it('says which of the four groups each Open Task is in', async () => {
+    const { session, now } = await scheduled()
+
+    await session.open()
+
+    expect(groupsOf(now())).toEqual({
+      overdue: ['last week'],
+      today: ['this evening'],
+      upcoming: ['next week'],
+      unscheduled: ['someday'],
+    })
+  })
+
+  it('re-groups on the day rolling over, without re-reading', async () => {
+    const { session, clock, core, now } = await scheduled()
+    await session.open()
+    await core.deleteTask((await core.openTasks())[0].id)
+
+    clock.set(new Date('2026-03-10T00:01:00'))
+    session.regroup()
+
+    // The deleted Task is still on screen: re-grouping asks the day, not the
+    // database.
+    expect(groupsOf(now())).toEqual({
+      overdue: ['last week', 'this evening'],
+      upcoming: ['next week'],
+      unscheduled: ['someday'],
+    })
+  })
+
+  it('leaves the Completed list ungrouped', async () => {
+    const { session, now } = await scheduled()
+
+    await session.show('completed')
+
+    expect(groupsOf(now())).toEqual({})
   })
 })
 

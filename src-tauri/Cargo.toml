@@ -55,8 +55,24 @@ objc2-foundation = { version = "0.3", features = [
     "NSValue",
     "NSPredicate",
     "NSObject",
+    "NSBundle",
+    "NSURL",
 ] }
 block2 = "0.6"
+# The Task Alerts macOS holds and delivers on its own — see
+# src-tauri/src/alerts.rs and docs/adr/0017-the-os-schedules-task-alerts.md.
+objc2-user-notifications = { version = "0.3", default-features = false, features = [
+    "std",
+    "block2",
+    "UNUserNotificationCenter",
+    "UNNotificationRequest",
+    "UNNotificationContent",
+    "UNNotificationTrigger",
+    "UNNotificationSettings",
+    "UNNotificationResponse",
+    "UNNotification",
+    "UNNotificationSound",
+] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"
