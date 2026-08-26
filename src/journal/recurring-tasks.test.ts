@@ -852,6 +852,80 @@ describe('the one-Open-occurrence invariant', () => {
     expect((await journal.undoCompletion(task.id)).scheduledDate).toBe('2026-03-16')
   })
 
+  it('leaves exactly one Open occurrence when reanchoring is interrupted', async () => {
+    const { driver, clock } = await journalAt('2026-03-16T08:00:00')
+    const journal = createJournal({ clock, driver })
+    const task = await journal.createTask(
+      'gym',
+      { date: '2026-03-16', time: null },
+      every(1, 'day'),
+    )
+    clock.set(new Date('2026-03-16T20:00:00'))
+    await journal.completeTask(task.id)
+
+    // An edit replaces the Open occurrence: the rule, the head and the
+    // occurrence move together or not at all.
+    for (const after of [1, 2]) {
+      const brittle = createJournal({ clock, driver: interrupted(driver, after) })
+      await expect(
+        brittle.editTask(task.id, {
+          description: 'gym',
+          schedule: { date: '2026-03-20', time: null },
+          recurrence: every(1, 'day'),
+        }),
+      ).rejects.toThrow()
+
+      expect(await openCount(driver, task.id)).toBe(1)
+      const [standing] = await journal.openTasks()
+      expect(standing.scheduledDate).toBe('2026-03-17')
+      expect(standing.recurrenceAnchor).toBe('2026-03-16')
+      expect(openOccurrence(await journal.occurrencesOf(task.id))?.scheduledDate).toBe(
+        '2026-03-17',
+      )
+      expect(completedOccurrences(await journal.occurrencesOf(task.id))).toHaveLength(1)
+    }
+
+    // And the ordinary path still works afterwards.
+    const reanchored = await journal.editTask(task.id, {
+      description: 'gym',
+      schedule: { date: '2026-03-20', time: null },
+      recurrence: every(1, 'day'),
+    })
+    expect(reanchored.scheduledDate).toBe('2026-03-20')
+    expect(await openCount(driver, task.id)).toBe(1)
+    expect(completedOccurrences(await journal.occurrencesOf(task.id))).toHaveLength(1)
+  })
+
+  it('leaves the series intact when Stop Recurrence is interrupted', async () => {
+    const { driver, clock } = await journalAt('2026-03-16T08:00:00')
+    const journal = createJournal({ clock, driver })
+    const task = await journal.createTask(
+      'gym',
+      { date: '2026-03-16', time: null },
+      every(1, 'day'),
+    )
+    clock.set(new Date('2026-03-16T20:00:00'))
+    await journal.completeTask(task.id)
+
+    // Stopping drops the rule and the Open occurrence together: a Task that
+    // kept its rule and lost its occurrence would be a series asking for
+    // nothing.
+    const brittle = createJournal({ clock, driver: interrupted(driver, 1) })
+    await expect(brittle.stopRecurrence(task.id)).rejects.toThrow()
+
+    expect(await openCount(driver, task.id)).toBe(1)
+    const [standing] = await journal.openTasks()
+    expect(standing.recurrence).toEqual(every(1, 'day'))
+    expect(standing.scheduledDate).toBe('2026-03-17')
+    expect(await journal.occurrencesOf(task.id)).toHaveLength(2)
+
+    const stopped = await journal.stopRecurrence(task.id)
+    expect(stopped.recurrence).toBeNull()
+    expect(stopped.scheduledDate).toBe('2026-03-17')
+    expect(await openCount(driver, task.id)).toBe(0)
+    expect(completedOccurrences(await journal.occurrencesOf(task.id))).toHaveLength(1)
+  })
+
   it('leaves the whole Task behind when deleting is interrupted', async () => {
     const { driver, clock } = await journalAt('2026-03-16T08:00:00')
     const journal = createJournal({ clock, driver })

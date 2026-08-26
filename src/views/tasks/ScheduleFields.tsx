@@ -169,6 +169,11 @@ export default function ScheduleFields({
               id={intervalId}
               type="number"
               min={1}
+              // Whole units only, and said in the control rather than left to
+              // the journal to refuse: a cadence counts calendar units, and
+              // half of one is not a unit. Without it the field takes "1.5"
+              // quite happily and the save is what fails.
+              step={1}
               disabled={disabled}
               aria-label={`How many ${recurrence.unit}s between occurrences`}
               value={recurrence.interval}
@@ -178,8 +183,9 @@ export default function ScheduleFields({
                   recurrence: {
                     ...recurrence,
                     // An empty or half-typed field is still one unit: a
-                    // cadence of nothing is not one.
-                    interval: Math.max(1, Number(event.target.value) || 1),
+                    // cadence of nothing is not one, and neither is a
+                    // fractional one.
+                    interval: Math.max(1, Math.round(Number(event.target.value)) || 1),
                   },
                 })
               }

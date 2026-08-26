@@ -406,6 +406,29 @@ describe('repeating a Task as it is created', () => {
     expect(task.recurrenceAnchor).toBe('2026-03-16')
   })
 
+  it('takes a fractional interval as the whole unit it has to be', async () => {
+    const journal = await openJournal()
+    showTaskCreation(fakeDesktop(), journal)
+
+    type('water the plants')
+    pick(dateField(), '2026-03-16')
+    fireEvent.change(cadenceField(), { target: { value: 'day' } })
+    // A cadence counts calendar units, so half of one is refused by the
+    // control rather than by the save that would otherwise fail.
+    fireEvent.change(
+      screen.getByLabelText('How many days between occurrences'),
+      { target: { value: '1.5' } },
+    )
+    pressEnter()
+
+    await expect.poll(async () => await journal.openTasks()).toHaveLength(1)
+    expect((await journal.openTasks())[0].recurrence).toEqual({
+      unit: 'day',
+      interval: 2,
+      weekdays: [],
+    })
+  })
+
   it('commits a weekly cadence on several weekdays', async () => {
     const journal = await openJournal()
     showTaskCreation(fakeDesktop(), journal)
