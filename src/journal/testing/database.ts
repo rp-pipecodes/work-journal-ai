@@ -30,6 +30,22 @@ export async function openTestDatabase(): Promise<{
     async select<Row>(sql: string, params: unknown[]) {
       return database.prepare(sql).all(...(params as never[])) as Row[]
     },
+    // A real transaction, on the one connection this database has: the suite
+    // proves the recurrence invariants against SQLite's own atomicity rather
+    // than against a fake that always succeeds — see
+    // docs/adr/0020-recurring-task-transitions-are-transactional.md.
+    async transaction(statements) {
+      database.exec('BEGIN')
+      try {
+        for (const { sql, params } of statements) {
+          database.prepare(sql).run(...(params as never[]))
+        }
+        database.exec('COMMIT')
+      } catch (error) {
+        database.exec('ROLLBACK')
+        throw error
+      }
+    },
   }
 
   return { driver, close: () => database.close() }

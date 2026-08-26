@@ -15,7 +15,7 @@ use tauri::{
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-use tauri_plugin_sql::{Migration, MigrationKind};
+use tauri_plugin_sql::{DbInstances, DbPool, Migration, MigrationKind};
 use tauri_plugin_store::StoreExt;
 
 /// The menu bar glyph, compiled in so the tray never depends on a file on disk.
@@ -94,11 +94,12 @@ const TASK_ALERT_OPENED_EVENT: &str = "task-alert://opened";
 
 /// The resting height of each resident window: the panel its view draws, plus
 /// the transparent gutter the view's own drop shadow needs on every side. They
-/// differ because a Task may say when it is meant to be done and a Note may
-/// not, so the Task Creation panel has a second row under its field. Must match
-/// `CAPTURE_HEIGHT` and `TASK_CREATION_HEIGHT` in `src/platform/desktop.ts`.
+/// differ because a Task may say when it is meant to be done and how often it
+/// repeats, and a Note may say neither, so the Task Creation panel has two more
+/// rows under its field. Must match `CAPTURE_HEIGHT` and
+/// `TASK_CREATION_HEIGHT` in `src/platform/desktop.ts`.
 const CAPTURE_HEIGHT: f64 = 130.0;
-const TASK_CREATION_HEIGHT: f64 = 175.0;
+const TASK_CREATION_HEIGHT: f64 = 219.0;
 
 /// Both resident windows are this wide. Must match `CAPTURE_WIDTH` in
 /// `src/platform/desktop.ts`.
@@ -159,7 +160,8 @@ pub fn run() {
             task_alert_permission,
             request_task_alert_permission,
             reconcile_task_alerts,
-            open_notification_settings
+            open_notification_settings,
+            journal_transaction
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -251,6 +253,12 @@ fn migrations() -> Vec<Migration> {
             version: 5,
             description: "task schedule",
             sql: include_str!("../migrations/0005_task_schedule.sql"),
+            kind: MigrationKind::Up,
+        },
+        Migration {
+            version: 6,
+            description: "task recurrence",
+            sql: include_str!("../migrations/0006_task_recurrence.sql"),
             kind: MigrationKind::Up,
         },
     ]
@@ -913,6 +921,75 @@ fn watch_for_wake(app: &tauri::AppHandle) {
         std::mem::forget(observer);
         std::mem::forget(observed);
     }
+}
+
+/// One statement of a transaction, exactly as the journal's storage seam hands
+/// it over. Must match `SqlStatement` in `src/journal/journal.ts`.
+#[derive(serde::Deserialize)]
+struct Statement {
+    sql: String,
+    params: Vec<serde_json::Value>,
+}
+
+/// Every statement, or none — the journal's transaction seam; see
+/// docs/adr/0020-recurring-task-transitions-are-transactional.md.
+///
+/// It is here rather than in the webview because `tauri-plugin-sql` hands each
+/// call whichever connection of its pool happens to be free, so a `BEGIN` sent
+/// from JavaScript would not be on the same connection as the writes that
+/// follow it. This runs the whole list through one `sqlx` transaction on one
+/// connection, which is the only way the one-Open-occurrence invariant can
+/// survive an interruption.
+///
+/// The pool is the plugin's own, so these statements see exactly the database
+/// the ordinary reads and writes do — there is no second connection to the file
+/// and no second copy of the migrations.
+#[tauri::command]
+async fn journal_transaction(
+    databases: tauri::State<'_, DbInstances>,
+    statements: Vec<Statement>,
+) -> Result<(), String> {
+    let databases = databases.0.read().await;
+    // The plugin keeps its pools behind an enum whose accessors are not
+    // published, so the variant is matched directly.
+    #[allow(unreachable_patterns)]
+    let pool = match databases
+        .get(DATABASE_URL)
+        .ok_or_else(|| "the journal database is not open".to_string())?
+    {
+        DbPool::Sqlite(pool) => pool,
+        _ => return Err("the journal database is not SQLite".to_string()),
+    };
+
+    let mut transaction = pool.begin().await.map_err(|error| error.to_string())?;
+
+    for statement in statements {
+        let mut query = sqlx::query(&statement.sql);
+        for value in statement.params {
+            // The only three shapes the journal ever stores. Anything else is
+            // a statement built wrong, and refusing it loudly is better than
+            // stringifying it into a column that will read back as nonsense.
+            query = match value {
+                serde_json::Value::Null => query.bind(None::<String>),
+                serde_json::Value::String(text) => query.bind(text),
+                serde_json::Value::Number(number) => query.bind(
+                    number
+                        .as_i64()
+                        .ok_or_else(|| format!("not a whole number: {number}"))?,
+                ),
+                other => return Err(format!("the journal does not store {other}")),
+            };
+        }
+
+        // The first refusal ends the transaction: dropping it without a commit
+        // rolls back everything before it.
+        query
+            .execute(&mut *transaction)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+
+    transaction.commit().await.map_err(|error| error.to_string())
 }
 
 /// Ends a Capture, whether it committed a Note or discarded one. The window is

@@ -609,3 +609,297 @@ describe('a clicked Task Alert', () => {
     ).toBeNull()
   })
 })
+
+describe('the recurrence controls', () => {
+  const daily = { unit: 'day' as const, interval: 1, weekdays: [] }
+
+  /** The cadence picker inside whichever sheet is open. */
+  function cadence(): HTMLSelectElement {
+    return screen.getByLabelText('Repeats') as HTMLSelectElement
+  }
+
+  it('cannot be used until there is a date to count from', async () => {
+    await showTasks(['renew the cert'])
+    fireEvent.click(await screen.findByText('renew the cert'))
+
+    expect(cadence().disabled).toBe(true)
+    expect(cadence().value).toBe('none')
+  })
+
+  it('saves a cadence chosen beside the date', async () => {
+    const { core, created, desktop } = await showTasks(['renew the cert'])
+    await core.editTask(created[0].id, {
+      description: 'renew the cert',
+      schedule: { date: '2026-03-16', time: null },
+    })
+    await openEditorFor(desktop, 'renew the cert', 'Upcoming')
+
+    fireEvent.change(cadence(), { target: { value: 'month' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await expect
+      .poll(async () => (await core.openTasks())[0].recurrence?.unit)
+      .toBe('month')
+    expect((await core.openTasks())[0].recurrence?.interval).toBe(1)
+  })
+
+  it('offers the weekdays only for a weekly cadence, and keeps several', async () => {
+    const { core, created, desktop } = await showTasks(['gym'])
+    await core.editTask(created[0].id, {
+      description: 'gym',
+      schedule: { date: '2026-03-16', time: null },
+    })
+    await openEditorFor(desktop, 'gym', 'Upcoming')
+
+    expect(screen.queryByRole('button', { name: 'Wednesday' })).toBeNull()
+
+    fireEvent.change(cadence(), { target: { value: 'week' } })
+    // 16 March 2026 is a Monday, so that is where a weekly cadence starts.
+    expect(
+      screen.getByRole('button', { name: 'Monday' }).getAttribute('aria-pressed'),
+    ).toBe('true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Wednesday' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Friday' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await expect
+      .poll(async () => (await core.openTasks())[0].recurrence?.weekdays)
+      .toEqual([1, 3, 5])
+  })
+
+  it('asks before clearing a date that would stop an existing recurrence', async () => {
+    const { core, created, desktop } = await showTasks(['water the plants'])
+    await core.editTask(created[0].id, {
+      description: 'water the plants',
+      schedule: { date: '2026-03-16', time: null },
+      recurrence: daily,
+    })
+    await openEditorFor(desktop, 'water the plants', 'Upcoming')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the schedule' }))
+
+    const asked = await screen.findByRole('alertdialog')
+    expect(asked.textContent).toContain('clearing the date also')
+    // Cancelling leaves the cadence exactly where it was.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await expect.poll(() => screen.queryByRole('alertdialog')).toBeNull()
+    expect(cadence().value).toBe('day')
+  })
+
+  it('does not ask when the cadence itself is turned off', async () => {
+    const { core, created, desktop } = await showTasks(['water the plants'])
+    await core.editTask(created[0].id, {
+      description: 'water the plants',
+      schedule: { date: '2026-03-16', time: null },
+      recurrence: daily,
+    })
+    await openEditorFor(desktop, 'water the plants', 'Upcoming')
+
+    // Choosing it outright is the user saying it: nothing stands in the way,
+    // and the date they chose stays exactly where it is.
+    fireEvent.change(cadence(), { target: { value: 'none' } })
+
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect((screen.getByLabelText('Scheduled For') as HTMLInputElement).value).toBe(
+      '2026-03-16',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await expect
+      .poll(async () => (await core.openTasks())[0].recurrence)
+      .toBeNull()
+    expect((await core.openTasks())[0].scheduledDate).toBe('2026-03-16')
+  })
+
+  it('stops the recurrence once that clearing is confirmed', async () => {
+    const { core, created, desktop } = await showTasks(['water the plants'])
+    await core.editTask(created[0].id, {
+      description: 'water the plants',
+      schedule: { date: '2026-03-16', time: null },
+      recurrence: daily,
+    })
+    await openEditorFor(desktop, 'water the plants', 'Upcoming')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the schedule' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Stop repeating' }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await expect
+      .poll(async () => (await core.openTasks())[0].recurrence)
+      .toBeNull()
+    expect((await core.openTasks())[0].scheduledDate).toBeNull()
+  })
+})
+
+describe('a Recurring Task in the list', () => {
+  const daily = { unit: 'day' as const, interval: 1, weekdays: [] }
+
+  /** A Recurring Task, already on screen. */
+  async function showRecurring(
+    { completions = 0 } = {},
+  ) {
+    const { core, clock, desktop, created } = await showTasks(['water the plants'])
+    const task = await core.editTask(created[0].id, {
+      description: 'water the plants',
+      schedule: { date: '2026-03-09', time: null },
+      recurrence: daily,
+    })
+    for (let round = 0; round < completions; round += 1) {
+      clock.set(new Date(`2026-03-${String(9 + round).padStart(2, '0')}T20:00:00`))
+      await core.completeTask(task.id)
+    }
+    await desktop.announceTasksChanged()
+    await screen.findByText('water the plants')
+
+    return { core, clock, desktop, task }
+  }
+
+  it('says what it repeats on, in the same words an export writes', async () => {
+    await showRecurring()
+
+    await expect.poll(() => screen.queryByText('every day')).not.toBeNull()
+  })
+
+  it('advances into another group when it is completed', async () => {
+    const { core, clock } = await showRecurring()
+    await expect.poll(() => rowsUnder('Today')).toEqual(['water the plants'])
+
+    clock.set(new Date('2026-03-09T20:00:00'))
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Complete “water the plants”' }),
+    )
+
+    await expect.poll(() => rowsUnder('Upcoming')).toEqual(['water the plants'])
+    // It never joins the ordinary Completed Tasks.
+    expect(await core.completedTasks()).toEqual([])
+  })
+
+  it('shows the completed occurrences in an expandable history', async () => {
+    await showRecurring({ completions: 2 })
+
+    const history = await screen.findByRole('button', {
+      name: 'Completed occurrences of “water the plants”',
+    })
+    expect(history.textContent).toContain('2 completed occurrences')
+    expect(screen.queryByText('2026-03-09')).toBeNull()
+
+    fireEvent.click(history)
+
+    await screen.findByText('2026-03-09')
+    expect(screen.getByText('2026-03-10')).not.toBeNull()
+  })
+
+  it('offers Undo Completion while it is safe and not once it is not', async () => {
+    const { core, task } = await showRecurring({ completions: 1 })
+
+    const undo = await screen.findByRole('button', {
+      name: 'Undo the last completion of “water the plants”',
+    })
+
+    fireEvent.click(undo)
+
+    await expect
+      .poll(async () => (await core.openTasks())[0].scheduledDate)
+      .toBe('2026-03-09')
+    await expect
+      .poll(() =>
+        screen.queryByRole('button', {
+          name: 'Undo the last completion of “water the plants”',
+        }),
+      )
+      .toBeNull()
+    expect(await core.occurrencesOf(task.id)).toHaveLength(1)
+  })
+
+  it('does not offer Undo Completion once an edit has replaced the successor', async () => {
+    const { core, task, desktop } = await showRecurring({ completions: 1 })
+    await screen.findByRole('button', {
+      name: 'Undo the last completion of “water the plants”',
+    })
+
+    await core.editTask(task.id, {
+      description: 'water the plants',
+      schedule: { date: '2026-03-20', time: null },
+      recurrence: daily,
+    })
+    await desktop.announceTasksChanged()
+
+    await expect
+      .poll(() =>
+        screen.queryByRole('button', {
+          name: 'Undo the last completion of “water the plants”',
+        }),
+      )
+      .toBeNull()
+  })
+
+  it('stops the recurrence from the row, immediately and without asking', async () => {
+    const { core, task } = await showRecurring({ completions: 1 })
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Stop repeating “water the plants”',
+      }),
+    )
+
+    // Nothing stood between the press and the change: the user said it
+    // outright, and nothing is destroyed by it.
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    await expect
+      .poll(async () => (await core.openTasks())[0].recurrence)
+      .toBeNull()
+    // The history survives; only the rule and the Open occurrence go.
+    expect(await core.occurrencesOf(task.id)).toHaveLength(1)
+  })
+
+  it('warns that deleting takes the occurrence history with it', async () => {
+    const { core, task } = await showRecurring({ completions: 1 })
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Delete “water the plants”' }),
+    )
+
+    const asked = await screen.findByRole('alertdialog')
+    expect(asked.textContent).toContain('every occurrence it has completed')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+    await expect.poll(async () => await core.openTasks()).toEqual([])
+    expect(await core.occurrencesOf(task.id)).toEqual([])
+  })
+
+  it('still warns about the history once the recurrence has been stopped', async () => {
+    const { core, task, desktop } = await showRecurring({ completions: 1 })
+    await core.stopRecurrence(task.id)
+    await desktop.announceTasksChanged()
+    await expect
+      .poll(() =>
+        screen.queryByRole('button', {
+          name: 'Stop repeating “water the plants”',
+        }),
+      )
+      .toBeNull()
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Delete “water the plants”' }),
+    )
+
+    const asked = await screen.findByRole('alertdialog')
+    expect(asked.textContent).toContain('every occurrence it has completed')
+  })
+
+  it('hears a completion made in another window', async () => {
+    const { core, clock, desktop, task } = await showRecurring()
+    await expect.poll(() => rowsUnder('Today')).toEqual(['water the plants'])
+
+    clock.set(new Date('2026-03-09T20:00:00'))
+    await core.completeTask(task.id)
+    await desktop.announceTasksChanged()
+
+    await expect.poll(() => rowsUnder('Upcoming')).toEqual(['water the plants'])
+  })
+})

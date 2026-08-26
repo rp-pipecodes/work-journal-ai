@@ -26,8 +26,10 @@ import {
   isOpen,
   type Clock,
   type Journal,
+  type Recurrence,
   type Task,
   type TaskGroup,
+  type TaskOccurrence,
   type TaskSchedule,
 } from './journal'
 
@@ -46,7 +48,20 @@ export type TasksTab = 'open' | 'completed'
  */
 export type TasksState =
   | { state: 'loading' }
-  | { state: 'tasks'; tasks: Task[]; groups: TaskGroup[] }
+  | {
+      state: 'tasks'
+      tasks: Task[]
+      groups: TaskGroup[]
+      /**
+       * The Task Occurrences of every Task in the list that has any, by Task —
+       * its expandable history, and the record that says whether Undo
+       * Completion is still safe. Read with the list rather than when a
+       * history is opened, so a row can offer the action without asking
+       * again, and kept for a Task whose recurrence was stopped, because
+       * stopping keeps what the Task already completed.
+       */
+      occurrences: Record<string, TaskOccurrence[]>
+    }
   | { state: 'unreadable' }
 
 /** Everything a tasks window renders, and the only thing it renders. */
@@ -120,10 +135,25 @@ export interface TasksSession {
    */
   save(
     id: string,
-    change: { description: string; schedule: TaskSchedule | null },
+    change: {
+      description: string
+      schedule: TaskSchedule | null
+      recurrence?: Recurrence | null
+    },
   ): Promise<void>
   complete(id: string): Promise<void>
   reopen(id: string): Promise<void>
+  /**
+   * Takes back the most recent completion of a Recurring Task, while that is
+   * still safe. Refused rather than hidden when it is not: a list that moved
+   * under the user between the offer and the click has to say so.
+   */
+  undoCompletion(id: string): Promise<void>
+  /**
+   * Removes the cadence and keeps the Task and its history. Confirmed by the
+   * view rather than here — a session says what happened, not what to ask.
+   */
+  stopRecurrence(id: string): Promise<void>
   delete(id: string): Promise<void>
 }
 
@@ -177,12 +207,19 @@ export function createTasksSession({
       const core = await journal
       const tasks =
         tab === 'open' ? await core.openTasks() : await core.completedTasks()
+      // One read for the whole list rather than one per row: the histories
+      // are wanted together, and a list that grew a query per Task would get
+      // slower for the reason it got longer.
+      const occurrences = await core.occurrencesOfEach(
+        tasks.map((task) => task.id),
+      )
       if (latestRead !== ticket) return
       show({
         tasks: {
           state: 'tasks',
           tasks,
           groups: tab === 'open' ? groupOpenTasks(tasks, clock.now()) : [],
+          occurrences,
         },
       })
     } catch (error) {
@@ -274,13 +311,17 @@ export function createTasksSession({
       })
     },
 
-    async save(id, { description, schedule }) {
+    async save(id, { description, schedule, recurrence }) {
       let timed = false
 
       const saved = await change(
         'That Task could not be saved.',
         async (core) => {
-          const task = await core.editTask(id, { description, schedule })
+          const task = await core.editTask(id, {
+            description,
+            schedule,
+            recurrence,
+          })
           // Only an Open Task can have gained a time: a Completed one keeps
           // the schedule it was completed with, and asking macOS about an
           // Alert for a commitment already kept would make no sense.
@@ -299,6 +340,17 @@ export function createTasksSession({
     async reopen(id) {
       await change('That Task could not be reopened.', (core) =>
         core.reopenTask(id),
+      )
+    },
+    async undoCompletion(id) {
+      await change(
+        'That completion could not be undone: only the latest one can be, and only while what it advanced to is untouched.',
+        (core) => core.undoCompletion(id),
+      )
+    },
+    async stopRecurrence(id) {
+      await change('That recurrence could not be stopped.', (core) =>
+        core.stopRecurrence(id),
       )
     },
     async delete(id) {

@@ -99,6 +99,12 @@ export function createTauriDesktop(): Desktop {
       return {
         execute: (sql, params) => database.execute(sql, params),
         select: (sql, params) => database.select(sql, params),
+        // Not `BEGIN` and `COMMIT` from here: the plugin hands each call
+        // whichever connection of its pool happens to be free, so the writes
+        // would not be on the connection that opened the transaction. The
+        // Rust side runs the whole list through one of its own instead — see
+        // docs/adr/0020-recurring-task-transitions-are-transactional.md.
+        transaction: (statements) => invoke('journal_transaction', { statements }),
       }
     },
 

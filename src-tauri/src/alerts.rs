@@ -58,6 +58,22 @@ pub struct TaskAlert {
     pub minute: i32,
 }
 
+/// Which of the app's pending requests the journal no longer wants: everything
+/// macOS is holding that is not in the answer it was just handed.
+///
+/// Pure, and deliberately out of the `objc2` module so it can be tested without
+/// a notification centre. It is the whole of the cancelling decision — the
+/// registering half needs none, because adding a request under an identifier
+/// that is already pending replaces it, which is what a Recurring Task
+/// advancing to its next occurrence is.
+fn stale_identifiers(pending: &[String], keeping: &[TaskAlert]) -> Vec<String> {
+    pending
+        .iter()
+        .filter(|identifier| !keeping.iter().any(|alert| &&alert.id == identifier))
+        .cloned()
+        .collect()
+}
+
 #[cfg(target_os = "macos")]
 mod user_notifications {
     use super::{Permission, TaskAlert};
@@ -207,10 +223,8 @@ mod user_notifications {
             .map_err(|_| "macOS did not say what it is holding".to_string())?;
 
         let stale = NSMutableArray::new();
-        for identifier in pending {
-            if !keeping.iter().any(|alert| alert.id == identifier) {
-                stale.addObject(&*NSString::from_str(&identifier));
-            }
+        for identifier in super::stale_identifiers(&pending, keeping) {
+            stale.addObject(&*NSString::from_str(&identifier));
         }
 
         if !stale.is_empty() {
@@ -393,3 +407,54 @@ mod user_notifications {
 pub use user_notifications::{
     open_settings, permission, reconcile, request_permission, watch_for_clicks, Clicks,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::{stale_identifiers, TaskAlert};
+
+    /// One Task's pending request, under the identifier the journal derives
+    /// from the Task — the same one every occurrence of a Recurring Task
+    /// claims, which is what makes advancing a replacement rather than a
+    /// second alert.
+    fn alert(id: &str, day: i32) -> TaskAlert {
+        TaskAlert {
+            id: id.to_string(),
+            description: "water the plants".to_string(),
+            year: 2026,
+            month: 3,
+            day,
+            hour: 9,
+            minute: 0,
+        }
+    }
+
+    #[test]
+    fn cancels_every_request_the_journal_no_longer_wants() {
+        let pending = vec!["task:a".to_string(), "task:b".to_string()];
+
+        assert_eq!(
+            stale_identifiers(&pending, &[alert("task:a", 16)]),
+            vec!["task:b".to_string()]
+        );
+    }
+
+    #[test]
+    fn leaves_a_recurring_task_exactly_one_request_as_it_advances() {
+        // The occurrence moved from the 16th to the 17th. The identifier is
+        // the Task's, so nothing is cancelled and the re-registration below it
+        // replaces what macOS holds — one request, never two.
+        let pending = vec!["task:a".to_string()];
+
+        assert!(stale_identifiers(&pending, &[alert("task:a", 17)]).is_empty());
+    }
+
+    #[test]
+    fn cancels_the_request_of_a_series_that_was_stopped_or_removed() {
+        let pending = vec!["task:a".to_string()];
+
+        assert_eq!(
+            stale_identifiers(&pending, &[]),
+            vec!["task:a".to_string()]
+        );
+    }
+}
