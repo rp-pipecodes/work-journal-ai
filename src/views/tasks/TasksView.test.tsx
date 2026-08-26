@@ -90,6 +90,16 @@ function tab(name: 'Open' | 'Completed'): HTMLElement {
   return screen.getByRole('button', { name })
 }
 
+/**
+ * A Task scheduled without a time offers an action rather than an empty time
+ * field, so setting one is asking for it first — see ScheduleFields.
+ */
+function setTime(time: string) {
+  const add = screen.queryByRole('button', { name: 'Add a time' })
+  if (add !== null) fireEvent.click(add)
+  fireEvent.change(screen.getByLabelText('Time'), { target: { value: time } })
+}
+
 describe('opening Tasks View', () => {
   it('opens on the Open Tasks, newest first', async () => {
     await showTasks(['first', 'second', 'third'])
@@ -349,12 +359,11 @@ describe('the schedule controls', () => {
     await showTasks(['renew the cert'])
     fireEvent.click(await screen.findByText('renew the cert'))
 
-    expect((screen.getByLabelText('Time') as HTMLInputElement).disabled).toBe(
-      true,
-    )
-    expect(
-      (screen.getByLabelText('Scheduled For') as HTMLInputElement).value,
-    ).toBe('')
+    // No date-shaped field either: WebKit fills an empty one with today's
+    // date, which would read as a schedule nobody chose — see ScheduleFields.
+    expect(screen.queryByLabelText('Time')).toBeNull()
+    expect(screen.queryByLabelText('Scheduled For')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Add a date' })).toBeTruthy()
   })
 
   it('saves the date and the time chosen', async () => {
@@ -365,9 +374,7 @@ describe('the schedule controls', () => {
     })
     await openEditorFor(desktop, 'renew the cert', 'Upcoming')
 
-    fireEvent.change(screen.getByLabelText('Time'), {
-      target: { value: '14:30' },
-    })
+    setTime('14:30')
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await expect
@@ -433,9 +440,7 @@ describe('asking about Task Alerts', () => {
     await openEditorFor(desktop, 'renew the cert', 'Upcoming')
     expect(desktop.alertPrompted).toBe(false)
 
-    fireEvent.change(screen.getByLabelText('Time'), {
-      target: { value: '14:30' },
-    })
+    setTime('14:30')
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await expect.poll(() => desktop.alertPrompted).toBe(true)
@@ -450,9 +455,7 @@ describe('asking about Task Alerts', () => {
     })
     await openEditorFor(desktop, 'renew the cert', 'Upcoming')
 
-    fireEvent.change(screen.getByLabelText('Time'), {
-      target: { value: '14:30' },
-    })
+    setTime('14:30')
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     await screen.findByText(/macOS is not allowing Work Journal to alert you/)

@@ -1,10 +1,11 @@
 import { useId, useState } from 'react'
-import { XIcon } from 'lucide-react'
+import { CalendarPlusIcon, XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   formatWeekday,
+  journalDayFor,
   weekdayOf,
   type Recurrence,
   type RecurrenceUnit,
@@ -93,54 +94,99 @@ export default function ScheduleFields({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2 type-meta">
-        <label htmlFor={dateId} className="sr-only">
-          Scheduled For
-        </label>
-        <Input
-          id={dateId}
-          type="date"
-          disabled={disabled}
-          value={schedule?.date ?? ''}
-          onChange={(event) =>
-            setSchedule(
-              event.target.value === ''
-                ? null
-                : { date: event.target.value, time: schedule?.time ?? null },
-            )
-          }
-          className="h-8 w-40 tabular-nums"
-        />
-
-        <label htmlFor={timeId} className="sr-only">
-          Time
-        </label>
-        <Input
-          id={timeId}
-          type="time"
-          // A time is a minute of a day, so there has to be a day first.
-          disabled={disabled || schedule === null}
-          value={schedule?.time ?? ''}
-          onChange={(event) =>
-            schedule !== null &&
-            setSchedule({
-              ...schedule,
-              time: event.target.value === '' ? null : event.target.value,
-            })
-          }
-          className="h-8 w-28 tabular-nums"
-        />
-
-        {schedule !== null && !disabled && (
+        {schedule === null ? (
+          // An empty date field cannot say it is empty: WebKit fills one with
+          // today's date in grey, which is indistinguishable from a date the
+          // user chose — so the Task reads as scheduled for today while the
+          // time and the cadence stay disabled with no visible reason. An
+          // Unscheduled Task therefore offers an action instead of a field,
+          // and taking it starts the schedule on today, which is the date the
+          // empty field was pretending to hold anyway.
           <Button
             variant="ghost"
             size="sm"
-            aria-label="Clear the schedule"
-            onClick={() => setSchedule(null)}
+            disabled={disabled}
+            onClick={() =>
+              setSchedule({ date: journalDayFor(new Date()), time: null })
+            }
             className="text-muted-foreground"
           >
-            <XIcon />
-            Clear
+            <CalendarPlusIcon />
+            Add a date
           </Button>
+        ) : (
+          <>
+            <label htmlFor={dateId} className="sr-only">
+              Scheduled For
+            </label>
+            <Input
+              id={dateId}
+              type="date"
+              disabled={disabled}
+              value={schedule.date}
+              onChange={(event) =>
+                setSchedule(
+                  event.target.value === ''
+                    ? null
+                    : { date: event.target.value, time: schedule.time },
+                )
+              }
+              className="h-8 w-40 tabular-nums"
+            />
+
+            {/* And the same for the minute of it: an empty time field reads as
+                a time WebKit chose, and a date alone must never look like it
+                carries one — that is the difference between a Task that will
+                raise a Task Alert and one that will not. Asking for a time
+                starts it at the current one, which the field then edits;
+                emptying the field puts this action back. */}
+            {schedule.time === null ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={disabled}
+                onClick={() =>
+                  setSchedule({ ...schedule, time: timeOfDay(new Date()) })
+                }
+                className="text-muted-foreground"
+              >
+                Add a time
+              </Button>
+            ) : (
+              <>
+                <label htmlFor={timeId} className="sr-only">
+                  Time
+                </label>
+                <Input
+                  id={timeId}
+                  type="time"
+                  disabled={disabled}
+                  value={schedule.time}
+                  onChange={(event) =>
+                    setSchedule({
+                      ...schedule,
+                      time:
+                        event.target.value === '' ? null : event.target.value,
+                    })
+                  }
+                  className="h-8 w-28 tabular-nums"
+                />
+              </>
+            )}
+
+            {!disabled && (
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label="Clear the schedule"
+                onClick={() => setSchedule(null)}
+                className="text-muted-foreground"
+              >
+                <XIcon />
+                Clear
+              </Button>
+            )}
+          </>
         )}
       </div>
 
@@ -251,4 +297,12 @@ export default function ScheduleFields({
       </div>
     </div>
   )
+}
+
+/** The wall-clock minute an instant falls on, as Scheduled For writes one. */
+function timeOfDay(instant: Date): string {
+  return [
+    String(instant.getHours()).padStart(2, '0'),
+    String(instant.getMinutes()).padStart(2, '0'),
+  ].join(':')
 }

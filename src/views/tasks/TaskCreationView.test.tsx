@@ -49,12 +49,23 @@ function pressEscape() {
   fireEvent.keyDown(field(), { key: 'Escape' })
 }
 
+// An Unscheduled Task offers an action rather than an empty date field, so
+// reaching the field is asking for one first — see ScheduleFields.
 function dateField(): HTMLInputElement {
+  const add = screen.queryByRole('button', { name: 'Add a date' })
+  if (add !== null) fireEvent.click(add)
   return screen.getByLabelText('Scheduled For') as HTMLInputElement
 }
 
 function timeField(): HTMLInputElement {
+  const add = screen.queryByRole('button', { name: 'Add a time' })
+  if (add !== null) fireEvent.click(add)
   return screen.getByLabelText('Time') as HTMLInputElement
+}
+
+/** Whether the row is offering a date rather than showing one. */
+function isUnscheduled(): boolean {
+  return screen.queryByRole('button', { name: 'Add a date' }) !== null
 }
 
 function pick(control: HTMLInputElement, value: string) {
@@ -274,10 +285,38 @@ describe('scheduling a Task as it is created', () => {
     expect(task.scheduledTime).toBeNull()
   })
 
+  it('offers no date-shaped field while the Task is Unscheduled', async () => {
+    // WebKit draws today's date into an empty date field, so a field here
+    // would say the Task is scheduled for today while the time and the cadence
+    // sat disabled beside it with no visible reason.
+    showTaskCreation(fakeDesktop(), await openJournal())
+
+    expect(screen.queryByLabelText('Scheduled For')).toBeNull()
+    expect(isUnscheduled()).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add a date' }))
+
+    const today = new Date()
+    expect(
+      (screen.getByLabelText('Scheduled For') as HTMLInputElement).value,
+    ).toBe(
+      [
+        String(today.getFullYear()).padStart(4, '0'),
+        String(today.getMonth() + 1).padStart(2, '0'),
+        String(today.getDate()).padStart(2, '0'),
+      ].join('-'),
+    )
+    expect(timeField().disabled).toBe(false)
+    expect(
+      (screen.getByLabelText('Repeats') as HTMLSelectElement).disabled,
+    ).toBe(false)
+  })
+
   it('has no time until there is a date for it to be a minute of', async () => {
     showTaskCreation(fakeDesktop(), await openJournal())
 
-    expect(timeField().disabled).toBe(true)
+    expect(screen.queryByLabelText('Time')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add a time' })).toBeNull()
 
     pick(dateField(), '2026-03-16')
 
@@ -293,9 +332,9 @@ describe('scheduling a Task as it is created', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear the schedule' }))
 
-    expect(dateField().value).toBe('')
-    expect(timeField().value).toBe('')
-    expect(timeField().disabled).toBe(true)
+    expect(isUnscheduled()).toBe(true)
+    expect(screen.queryByLabelText('Scheduled For')).toBeNull()
+    expect(screen.queryByLabelText('Time')).toBeNull()
   })
 
   it('leaves the description exactly as typed, schedule words and all', async () => {
@@ -320,14 +359,14 @@ describe('scheduling a Task as it is created', () => {
     pick(dateField(), '2026-03-16')
     pressEnter()
 
-    await expect.poll(() => dateField().value).toBe('')
+    await expect.poll(() => isUnscheduled()).toBe(true)
     expect(field().value).toBe('')
 
     type('abandoned')
     pick(dateField(), '2026-03-20')
     pressEscape()
 
-    await expect.poll(() => dateField().value).toBe('')
+    await expect.poll(() => isUnscheduled()).toBe(true)
   })
 
   it('asks about Task Alerts once a Task with a time is committed', async () => {
@@ -509,6 +548,6 @@ describe('repeating a Task as it is created', () => {
 
     await expect.poll(async () => await journal.openTasks()).toHaveLength(1)
     await expect.poll(() => cadenceField().value).toBe('none')
-    expect(dateField().value).toBe('')
+    expect(isUnscheduled()).toBe(true)
   })
 })
