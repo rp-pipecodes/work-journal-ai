@@ -837,7 +837,7 @@ describe('a Recurring Task in the list', () => {
       .toBeNull()
   })
 
-  it('stops the recurrence from the row, after asking', async () => {
+  it('stops the recurrence from the row, immediately and without asking', async () => {
     const { core, task } = await showRecurring({ completions: 1 })
 
     fireEvent.click(
@@ -845,10 +845,10 @@ describe('a Recurring Task in the list', () => {
         name: 'Stop repeating “water the plants”',
       }),
     )
-    const asked = await screen.findByRole('alertdialog')
-    expect(asked.textContent).toContain('stays exactly where it is')
-    fireEvent.click(screen.getByRole('button', { name: 'Stop repeating' }))
 
+    // Nothing stood between the press and the change: the user said it
+    // outright, and nothing is destroyed by it.
+    expect(screen.queryByRole('alertdialog')).toBeNull()
     await expect
       .poll(async () => (await core.openTasks())[0].recurrence)
       .toBeNull()

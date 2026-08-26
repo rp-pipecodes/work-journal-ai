@@ -218,7 +218,7 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 - [ ] Editing the Task's date, time, weekdays or cadence and saving replaces its Open occurrence without recording a completion, and **Undo** is no longer offered.
 - [ ] Completing again after a completion also stops **Undo** reaching the older one: only the latest is ever offered.
 - [ ] The row shows an expandable count of completed occurrences; opening it lists each slot and when it was kept, and none of them appear in **Completed Tasks**.
-- [ ] **Stop repeating** asks first, then leaves the Task exactly where it stands with its history still under it; the Task can then be completed like any other.
+- [ ] **Stop repeating** on the row takes effect immediately, with no confirmation, and leaves the Task exactly where it stands with its history still under it; the Task can then be completed like any other.
 - [ ] Clearing the date on a Recurring Task in the Editor asks before doing it, and cancelling leaves the cadence untouched.
 - [ ] **Delete** on a Recurring Task says the occurrence history goes too; confirming removes both.
 - [ ] Quitting and relaunching leaves every Recurring Task on exactly the slot it was on, with its history intact — and force-quitting during a completion leaves either the old slot or the new one, never both and never neither.

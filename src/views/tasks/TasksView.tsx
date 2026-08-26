@@ -106,10 +106,6 @@ export default function TasksView({
   // than the session: a list only ever has one change in progress.
   const [editing, setEditing] = useState<Task | null>(null)
   const [deleting, setDeleting] = useState<Task | null>(null)
-  // And the one whose recurrence is about to be stopped. Confirmed because it
-  // is the end of a series rather than one occurrence, even though the Task
-  // and its history survive it.
-  const [stopping, setStopping] = useState<Task | null>(null)
   // The Task a clicked Task Alert was about. Null until one is clicked: the
   // window opens on the whole list, not on one row.
   const [focused, setFocused] = useState<string | null>(null)
@@ -229,7 +225,7 @@ export default function TasksView({
       setEditing(null)
       return
     }
-    if (deleting !== null || stopping !== null) return
+    if (deleting !== null) return
 
     void desktop.closeWindow()
   }
@@ -271,7 +267,7 @@ export default function TasksView({
         }
         onEdit={() => setEditing(task)}
         onUndoCompletion={() => void session.undoCompletion(task.id)}
-        onStopRecurrence={() => setStopping(task)}
+        onStopRecurrence={() => void session.stopRecurrence(task.id)}
         onDelete={() => setDeleting(task)}
       />
     )
@@ -398,16 +394,6 @@ export default function TasksView({
           onCancel={() => setEditing(null)}
         />
       )}
-
-      <ConfirmStopRecurrence
-        open={stopping !== null}
-        onConfirm={() => {
-          if (stopping === null) return
-          setStopping(null)
-          void session.stopRecurrence(stopping.id)
-        }}
-        onCancel={() => setStopping(null)}
-      />
 
       <ConfirmDelete
         task={deleting}
@@ -766,7 +752,6 @@ function TaskEditor({
 
       <ConfirmStopRecurrence
         open={stopping !== null}
-        why="A cadence is counted from its date, so clearing the date also stops the recurrence."
         onConfirm={() => {
           if (stopping === null) return
           setSchedule(stopping.schedule)
@@ -780,23 +765,18 @@ function TaskEditor({
 }
 
 /**
- * The guard on ending a series, wherever it is reached from — the row's own
- * action, or clearing the date the cadence is counted from. One dialog because
- * it is one decision: only why it is being asked differs.
- *
- * Not destructive — the Task stays exactly where it stands and every completed
- * occurrence stays under it — but it is the end of something the user set up,
- * so it is asked rather than assumed.
+ * The guard on clearing the date a cadence is counted from, which stops the
+ * recurrence as a side effect. Only that: Stop repeating and Does not repeat
+ * are the user saying it outright, and confirming what somebody just chose
+ * would be in the way. Nothing is destroyed either way — the Task stays where
+ * it stands and every completed occurrence stays under it.
  */
 function ConfirmStopRecurrence({
   open,
-  why,
   onConfirm,
   onCancel,
 }: {
   open: boolean
-  /** What brought this on, in the words of whatever the user just did. */
-  why?: string
   onConfirm: () => void
   onCancel: () => void
 }) {
@@ -811,9 +791,10 @@ function ConfirmStopRecurrence({
         <AlertDialogHeader>
           <AlertDialogTitle>Stop repeating this Task?</AlertDialogTitle>
           <AlertDialogDescription>
-            {why === undefined ? '' : `${why} `}
-            The Task stays exactly where it is, and so does everything it has
-            already completed. It simply stops coming round again.
+            A cadence is counted from its date, so clearing the date also stops
+            the recurrence. The Task stays exactly where it is, and so does
+            everything it has already completed. It simply stops coming round
+            again.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
