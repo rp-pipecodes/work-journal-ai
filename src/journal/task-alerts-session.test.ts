@@ -199,6 +199,63 @@ describe('createTaskAlertsSession', () => {
     ])
   })
 
+  it('asks again for a change that landed while it was reconciling', async () => {
+    const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
+    await session.start()
+
+    // The OS held mid-reconciliation, so a second change lands while the first
+    // run has already read the journal — the case a dropped trigger loses.
+    const reconcile = desktop.reconcileTaskAlerts.bind(desktop)
+    let release = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    desktop.reconcileTaskAlerts = async (alerts) => {
+      await held
+      await reconcile(alerts)
+    }
+
+    await journal.createTask('first', { date: '2026-03-16', time: '17:00' })
+    await desktop.announceTasksChanged()
+    await vi.advanceTimersByTimeAsync(0)
+
+    await journal.createTask('second', { date: '2026-03-16', time: '18:00' })
+    await desktop.announceTasksChanged()
+    await vi.advanceTimersByTimeAsync(0)
+
+    release()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(pending(desktop).sort()).toEqual(['first', 'second'])
+  })
+
+  it('says so when the OS would not hold what the journal asked', async () => {
+    const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
+    const outcomes: boolean[] = []
+    await desktop.onTaskAlertsReconciled((held) => outcomes.push(held))
+    await journal.createTask('ahead', { date: '2026-03-16', time: '17:00' })
+    desktop.alertsFail = true
+
+    await session.start()
+
+    expect(outcomes).toEqual([false])
+  })
+
+  it('says so again once the OS takes them after all', async () => {
+    const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
+    const outcomes: boolean[] = []
+    await desktop.onTaskAlertsReconciled((held) => outcomes.push(held))
+    await journal.createTask('ahead', { date: '2026-03-16', time: '17:00' })
+    desktop.alertsFail = true
+    await session.start()
+
+    desktop.alertsFail = false
+    desktop.wake()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(outcomes).toEqual([false, true])
+  })
+
   it('stops asking once it is stopped', async () => {
     const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
     await session.start()

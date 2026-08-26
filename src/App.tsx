@@ -1,4 +1,4 @@
-import type { Journal } from './journal/journal'
+import type { Clock, Journal } from './journal/journal'
 import type { Desktop } from './platform/desktop'
 import type { AppSettings } from './settings/app-settings'
 import CaptureView from './views/capture/CaptureView'
@@ -20,11 +20,14 @@ export default function App({
   desktop,
   settings,
   journal,
+  clock,
 }: {
   windowLabel: string
   desktop: Desktop
   settings: AppSettings
   journal: Promise<Journal>
+  /** What the day is, for the views that group by it. */
+  clock: Clock
 }) {
   const view = viewForLabel(windowLabel)
 
@@ -45,7 +48,7 @@ export default function App({
   }
 
   if (view === 'tasks') {
-    return <TasksView desktop={desktop} journal={journal} />
+    return <TasksView desktop={desktop} journal={journal} clock={clock} />
   }
 
   if (view === 'settings') {

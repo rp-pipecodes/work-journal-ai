@@ -480,7 +480,6 @@ const UPDATE_TASK_COMPLETED_AT = `
   UPDATE tasks SET completed_at = ? WHERE id = ?
 `
 
-
 const DELETE_TASK = `
   DELETE FROM tasks WHERE id = ?
 `

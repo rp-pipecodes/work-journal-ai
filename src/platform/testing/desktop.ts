@@ -125,6 +125,7 @@ export function fakeDesktop({
   const themeChanged = subscribers<Theme>()
   const windowFocused = subscribers<void>()
   const taskAlertOpened = subscribers<string>()
+  const taskAlertsReconciled = subscribers<boolean>()
 
   const desktop: FakeDesktop = {
     stored,
@@ -226,7 +227,16 @@ export function fakeDesktop({
         desktop.alertPermission === 'granted' ? alerts : []
     },
     onTaskAlertOpened: async (handle) => taskAlertOpened.add(handle),
-    openTaskAlert: (taskId) => taskAlertOpened.announce(taskId),
+    announceTaskAlertsReconciled: async (held) =>
+      taskAlertsReconciled.announce(held),
+    onTaskAlertsReconciled: async (handle) => taskAlertsReconciled.add(handle),
+    openTaskAlert: (taskId) => {
+      // Both, exactly as the Rust side does it: written down for a Tasks View
+      // that this very click is about to build, and announced for one that is
+      // already on screen. Whichever claims it, it is claimed once.
+      desktop.pendingTaskAlert = taskId
+      taskAlertOpened.announce(taskId)
+    },
     openedTaskAlert: async () => {
       // Handed over exactly once, as the real one is: an Alert singles a Task
       // out for the window it opened, not for every window after it.

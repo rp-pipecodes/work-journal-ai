@@ -222,6 +222,14 @@ mod user_notifications {
 
     /// One request, as macOS holds it: the whole Task Description as the body,
     /// the default sound, and a calendar trigger that fires once.
+    ///
+    /// The components are handed over civil and unresolved, which is what makes
+    /// "Monday at 14:00" still 14:00 after the user travels — so the two
+    /// awkward days of the year are resolved by `UNCalendarNotificationTrigger`
+    /// against the timezone in force when the moment arrives, and not here.
+    /// Apple documents no guarantee for either one, so both are verified by
+    /// hand rather than asserted; see the Task Alerts section of
+    /// docs/manual-verification.md.
     fn build(alert: &TaskAlert) -> Retained<UNNotificationRequest> {
         let content = UNMutableNotificationContent::new();
         // No separate title: the Task Description is the whole of what the

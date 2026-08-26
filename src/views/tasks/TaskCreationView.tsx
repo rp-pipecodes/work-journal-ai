@@ -96,8 +96,19 @@ export default function TaskCreationView({
       // the system's and belongs in front of whatever the user is doing, not
       // behind a panel held open for it. The Task is stored either way — see
       // docs/adr/0017-the-os-schedules-task-alerts.md.
+      //
+      // The answer is deliberately not shown here: by the time it arrives this
+      // window is gone, and there is nowhere honest to put it. A refusal is
+      // the user's own answer to a prompt they just saw, and Settings › Task
+      // Alerts is where it stays sayable afterwards. A grant announces, so the
+      // window that registers the Alerts hears it — and if that registration
+      // fails, an open Tasks View says so.
       if (scheduledFor !== null && scheduledFor.time !== null) {
-        void askAboutTaskAlerts(desktop)
+        void askAboutTaskAlerts(desktop).then((answer) => {
+          if (answer !== 'granted') {
+            console.warn('the first timed Task got no Task Alert:', answer)
+          }
+        })
       }
     },
     [desktop, journal, dismiss],
@@ -225,7 +236,6 @@ export default function TaskCreationView({
     </div>
   )
 }
-
 
 const PROBLEM_ID = 'task-creation-problem'
 const BARGAIN_ID = 'task-creation-bargain'

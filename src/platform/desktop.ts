@@ -214,6 +214,16 @@ export const TASKS_CHANGED_EVENT = 'tasks://changed'
  */
 export const TASK_ALERT_OPENED_EVENT = 'task-alert://opened'
 
+/**
+ * How a reconciliation went: whether the OS is now holding what the journal
+ * says it should. Spoken by the reconciliation, which runs in the capture
+ * window and has no screen of its own, and heard by Tasks View, which does. A
+ * failure never rolls a Task back — this is only how it stops being silent; see
+ * docs/adr/0017-the-os-schedules-task-alerts.md. Spoken and heard entirely on
+ * this side, so the Rust side keeps no copy of it.
+ */
+export const TASK_ALERTS_RECONCILED_EVENT = 'task-alert://reconciled'
+
 /** Where an export ended up — the Rust side's `ExportedFile`. */
 export interface ExportedFile {
   path: string
@@ -358,6 +368,14 @@ export interface Desktop {
    * View already on screen can single it out.
    */
   onTaskAlertOpened(handle: (taskId: string) => void): Promise<Unlisten>
+  /**
+   * Whether the OS took what the journal asked it to hold. Said by the window
+   * that reconciles, which is headless, so that the window with a screen can
+   * say it to the user — and said either way, so a failure that has since been
+   * put right stops being on screen.
+   */
+  announceTaskAlertsReconciled(held: boolean): Promise<void>
+  onTaskAlertsReconciled(handle: (held: boolean) => void): Promise<Unlisten>
   /**
    * The Task Alert that opened this window, if one did — asked for by Tasks
    * View as it opens, and null when it was opened any other way.

@@ -12,6 +12,14 @@ import type { Desktop } from '@/platform/desktop'
  */
 export type TaskAlertAnswer = 'granted' | 'refused' | 'unknown'
 
+/**
+ * What a reconciliation macOS would not take says, on the one screen that can
+ * say it. The Task and its schedule are already stored and stay exactly as they
+ * are — all that failed is the OS's copy of the answer.
+ */
+export const ALERTS_NOT_HELD =
+  'macOS is not holding the alerts for your scheduled Tasks. Every Task and its schedule is saved; the app will keep trying.'
+
 /** What a denied Task Alert says, where the user just asked for one. */
 export const ALERT_REFUSED =
   'macOS is not allowing Work Journal to alert you. The Task is saved and its schedule is kept; turn notifications on in Settings to be alerted.'

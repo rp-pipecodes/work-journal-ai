@@ -201,6 +201,7 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 - [ ] Open Tasks are grouped **Overdue**, **Today**, **Upcoming**, **Unscheduled**, each sorted earliest first except **Unscheduled**, which is newest created first; empty groups are absent.
 - [ ] Leaving Tasks View open across local midnight, or sleeping and waking the machine, re-groups it without a manual refresh.
 - [ ] Changing the Mac's timezone and returning to Tasks View leaves each Task at the wall-clock time it was given.
+- [ ] On the day the clocks go forward, a Task scheduled inside the skipped hour still groups as the day's own — it is never lost from every group.
 
 ## Task Alerts
 
@@ -221,6 +222,12 @@ Requires the release build: macOS will not hold a notification for a binary with
 - [ ] Refusing the prompt still saves the Task and its schedule; Tasks View says the Task is unaffected, and **Settings › Task Alerts** reads **Not allowed** with the path `System Settings › Notifications › Work Journal` and an **Open System Settings** button that opens that pane.
 - [ ] Turning notifications back on there and returning to the Settings window changes **Task Alerts** to **Allowed** without a relaunch, and the Tasks still ahead are registered; none of the past ones are replayed.
 - [ ] With Work Journal denied, everything else about Tasks — creating, scheduling, completing, exporting — still works.
+
+Daylight saving is macOS's to resolve, not the app's: the app registers the civil date and minute, and the OS matches its own clock against them. These are what verify it — run them by setting the Mac's clock and date forward to the transition, or on the day itself.
+
+- [ ] A Task scheduled at a wall-clock time the spring transition skips still alerts, at the first valid minute after the clocks move — not silently never.
+- [ ] A Task scheduled at a wall-clock time the autumn transition repeats alerts exactly once, at the first of the two occurrences.
+- [ ] Reconciling while an Alert's minute is arriving — saving another Task at that moment — does not swallow the Alert that was due.
 
 ## Export
 

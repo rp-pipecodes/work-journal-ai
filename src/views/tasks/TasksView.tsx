@@ -32,7 +32,6 @@ import {
   formatTaskCompletedAt,
   msUntilNextJournalDay,
   scheduleOf,
-  systemClock,
   taskIdOfAlert,
   type Clock,
   type Journal,
@@ -69,12 +68,16 @@ const GROUP_HEADINGS: Record<TaskGroupName, string> = {
 export default function TasksView({
   desktop,
   journal,
-  clock = systemClock,
+  clock,
 }: {
   desktop: Desktop
   journal: Promise<Journal>
-  /** Injected so a test can put the window on a particular day. */
-  clock?: Clock
+  /**
+   * Which day it is, and so which group each Task falls in. Handed down from
+   * the composition root like every other collaborator — see
+   * docs/adr/0003-one-composition-root-one-desktop-module.md.
+   */
+  clock: Clock
 }) {
   const [snapshot, setSnapshot] = useState<TasksSnapshot>(openingTasksSnapshot)
   const [session] = useState(() =>
@@ -88,7 +91,7 @@ export default function TasksView({
       onChange: setSnapshot,
     }),
   )
-  const { showing, tasks, problem, alertRefusal } = snapshot
+  const { showing, tasks, problem, alertRefusal, alertProblem } = snapshot
 
   // The one Task being changed in the Editor, and the one waiting on a
   // confirmed deletion. Both are single, and both are about this screen rather
@@ -177,11 +180,29 @@ export default function TasksView({
       console.error('could not read the Task Alert that opened this', error)
     })
 
-    // And the announcement, for a window that was already on screen.
-    const opened = desktop.onTaskAlertOpened(single)
+    // And the announcement, for a window that was already on screen. The Rust
+    // side writes every click down as well as announcing it, because it cannot
+    // know whether a window is listening — so the window that hears one claims
+    // what was written down too. Otherwise a click handled here would be left
+    // sitting there for the next Tasks View to open, which would single out a
+    // Task nobody asked about.
+    const opened = desktop.onTaskAlertOpened((alertId) => {
+      void desktop.openedTaskAlert().catch((error: unknown) => {
+        console.error('could not claim the Task Alert that was announced', error)
+      })
+      single(alertId)
+    })
+
+    // How the reconciliation went. It runs in the capture window, which has no
+    // screen, so this is where a failure becomes something the user can see —
+    // and where it stops being seen once one succeeds.
+    const reconciled = desktop.onTaskAlertsReconciled((held) => {
+      session.reconciled(held)
+    })
 
     return () => {
       void opened.then((stop) => stop())
+      void reconciled.then((stop) => stop())
     }
   }, [desktop, session])
 
@@ -304,6 +325,14 @@ export default function TasksView({
       {alertRefusal !== null && (
         <p role="status" className="shrink-0 px-6 pb-3 type-meta text-muted-foreground">
           {alertRefusal}
+        </p>
+      )}
+
+      {/* The Tasks and their schedules are untouched; what failed is only the
+          OS's copy of them, which the next reconciliation asks for again. */}
+      {alertProblem !== null && (
+        <p role="status" className="shrink-0 px-6 pb-3 type-meta text-muted-foreground">
+          {alertProblem}
         </p>
       )}
 

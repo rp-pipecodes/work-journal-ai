@@ -88,6 +88,7 @@ createRoot(document.getElementById('root')!).render(
           desktop={desktop}
           settings={settings}
           journal={journal}
+          clock={systemClock}
         />
       </ThemeProvider>
     </ErrorBoundary>

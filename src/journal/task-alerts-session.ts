@@ -60,19 +60,42 @@ export function createTaskAlertsSession({
   let unlisten: Array<() => void> = []
   // Two triggers can land together — a Task saved just as the machine wakes —
   // and two reconciliations racing would hand macOS two different answers in
-  // an order neither of them chose. They never overlap; the one that arrives
-  // late is dropped, and the next trigger recomputes everything anyway.
+  // an order neither of them chose. So they never overlap.
   let reconciling = false
+  // But a trigger that lands mid-run is not dropped either: the run in flight
+  // may already have read the journal, so what it is about to hand macOS is
+  // the answer from before this change. It is asked for again the moment that
+  // run ends, which is what makes "rescheduled on every change" true rather
+  // than true within fifteen minutes.
+  let askedAgain = false
 
   /**
-   * One reconciliation. Every failure stops here: a Task Alert is derived from
-   * a Task that is already stored, so an OS that refuses leaves the journal
-   * exactly as it was — never a rollback, and never a deleted Task.
+   * One reconciliation, and then another if anything asked while it ran. Every
+   * failure stops here: a Task Alert is derived from a Task that is already
+   * stored, so an OS that refuses leaves the journal exactly as it was — never
+   * a rollback, and never a deleted Task.
    */
   async function reconcile(): Promise<void> {
-    if (!running || reconciling) return
-    reconciling = true
+    if (!running) return
+    if (reconciling) {
+      askedAgain = true
+      return
+    }
 
+    reconciling = true
+    try {
+      do {
+        askedAgain = false
+        await reconcileOnce()
+      } while (askedAgain && running)
+    } finally {
+      reconciling = false
+      askedAgain = false
+    }
+  }
+
+  /** The whole answer, recomputed from the record and handed to the OS. */
+  async function reconcileOnce(): Promise<void> {
     try {
       const permission = await desktop.taskAlertPermission()
       if (permission !== 'granted') {
@@ -88,10 +111,27 @@ export function createTaskAlertsSession({
       if (!running) return
 
       await desktop.reconcileTaskAlerts(alerts)
+      await announce(true)
     } catch (error) {
+      // Said out loud as well as logged: a Task whose Alert macOS would not
+      // hold is still a Task, but the user is the only one who can tell the
+      // difference between an Alert that is coming and one that is not.
       console.error('could not reconcile the Task Alerts', error)
-    } finally {
-      reconciling = false
+      await announce(false)
+    }
+  }
+
+  /**
+   * How it went, told to whichever Tasks View is open — this window has no
+   * screen to say it on. Said either way, so a failure that has since been put
+   * right stops being on screen. Never worth failing a reconciliation over: an
+   * announcement nobody hears leaves everything exactly as it was.
+   */
+  async function announce(held: boolean): Promise<void> {
+    try {
+      await desktop.announceTaskAlertsReconciled(held)
+    } catch (error) {
+      console.error('could not say how the Task Alerts went', error)
     }
   }
 

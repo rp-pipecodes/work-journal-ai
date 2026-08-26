@@ -30,6 +30,7 @@ import {
   SETTINGS_FILE,
   SYSTEM_WOKE_EVENT,
   TASK_ALERT_OPENED_EVENT,
+  TASK_ALERTS_RECONCILED_EVENT,
   TASK_CREATION_SHOWN_EVENT,
   taskCreationWindowHeight,
   TASKS_CHANGED_EVENT,
@@ -148,6 +149,12 @@ export function createTauriDesktop(): Desktop {
     onTaskAlertOpened: (handle) =>
       listen<{ taskId: string }>(TASK_ALERT_OPENED_EVENT, ({ payload }) =>
         handle(payload.taskId),
+      ),
+    announceTaskAlertsReconciled: (held) =>
+      emit(TASK_ALERTS_RECONCILED_EVENT, { held }),
+    onTaskAlertsReconciled: (handle) =>
+      listen<{ held: boolean }>(TASK_ALERTS_RECONCILED_EVENT, ({ payload }) =>
+        handle(payload.held),
       ),
     openedTaskAlert: async () =>
       (await invoke<string | null>('opened_task_alert')) ?? null,

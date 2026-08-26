@@ -460,6 +460,42 @@ describe('asking about Task Alerts', () => {
   })
 })
 
+describe('a reconciliation the OS refused', () => {
+  it('says so, since the window that reconciles has no screen', async () => {
+    const { desktop } = await showTasks(['renew the cert'])
+    await screen.findByText('renew the cert')
+
+    await desktop.announceTaskAlertsReconciled(false)
+
+    expect(
+      await screen.findByText(/macOS is not holding the alerts/),
+    ).not.toBeNull()
+  })
+
+  it('stops saying so once the OS takes them after all', async () => {
+    const { desktop } = await showTasks(['renew the cert'])
+    await screen.findByText('renew the cert')
+    await desktop.announceTaskAlertsReconciled(false)
+    await screen.findByText(/macOS is not holding the alerts/)
+
+    await desktop.announceTaskAlertsReconciled(true)
+
+    await expect
+      .poll(() => screen.queryByText(/macOS is not holding the alerts/))
+      .toBeNull()
+  })
+
+  it('leaves every Task exactly where it was', async () => {
+    const { desktop } = await showTasks(['renew the cert'])
+    await screen.findByText('renew the cert')
+
+    await desktop.announceTaskAlertsReconciled(false)
+    await screen.findByText(/macOS is not holding the alerts/)
+
+    expect(screen.getByText('renew the cert')).not.toBeNull()
+  })
+})
+
 describe('a clicked Task Alert', () => {
   it('singles out the Task even when the click built the window', async () => {
     const { driver, close } = await openTestDatabase()
@@ -520,6 +556,27 @@ describe('a clicked Task Alert', () => {
           ?.getAttribute('aria-current'),
       )
       .toBeNull()
+  })
+
+  it('leaves nothing behind for the next window when it was announced', async () => {
+    const { desktop, created } = await showTasks(['renew the cert'])
+    await screen.findByText('renew the cert')
+
+    // The click is written down as well as announced — the Rust side cannot
+    // know a window is listening. This one was, so nothing may be left sitting
+    // there for the next Tasks View to inherit.
+    desktop.openTaskAlert(`task:${created[0].id}`)
+
+    await expect
+      .poll(() =>
+        screen
+          .queryByText('renew the cert')
+          ?.closest('li')
+          ?.getAttribute('aria-current'),
+      )
+      .toBe('true')
+    // Read rather than claimed: asking would empty it and prove nothing.
+    await expect.poll(() => desktop.pendingTaskAlert).toBeNull()
   })
 
   it('shows the Open list with that Task singled out', async () => {

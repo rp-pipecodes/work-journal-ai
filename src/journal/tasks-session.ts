@@ -16,7 +16,11 @@
  */
 
 import type { Desktop } from '@/platform/desktop'
-import { ALERT_REFUSED, askAboutTaskAlerts } from './task-alerts'
+import {
+  ALERT_REFUSED,
+  ALERTS_NOT_HELD,
+  askAboutTaskAlerts,
+} from './task-alerts'
 import {
   groupOpenTasks,
   isOpen,
@@ -62,6 +66,12 @@ export interface TasksSnapshot {
    * sayable afterwards.
    */
   alertRefusal: string | null
+  /**
+   * That the OS is not holding what the journal says it should — the last
+   * reconciliation failed, and this window is the one with a screen to say so
+   * on. Nothing until one fails, and gone again the moment one succeeds.
+   */
+  alertProblem: string | null
 }
 
 /** Where every session starts: nothing asked yet, so nothing to show. */
@@ -70,6 +80,7 @@ export const openingTasksSnapshot: TasksSnapshot = {
   tasks: { state: 'loading' },
   problem: null,
   alertRefusal: null,
+  alertProblem: null,
 }
 
 export interface TasksSession {
@@ -85,6 +96,12 @@ export interface TasksSession {
    * another Tasks View. Re-reads whichever list is showing.
    */
   refresh(): Promise<void>
+  /**
+   * How the reconciliation the capture window runs went. It is headless, so it
+   * says it here: a failure never rolls a Task back, but the user is the only
+   * one who can tell an Alert that is coming from one that is not.
+   */
+  reconciled(held: boolean): void
   /**
    * The Tasks are what they were, but the day has moved: local midnight, a
    * wake, or the window being looked at again. Re-groups what is already here,
@@ -240,6 +257,10 @@ export function createTasksSession({
     },
 
     refresh: () => read(snapshot.showing),
+
+    reconciled(held) {
+      show({ alertProblem: held ? null : ALERTS_NOT_HELD })
+    },
 
     regroup() {
       const { tasks } = snapshot
