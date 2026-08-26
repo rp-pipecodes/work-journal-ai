@@ -1,7 +1,8 @@
-//! Export: every Note out of the SQLite file and into a Markdown one, so
-//! nothing captured in this app is locked inside it. What to write is the
-//! journal core's decision — see `src/journal/journal.ts`; where to put it,
-//! and never on top of something already there, is decided here.
+//! Export: the whole journal — Notes and Tasks alike — out of the SQLite file
+//! and into a Markdown one, so nothing kept in this app is locked inside it.
+//! What to write is the journal core's decision — see `src/journal/journal.ts`;
+//! where to put it, and never on top of something already there, is decided
+//! here.
 
 use serde::Serialize;
 use std::io;
@@ -54,8 +55,10 @@ fn plain_file_name(file_name: &str) -> io::Result<PathBuf> {
     ))
 }
 
-/// The first name not already taken: `notes.md`, then `notes-2.md`, and so on.
-/// Exporting twice in one day leaves two files rather than one.
+/// The first name not already taken: `work-journal-2026-03-11.md`, then
+/// `work-journal-2026-03-11-2.md`, and so on — the name itself is
+/// `exportFileName`'s in `src/journal/journal.ts`. Exporting twice in one day
+/// leaves two files rather than one.
 fn free_path(directory: &Path, file_name: &Path) -> io::Result<PathBuf> {
     let first = directory.join(file_name);
 

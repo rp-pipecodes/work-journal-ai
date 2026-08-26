@@ -10,6 +10,14 @@ describe('viewForLabel', () => {
     expect(viewForLabel('history')).toBe('history')
   })
 
+  it('routes the Task Creation window to its own view', () => {
+    expect(viewForLabel('task-creation')).toBe('task-creation')
+  })
+
+  it('routes the tasks window to Tasks View', () => {
+    expect(viewForLabel('tasks')).toBe('tasks')
+  })
+
   it('routes the settings window to the settings view', () => {
     expect(viewForLabel('settings')).toBe('settings')
   })

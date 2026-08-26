@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ProjectChip from '@/components/ProjectChip'
+import KeyHint from '@/components/KeyHint'
 import {
   applyPrediction,
   decideKeystroke,
@@ -19,8 +20,10 @@ import {
 
 /**
  * One line, one keystroke. The window behind this view is created at startup
- * and only ever shown and hidden, so the view resets itself every time the
- * Capture begins rather than relying on a fresh React tree.
+ * and only ever shown and hidden, so the view clears itself rather than
+ * relying on a fresh React tree — on the Capture ending, never on the window
+ * being shown, since the window is also put away to make room for Task
+ * Creation with a Body still half-typed in it.
  *
  * While a Project Marker is open, Predictions drawn from Projects already on
  * Notes sit under the field. Choosing one fills the marker; typing a new name
@@ -52,19 +55,15 @@ export default function CaptureView({
   const prefix = markerPrefix(body)
   const predictions = prefix === null ? [] : offered
 
-  // A Capture never inherits the last one: a Draft is nothing, so both the
-  // beginning of one and the end of one leave exactly the same empty window.
+  // A Capture never inherits the last one: a Draft is nothing, so ending one
+  // leaves exactly the empty window the next one begins in. Ending it is the
+  // only thing that clears it — see the window being shown, below.
   const reset = useCallback(() => {
     setBody('')
     setRefusals(0)
     setOffered([])
     setHighlight(0)
   }, [])
-
-  const begin = useCallback(() => {
-    reset()
-    field.current?.focus()
-  }, [reset])
 
   const dismiss = useCallback(async () => {
     reset()
@@ -129,20 +128,29 @@ export default function CaptureView({
     // below; only this window's document is marked, since the bundle is shared.
     document.body.classList.add('capture-window')
 
-    // On mount the field is already empty; from here on, every Capture begins
-    // with the window being shown.
     field.current?.focus()
 
-    const shown = desktop.onCaptureShown(begin)
+    // Shown again after having been hidden: take focus, and change nothing
+    // else. A window is put away either by a dismiss, which has already
+    // cleared it, or by the other Entry Point being invoked, which must leave
+    // the half-typed Body exactly where the user left it.
+    const shown = desktop.onCaptureShown(() => field.current?.focus())
     // Clicking away is a discard, not a Capture left floating over the screen.
-    const blurred = desktop.onWindowBlurred(() => void dismiss())
+    // Unless the window is already gone: the other resident window was invoked,
+    // the Rust side put this one away, and what is half-typed here is waiting
+    // for the next time rather than being thrown away behind the user's back.
+    const blurred = desktop.onWindowBlurred(() => {
+      void desktop.isWindowVisible().then((visible) => {
+        if (visible) void dismiss()
+      })
+    })
 
     return () => {
       document.body.classList.remove('capture-window')
       void shown.then((stop) => stop())
       void blurred.then((stop) => stop())
     }
-  }, [desktop, begin, dismiss])
+  }, [desktop, dismiss])
 
   useEffect(() => {
     if (prefix === null) {
@@ -283,8 +291,8 @@ export default function CaptureView({
             id={BARGAIN_ID}
             className="pointer-events-none absolute inset-y-0 right-5 flex select-none items-center gap-3 type-micro text-muted-foreground/70"
           >
-            <Hint glyph="↵" reading="Return commits." what="commits" />
-            <Hint glyph="esc" reading="Escape abandons." what="abandons" />
+            <KeyHint glyph="↵" reading="Return commits." what="commits" />
+            <KeyHint glyph="esc" reading="Escape abandons." what="abandons" />
           </div>
         </div>
         {predictions.length > 0 && (
@@ -352,33 +360,6 @@ export default function CaptureView({
   )
 }
 
-/**
- * Half of the bargain: a key cap and what pressing it is worth. Said twice and
- * never at once — a glyph beside a verb for a reader who can see the key, and
- * the whole sentence for one who cannot, since "↵ commits" read aloud is not
- * one.
- */
-function Hint({
-  glyph,
-  reading,
-  what,
-}: {
-  glyph: string
-  reading: string
-  what: string
-}) {
-  return (
-    <>
-      <span className="sr-only">{reading}</span>
-      <span aria-hidden="true" className="flex items-center gap-1">
-        <kbd className="rounded-sm border border-border bg-muted px-1 py-px font-sans type-micro leading-none text-muted-foreground">
-          {glyph}
-        </kbd>
-        {what}
-      </span>
-    </>
-  )
-}
 
 const PROBLEM_ID = 'capture-problem'
 const BARGAIN_ID = 'capture-bargain'

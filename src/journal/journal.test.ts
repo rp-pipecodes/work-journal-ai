@@ -6,6 +6,7 @@ import {
   decideArrival,
   decideKeystroke,
   describeCopiedDigest,
+  describeExport,
   rangeForJournalDay,
   rangeForPreset,
   rangeForDays,
@@ -1214,7 +1215,7 @@ describe('digest of a Filter narrowed by Project', () => {
   })
 })
 
-describe('exportAll', () => {
+describe('exportJournal', () => {
   it('includes every Note in the database exactly once', async () => {
     const { journal, clock } = await journalAt('2026-03-11T09:00:00')
     const bodies = []
@@ -1226,7 +1227,7 @@ describe('exportAll', () => {
       }
     }
 
-    const exported = await journal.exportAll()
+    const exported = await journal.exportJournal()
 
     const bullets = exported.markdown
       .split('\n')
@@ -1244,7 +1245,7 @@ describe('exportAll', () => {
     clock.set(local('2026-03-13T09:00:00'))
     await journal.capture('today')
 
-    const exported = await journal.exportAll()
+    const exported = await journal.exportJournal()
 
     expect(exported.markdown).toContain('- two years ago')
     expect(exported.markdown).toContain('- today')
@@ -1257,10 +1258,12 @@ describe('exportAll', () => {
     clock.set(local('2026-03-13T09:00:00'))
     await journal.capture('took the on-call handover')
 
-    const exported = await journal.exportAll()
+    const exported = await journal.exportJournal()
 
     expect(exported.markdown).toBe(
       [
+        '# Notes',
+        '',
         '## Wed 11 Mar',
         '- the migration landed',
         '',
@@ -1274,21 +1277,25 @@ describe('exportAll', () => {
     const { journal } = await journalAt('2026-03-13T09:00:00')
     await journal.capture('the only day with anything on it')
 
-    const exported = await journal.exportAll()
+    const exported = await journal.exportJournal()
 
     expect(exported.markdown).toBe(
-      '## Fri 13 Mar\n- the only day with anything on it',
+      '# Notes\n\n## Fri 13 Mar\n- the only day with anything on it',
     )
   })
 
   it('renders nothing at all for a journal with no Notes', async () => {
     const { journal } = await journalAt('2026-03-13T09:00:00')
 
-    expect(await journal.exportAll()).toEqual({ markdown: '', noteCount: 0 })
+    expect(await journal.exportJournal()).toEqual({
+      markdown: '',
+      noteCount: 0,
+      taskCount: 0,
+    })
   })
 })
 
-describe('exportAll and Projects', () => {
+describe('exportJournal and Projects', () => {
   it('writes a Project on the bullet, and groups by day rather than by Project', async () => {
     const { journal, clock } = await journalAt('2026-03-11T09:00:00')
     await journal.capture('#api rate limits')
@@ -1297,10 +1304,12 @@ describe('exportAll and Projects', () => {
     clock.set(local('2026-03-13T09:00:00'))
     await journal.capture('#billing invoices')
 
-    const exported = await journal.exportAll()
+    const exported = await journal.exportJournal()
 
     expect(exported.markdown).toBe(
       [
+        '# Notes',
+        '',
         '## Wed 11 Mar',
         '- #api rate limits',
         '- read the postmortem',
@@ -1990,5 +1999,340 @@ describe('importMeeting', () => {
     const digest = await journal.digest(rangeForJournalDay('2026-03-09'))
     expect(digest.markdown).toBe('- Weekly sync\n- the migration landed')
     expect(digest.noteCount).toBe(2)
+  })
+})
+
+describe('createTask', () => {
+  it('commits one Open Task with the description as written', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+
+    const task = await journal.createTask('renew the TLS certificate')
+
+    expect(task.description).toBe('renew the TLS certificate')
+    expect(task.completedAt).toBeNull()
+    expect(task.createdAt).toBe(local('2026-03-09T10:00:00').toISOString())
+    expect(await journal.openTasks()).toEqual([task])
+  })
+
+  it('trims the ends and preserves internal whitespace and Unicode', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+
+    const task = await journal.createTask('  migração  do   índice → ✅  ')
+
+    expect(task.description).toBe('migração  do   índice → ✅')
+  })
+
+  it('refuses a description that says nothing', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+
+    await expect(journal.createTask('')).rejects.toThrow()
+    await expect(journal.createTask('   ')).rejects.toThrow()
+    expect(await journal.openTasks()).toEqual([])
+  })
+
+  it('refuses a description holding a line break', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+
+    await expect(journal.createTask('two\nlines')).rejects.toThrow()
+    expect(await journal.openTasks()).toEqual([])
+  })
+
+  it('has no domain length limit', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+    const long = 'x'.repeat(5000)
+
+    const task = await journal.createTask(long)
+
+    expect(task.description).toBe(long)
+  })
+
+  it('allows two Tasks to say exactly the same thing', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T10:00:00')
+
+    const first = await journal.createTask('chase the invoice')
+    clock.set(local('2026-03-09T11:00:00'))
+    const second = await journal.createTask('chase the invoice')
+
+    expect(first.id).not.toBe(second.id)
+    expect(await journal.openTasks()).toHaveLength(2)
+  })
+})
+
+describe('openTasks', () => {
+  it('reads newest Task Created At first', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T09:00:00')
+    await journal.createTask('first')
+    clock.set(local('2026-03-09T10:00:00'))
+    await journal.createTask('second')
+    clock.set(local('2026-03-09T11:00:00'))
+    await journal.createTask('third')
+
+    expect((await journal.openTasks()).map((task) => task.description)).toEqual([
+      'third',
+      'second',
+      'first',
+    ])
+  })
+
+  it('leaves out the Tasks that were completed', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+    const done = await journal.createTask('already handled')
+    await journal.createTask('still owed')
+
+    await journal.completeTask(done.id)
+
+    expect((await journal.openTasks()).map((task) => task.description)).toEqual([
+      'still owed',
+    ])
+  })
+})
+
+describe('completedTasks', () => {
+  it('reads newest Task Completed At first, whatever order they were made in', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T09:00:00')
+    const first = await journal.createTask('first made')
+    clock.set(local('2026-03-09T10:00:00'))
+    const second = await journal.createTask('second made')
+
+    clock.set(local('2026-03-09T11:00:00'))
+    await journal.completeTask(second.id)
+    clock.set(local('2026-03-09T12:00:00'))
+    await journal.completeTask(first.id)
+
+    expect(
+      (await journal.completedTasks()).map((task) => task.description),
+    ).toEqual(['first made', 'second made'])
+  })
+})
+
+describe('completeTask and reopenTask', () => {
+  it('records when the commitment was kept', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the certificate')
+    clock.set(local('2026-03-09T16:30:00'))
+
+    const completed = await journal.completeTask(task.id)
+
+    expect(completed.completedAt).toBe(local('2026-03-09T16:30:00').toISOString())
+    expect(completed.createdAt).toBe(task.createdAt)
+    expect(await journal.completedTasks()).toEqual([completed])
+  })
+
+  it('does not move the instant of a Task already completed', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the certificate')
+    clock.set(local('2026-03-09T16:30:00'))
+    const completed = await journal.completeTask(task.id)
+
+    clock.set(local('2026-03-09T18:00:00'))
+    expect(await journal.completeTask(task.id)).toEqual(completed)
+  })
+
+  it('removes Task Completed At when the Task is reopened', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the certificate')
+    clock.set(local('2026-03-09T16:30:00'))
+    await journal.completeTask(task.id)
+
+    const reopened = await journal.reopenTask(task.id)
+
+    expect(reopened.completedAt).toBeNull()
+    expect(await journal.completedTasks()).toEqual([])
+    expect(await journal.openTasks()).toEqual([reopened])
+  })
+
+  it('leaves an Open Task alone when it is reopened', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the certificate')
+
+    expect(await journal.reopenTask(task.id)).toEqual(task)
+  })
+
+  it('fails loudly for a Task that is not there', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+
+    await expect(journal.completeTask('missing')).rejects.toThrow(/No such Task/)
+    await expect(journal.reopenTask('missing')).rejects.toThrow(/No such Task/)
+  })
+})
+
+describe('editTaskDescription', () => {
+  it('rewords a Task without touching Task Created At', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the cert')
+    clock.set(local('2026-03-09T12:00:00'))
+
+    const reworded = await journal.editTaskDescription(
+      task.id,
+      '  renew the TLS certificate  ',
+    )
+
+    expect(reworded.description).toBe('renew the TLS certificate')
+    expect(reworded.createdAt).toBe(task.createdAt)
+    expect(await journal.openTasks()).toEqual([reworded])
+  })
+
+  it('rewords a Completed Task and leaves it completed', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the cert')
+    clock.set(local('2026-03-09T16:00:00'))
+    const completed = await journal.completeTask(task.id)
+
+    const reworded = await journal.editTaskDescription(task.id, 'renewed it')
+
+    expect(reworded.completedAt).toBe(completed.completedAt)
+    expect(await journal.completedTasks()).toEqual([reworded])
+  })
+
+  it('refuses an empty description rather than emptying the Task', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the cert')
+
+    await expect(journal.editTaskDescription(task.id, '  ')).rejects.toThrow()
+    expect(await journal.openTasks()).toEqual([task])
+  })
+
+  it('fails loudly for a Task that is not there', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+
+    await expect(
+      journal.editTaskDescription('missing', 'anything'),
+    ).rejects.toThrow(/No such Task/)
+  })
+})
+
+describe('deleteTask', () => {
+  it('removes the Task permanently, in either state', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+    const open = await journal.createTask('still owed')
+    const done = await journal.createTask('already handled')
+    await journal.completeTask(done.id)
+
+    await journal.deleteTask(open.id)
+    await journal.deleteTask(done.id)
+
+    expect(await journal.openTasks()).toEqual([])
+    expect(await journal.completedTasks()).toEqual([])
+  })
+
+  it('leaves the Notes exactly as they were', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+    await journal.capture('the migration landed')
+    const task = await journal.createTask('renew the certificate')
+
+    await journal.deleteTask(task.id)
+
+    expect((await notesOn(journal, '2026-03-09')).map((note) => note.body)).toEqual(
+      ['the migration landed'],
+    )
+  })
+
+  it('fails loudly for a Task that is not there', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+
+    await expect(journal.deleteTask('missing')).rejects.toThrow(/No such Task/)
+  })
+})
+
+describe('Tasks and Notes are separate records', () => {
+  it('a Capture never becomes a Task, and a Task never becomes a Note', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+
+    await journal.capture('the migration landed')
+    const task = await journal.createTask('renew the certificate')
+    await journal.completeTask(task.id)
+
+    expect(await journal.openTasks()).toEqual([])
+    expect(await journal.completedTasks()).toHaveLength(1)
+    expect(await notesOn(journal, '2026-03-09')).toHaveLength(1)
+  })
+})
+
+describe('exportJournal with Tasks', () => {
+  it('writes Notes and Tasks as separate top-level sections', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+    await journal.capture('the migration landed')
+    const done = await journal.createTask('renew the certificate')
+    clock.set(local('2026-03-11T10:00:00'))
+    await journal.createTask('chase the invoice')
+    clock.set(local('2026-03-11T16:30:00'))
+    await journal.completeTask(done.id)
+
+    const exported = await journal.exportJournal()
+
+    expect(exported.markdown).toBe(
+      [
+        '# Notes',
+        '',
+        '## Wed 11 Mar',
+        '- the migration landed',
+        '',
+        '# Tasks',
+        '',
+        '## Open',
+        '- [ ] chase the invoice',
+        '',
+        '## Completed',
+        '- [x] renew the certificate (completed Wed 11 Mar, 16:30)',
+      ].join('\n'),
+    )
+    expect(exported.noteCount).toBe(1)
+    expect(exported.taskCount).toBe(2)
+  })
+
+  it('exports a journal holding only Tasks', async () => {
+    const { journal } = await journalAt('2026-03-11T09:00:00')
+    await journal.createTask('chase the invoice')
+
+    const exported = await journal.exportJournal()
+
+    expect(exported.markdown).toBe(
+      '# Tasks\n\n## Open\n- [ ] chase the invoice',
+    )
+    expect(exported.noteCount).toBe(0)
+    expect(exported.taskCount).toBe(1)
+  })
+
+  it('exports a journal holding only Notes with no Tasks section', async () => {
+    const { journal } = await journalAt('2026-03-11T09:00:00')
+    await journal.capture('the migration landed')
+
+    const exported = await journal.exportJournal()
+
+    expect(exported.markdown).toBe('# Notes\n\n## Wed 11 Mar\n- the migration landed')
+    expect(exported.taskCount).toBe(0)
+  })
+
+  it('renders nothing at all for an empty journal', async () => {
+    const { journal } = await journalAt('2026-03-11T09:00:00')
+
+    expect(await journal.exportJournal()).toEqual({
+      markdown: '',
+      noteCount: 0,
+      taskCount: 0,
+    })
+  })
+})
+
+describe('describeExport', () => {
+  it('reports both counts', () => {
+    expect(
+      describeExport({ markdown: '', noteCount: 3, taskCount: 2 }, '/tmp/a.md'),
+    ).toBe('Exported 3 Notes and 2 Tasks to /tmp/a.md.')
+  })
+
+  it('says only what the journal held', () => {
+    expect(
+      describeExport({ markdown: '', noteCount: 0, taskCount: 1 }, '/tmp/a.md'),
+    ).toBe('Exported 1 Task to /tmp/a.md.')
+    expect(
+      describeExport({ markdown: '', noteCount: 1, taskCount: 0 }, '/tmp/a.md'),
+    ).toBe('Exported 1 Note to /tmp/a.md.')
+  })
+
+  it('says an empty journal is empty rather than claiming a count', () => {
+    expect(
+      describeExport({ markdown: '', noteCount: 0, taskCount: 0 }, '/tmp/a.md'),
+    ).toBe('Exported an empty journal to /tmp/a.md.')
   })
 })

@@ -5,7 +5,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
 import ThemeProvider from '@/components/ThemeProvider'
 import { createAppSettings } from '@/settings/app-settings'
-import type { Digest, Journal } from '@/journal/journal'
+import type { Journal, JournalExport } from '@/journal/journal'
 import SettingsView from './SettingsView'
 
 // Settings as the user meets it. The one seam that cannot be driven from Node:
@@ -45,9 +45,9 @@ function showSettings(
 }
 
 /** A journal that exports whatever it is told to, and nothing else. */
-function journalExporting(digest: Digest): Promise<Journal> {
+function journalExporting(exported: JournalExport): Promise<Journal> {
   return Promise.resolve({
-    exportAll: async () => digest,
+    exportJournal: async () => exported,
   } as unknown as Journal)
 }
 
@@ -141,19 +141,113 @@ describe('Start at login', () => {
   })
 })
 
-describe('the Hotkey', () => {
+describe('the two Hotkeys', () => {
   it('renders one chip per key rather than a single string', async () => {
     const desktop = fakeDesktop({
       stored: { startAtLogin: false },
-      hotkey: { state: 'registered', hotkey: 'Cmd+Shift+J' },
+      hotkey: {
+        note: { state: 'registered', hotkey: 'Cmd+Shift+J' },
+        task: { state: 'registered', hotkey: 'Cmd+Shift+T' },
+      },
     })
 
     showSettings(desktop)
 
-    const chips = await screen.findByRole('group', { name: 'Current Hotkey' })
+    const chips = await screen.findByRole('group', {
+      name: 'Current Note Hotkey',
+    })
     expect(
       [...chips.querySelectorAll('kbd')].map((key) => key.textContent),
     ).toEqual(['Cmd', 'Shift', 'J'])
+  })
+
+  it('reports each Hotkey against its own action', async () => {
+    const desktop = fakeDesktop({
+      stored: { startAtLogin: false },
+      hotkey: {
+        note: { state: 'registered', hotkey: 'Cmd+Shift+J' },
+        task: { state: 'unavailable', hotkey: 'Cmd+Shift+T', reason: 'taken' },
+      },
+    })
+
+    showSettings(desktop)
+
+    const problem = await screen.findByRole('alert')
+    expect(problem.textContent).toContain('Task Hotkey')
+    expect(problem.textContent).toContain('New Task')
+    // The Note Hotkey is fine, and nothing on screen says otherwise.
+    expect(screen.getAllByRole('alert')).toHaveLength(1)
+  })
+
+  it('remaps one Hotkey without touching the other', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    const asked: Array<[string, string]> = []
+    desktop.setHotkey = async (action, hotkey) => {
+      asked.push([action, hotkey])
+      return {
+        note: { state: 'registered', hotkey: 'Ctrl+Shift+Cmd+J' },
+        task: { state: 'registered', hotkey },
+      }
+    }
+
+    showSettings(desktop)
+
+    const change = await screen.findByRole('button', {
+      name: 'Change Task Hotkey',
+    })
+    change.click()
+
+    const recorder = await screen.findByRole('button', {
+      name: 'Press a combination…',
+    })
+    recorder.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'K',
+        code: 'KeyK',
+        ctrlKey: true,
+        metaKey: true,
+        bubbles: true,
+      }),
+    )
+
+    await expect.poll(() => asked).toEqual([['task', 'Ctrl+Cmd+K']])
+    const chips = await screen.findByRole('group', {
+      name: 'Current Task Hotkey',
+    })
+    expect(
+      [...chips.querySelectorAll('kbd')].map((key) => key.textContent),
+    ).toEqual(['Ctrl', 'Cmd', 'K'])
+  })
+
+  it('says so when a remap is refused, and against the right action', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.setHotkey = () =>
+      Promise.reject(new Error('it is already the Note Hotkey'))
+
+    showSettings(desktop)
+
+    const change = await screen.findByRole('button', {
+      name: 'Change Task Hotkey',
+    })
+    change.click()
+
+    const recorder = await screen.findByRole('button', {
+      name: 'Press a combination…',
+    })
+    recorder.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'J',
+        code: 'KeyJ',
+        ctrlKey: true,
+        shiftKey: true,
+        metaKey: true,
+        bubbles: true,
+      }),
+    )
+
+    const problem = await screen.findByRole('alert')
+    expect(problem.textContent).toContain('Task Hotkey')
+    expect(problem.textContent).toContain('already the Note Hotkey')
   })
 })
 
@@ -167,7 +261,9 @@ describe('Escape', () => {
 
     showSettings(desktop)
 
-    const change = await screen.findByRole('button', { name: 'Change' })
+    const change = await screen.findByRole('button', {
+      name: 'Change Note Hotkey',
+    })
     change.click()
 
     // The recorder owns Escape while it is listening: abandoning a
@@ -179,7 +275,7 @@ describe('Escape', () => {
     expect(closed).toBe(0)
 
     // Abandoned, the window has Escape back.
-    escape(await screen.findByRole('button', { name: 'Change' }))
+    escape(await screen.findByRole('button', { name: 'Change Note Hotkey' }))
     expect(closed).toBe(1)
   })
 })
@@ -190,7 +286,7 @@ describe('Export', () => {
 
     showSettings(
       desktop,
-      journalExporting({ markdown: '- a note', noteCount: 1 } as Digest),
+      journalExporting({ markdown: '- a note', noteCount: 1, taskCount: 0 }),
     )
 
     const button = await screen.findByRole('button', {
@@ -216,7 +312,7 @@ describe('Export', () => {
 describe('the window chrome', () => {
   it('keeps a strip above everything for the traffic lights to sit in', async () => {
     showSettings(fakeDesktop())
-    await screen.findByText('Hotkey')
+    await screen.findByText('Note Hotkey')
 
     const strip = titleBarStrip()
     // The window's own first row, and outside whatever scrolls: a strip that

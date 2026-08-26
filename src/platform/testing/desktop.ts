@@ -1,5 +1,5 @@
 import type { CalendarEvent, SqlDriver } from '../../journal/journal'
-import type { HotkeyStatus } from '../../settings/hotkey'
+import type { HotkeyStatuses } from '../../settings/hotkey'
 import type { SettingsStore } from '../../settings/settings'
 import type { Theme } from '../../settings/theme'
 import type {
@@ -20,6 +20,14 @@ import type {
 export interface FakeDesktop extends Desktop {
   /** Shows the capture window, as an Entry Point would. */
   beginCapture(): void
+  /** Shows the Task Creation window, as a Task Entry Point would. */
+  showTaskCreation(): void
+  /** How many times a Task Entry Point asked for the resident window. */
+  taskCreationsBegun: number
+  /** How many times a Task Creation was dismissed. */
+  taskCreationsDismissed: number
+  /** Every size the Task Creation window was asked to take, most recent last. */
+  taskCreationFits: boolean[]
   /** What the settings store holds, readable without going through a facade. */
   stored: Record<string, unknown>
   /** Whether the login item is there, as the OS would report it. */
@@ -36,6 +44,10 @@ export interface FakeDesktop extends Desktop {
   requestYesterdayDigest(): void
   /** The machine wakes from sleep. */
   wake(): void
+  /** Whether the caller's window is on screen, as the OS would report it. */
+  windowVisible: boolean
+  /** The window loses focus, as it does when another application takes it. */
+  blur(): void
   /** What the OS allows of the calendars; writable, as a revocation is. */
   access: CalendarAccess
   /** Whether the user was ever asked, and what they said if they were. */
@@ -47,7 +59,10 @@ export interface FakeDesktop extends Desktop {
 export function fakeDesktop({
   driver,
   stored = {},
-  hotkey = { state: 'registered', hotkey: 'Cmd+Shift+J' },
+  hotkey = {
+    note: { state: 'registered', hotkey: 'Ctrl+Shift+Cmd+J' },
+    task: { state: 'registered', hotkey: 'Ctrl+Shift+Cmd+T' },
+  },
   appIdentity = { version: 'test', isDevelopment: true },
   openSettingsStore,
   access = 'undetermined',
@@ -58,7 +73,7 @@ export function fakeDesktop({
   /** Only the tests that reach the journal need one. */
   driver?: SqlDriver
   stored?: Record<string, unknown>
-  hotkey?: HotkeyStatus
+  hotkey?: HotkeyStatuses
   appIdentity?: AppIdentity
   /** Overridden by the tests about a settings file that cannot be read. */
   openSettingsStore?: () => Promise<SettingsStore>
@@ -70,6 +85,9 @@ export function fakeDesktop({
   events?: CalendarEvent[]
 } = {}): FakeDesktop {
   const captureShown = subscribers<void>()
+  const windowBlurred = subscribers<void>()
+  const taskCreationShown = subscribers<void>()
+  const tasksChanged = subscribers<void>()
   const systemWoke = subscribers<void>()
   const importChanged = subscribers<void>()
   const yesterdayDigestRequested = subscribers<void>()
@@ -87,15 +105,22 @@ export function fakeDesktop({
     access,
     prompted: false,
     events,
+    taskCreationsBegun: 0,
+    taskCreationsDismissed: 0,
+    taskCreationFits: [],
 
     beginCapture: () => captureShown.announce(undefined),
+    showTaskCreation: () => taskCreationShown.announce(undefined),
     requestYesterdayDigest: () => yesterdayDigestRequested.announce(undefined),
     wake: () => systemWoke.announce(undefined),
 
     windowLabel: () => 'history',
     appIdentity: async () => appIdentity,
     closeWindow: async () => {},
-    onWindowBlurred: async () => () => {},
+    windowVisible: true,
+    blur: () => windowBlurred.announce(undefined),
+    onWindowBlurred: async (handle) => windowBlurred.add(handle),
+    isWindowVisible: async () => desktop.windowVisible,
     onCloseRequested: async () => () => {},
 
     openJournalDatabase: async () => {
@@ -124,6 +149,22 @@ export function fakeDesktop({
       desktop.fits.push(fit)
     },
     onCaptureShown: async (handle) => captureShown.add(handle),
+
+    // Every Task Entry Point reaches the same resident window: the real one
+    // focuses it without resetting it, so this only counts the asking.
+    beginTaskCreation: async () => {
+      desktop.taskCreationsBegun += 1
+      taskCreationShown.announce(undefined)
+    },
+    dismissTaskCreation: async () => {
+      desktop.taskCreationsDismissed += 1
+    },
+    onTaskCreationShown: async (handle) => taskCreationShown.add(handle),
+    fitTaskCreation: async (refused) => {
+      desktop.taskCreationFits.push(refused)
+    },
+    announceTasksChanged: async () => tasksChanged.announce(undefined),
+    onTasksChanged: async (handle) => tasksChanged.add(handle),
     onYesterdayDigestRequested: async (handle) =>
       yesterdayDigestRequested.add(handle),
 
@@ -153,7 +194,10 @@ export function fakeDesktop({
     onThemeChanged: async (handle) => themeChanged.add(handle),
 
     hotkeyStatus: async () => hotkey,
-    setHotkey: async (next) => ({ state: 'registered', hotkey: next }),
+    setHotkey: async (action, next) => ({
+      ...hotkey,
+      [action]: { state: 'registered', hotkey: next },
+    }),
 
     startsAtLogin: async () => desktop.loginItem,
     setStartAtLogin: async (startAtLogin) => {
@@ -164,7 +208,7 @@ export function fakeDesktop({
       desktop.clipboard = text
     },
 
-    exportNotes: async (markdown, fileName): Promise<ExportedFile> => {
+    exportJournal: async (markdown, fileName): Promise<ExportedFile> => {
       desktop.exported.push({ markdown, fileName })
       return { path: `/tmp/${fileName}`, fileName }
     },

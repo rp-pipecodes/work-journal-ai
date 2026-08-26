@@ -52,7 +52,10 @@ describe('a day heading', () => {
 describe('the beginning', () => {
   it('teaches the Hotkey as keys rather than as a string', async () => {
     await showFurniture([], {
-      hotkey: { state: 'registered', hotkey: 'Cmd+Shift+J' },
+      hotkey: {
+        note: { state: 'registered', hotkey: 'Cmd+Shift+J' },
+        task: { state: 'registered', hotkey: 'Ctrl+Shift+Cmd+T' },
+      },
     })
 
     const empty = await emptyState('No Notes yet')
@@ -66,9 +69,8 @@ describe('the beginning', () => {
   it('falls back to the Tray Menu when the Hotkey is unavailable', async () => {
     await showFurniture([], {
       hotkey: {
-        state: 'unavailable',
-        hotkey: 'Cmd+Shift+J',
-        reason: 'taken',
+        note: { state: 'unavailable', hotkey: 'Cmd+Shift+J', reason: 'taken' },
+        task: { state: 'registered', hotkey: 'Ctrl+Shift+Cmd+T' },
       },
     })
 

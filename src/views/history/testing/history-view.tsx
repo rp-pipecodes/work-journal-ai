@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react'
 import { createJournal, type Journal, type Note } from '@/journal/journal'
 import { fixedClock, openTestDatabase } from '@/journal/testing/database'
 import { fakeDesktop } from '@/platform/testing/desktop'
-import type { HotkeyStatus } from '@/settings/hotkey'
+import type { HotkeyStatuses } from '@/settings/hotkey'
 import HistoryView from '../HistoryView'
 
 /**
@@ -26,7 +26,7 @@ export function closeTestDatabases() {
  * empty state asks, and the answer is the whole of what it teaches.
  */
 export interface HotkeyAnswer {
-  hotkey?: HotkeyStatus
+  hotkey?: HotkeyStatuses
   /** The OS refusing the question, rather than answering it unfavourably. */
   refuseHotkeyStatus?: boolean
 }

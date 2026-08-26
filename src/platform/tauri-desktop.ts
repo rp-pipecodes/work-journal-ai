@@ -16,7 +16,7 @@ import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import Database from '@tauri-apps/plugin-sql'
 import { load } from '@tauri-apps/plugin-store'
 import type { CalendarEvent } from '@/journal/journal'
-import type { HotkeyStatus } from '@/settings/hotkey'
+import type { HotkeyAction, HotkeyStatuses } from '@/settings/hotkey'
 import type { Theme } from '@/settings/theme'
 import {
   CAPTURE_SHOWN_EVENT,
@@ -29,6 +29,9 @@ import {
   NOTE_CAPTURED_EVENT,
   SETTINGS_FILE,
   SYSTEM_WOKE_EVENT,
+  TASK_CREATION_SHOWN_EVENT,
+  taskCreationWindowHeight,
+  TASKS_CHANGED_EVENT,
   THEME_CHANGED_EVENT,
   type CalendarAccess,
   type CalendarInfo,
@@ -62,6 +65,8 @@ export function createTauriDesktop(): Desktop {
       getCurrentWindow().onFocusChanged(({ payload: focused }) => {
         if (!focused) handle()
       }),
+
+    isWindowVisible: () => getCurrentWindow().isVisible(),
 
     async onCloseRequested(answer) {
       const window = getCurrentWindow()
@@ -115,6 +120,18 @@ export function createTauriDesktop(): Desktop {
 
     onCaptureShown: (handle) => listen(CAPTURE_SHOWN_EVENT, () => handle()),
 
+    beginTaskCreation: () => invoke('start_task_creation'),
+    dismissTaskCreation: () => invoke('dismiss_task_creation'),
+    onTaskCreationShown: (handle) =>
+      listen(TASK_CREATION_SHOWN_EVENT, () => handle()),
+    fitTaskCreation: (refused) =>
+      getCurrentWindow().setSize(
+        new LogicalSize(CAPTURE_WIDTH, taskCreationWindowHeight(refused)),
+      ),
+
+    announceTasksChanged: () => emit(TASKS_CHANGED_EVENT),
+    onTasksChanged: (handle) => listen(TASKS_CHANGED_EVENT, () => handle()),
+
     onYesterdayDigestRequested: (handle) =>
       listen(COPY_YESTERDAY_DIGEST_EVENT, () => handle()),
 
@@ -144,8 +161,9 @@ export function createTauriDesktop(): Desktop {
         handle(payload.theme),
       ),
 
-    hotkeyStatus: () => invoke<HotkeyStatus>('hotkey_status'),
-    setHotkey: (hotkey) => invoke<HotkeyStatus>('set_hotkey', { hotkey }),
+    hotkeyStatus: () => invoke<HotkeyStatuses>('hotkey_status'),
+    setHotkey: (action: HotkeyAction, hotkey) =>
+      invoke<HotkeyStatuses>('set_hotkey', { action, hotkey }),
 
     startsAtLogin: () => isEnabled(),
 
@@ -161,8 +179,8 @@ export function createTauriDesktop(): Desktop {
     // focused, where the webview's own clipboard is not allowed to.
     copyToClipboard: (text) => writeText(text),
 
-    exportNotes: (markdown, fileName) =>
-      invoke<ExportedFile>('export_notes', { markdown, fileName }),
+    exportJournal: (markdown, fileName) =>
+      invoke<ExportedFile>('export_journal', { markdown, fileName }),
 
     showTrayCount: (title) => invoke('show_tray_count', { title }),
   }
