@@ -3,19 +3,22 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Work Journal — a local-first log of short work notes</title>
+    <title>Work Journal — a local-first log of work notes and tasks</title>
     <meta
       name="description"
-      content="A personal, local-first macOS menu bar app for capturing short work notes, so what you did is recoverable at standup, in a review, or as context for an LLM."
+      content="A personal, local-first macOS menu bar app. Capture short notes about what you did, keep tasks for what is still to be done, and read either back as Markdown."
     />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="canonical" href="https://rp-pipecodes.github.io/work-journal-ai/" />
 
     <meta property="og:title" content="Work Journal" />
     <meta
       property="og:description"
-      content="A personal, local-first log of short work notes captured throughout the day."
+      content="A local-first log of short work notes, and the tasks that go with them. Everything stays on your Mac."
     />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://rp-pipecodes.github.io/work-journal-ai/" />
+    <meta name="twitter:card" content="summary" />
 
     <style>
       :root {
@@ -108,6 +111,19 @@
         font-weight: 600;
       }
 
+      /* The feature groups are a list of lists inside one section, not four
+         sections: a rule between each of them would read as four topics. */
+      section h3 {
+        font-size: 1rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        margin: 1.75rem 0 0.6rem;
+      }
+
+      section h3:first-of-type {
+        margin-top: 0;
+      }
+
       section {
         border-top: 1px solid var(--rule);
         margin-top: 3rem;
@@ -192,7 +208,8 @@
 
       <p class="tagline">
         A personal, local-first log of short work notes captured throughout the
-        day, so that what you did is recoverable later.
+        day — and the tasks that go with them. Notes recover what you did; tasks
+        hold what you still mean to do.
       </p>
 
       <p>
@@ -202,14 +219,16 @@
       </p>
 
       <p>
-        It lives in the menu bar. There is no Dock icon, no window to manage, and
-        no app to switch to: a global hotkey opens a single text field, you type
-        a line, and it disappears again.
+        It lives in the menu bar. There is no Dock icon and no app to switch to:
+        one hotkey opens a text field for a note, another opens one for a task,
+        and both disappear again as soon as you are done. The tray menu offers
+        the same two, and carries today's note count beside its glyph — the only
+        reminder to journal the app will ever give you.
       </p>
 
       <p>
         Everything is local. No account, no server, no network call — the notes
-        are a SQLite file on your Mac, and Export writes the whole journal to
+        and tasks are a SQLite file on your Mac, and Export writes all of it to
         Markdown so nothing is locked in.
       </p>
 
@@ -239,13 +258,83 @@
       <section>
         <h2>What it does</h2>
 
+        <h3>Notes</h3>
         <ul>
-          <li>Capture a note from a global hotkey, the tray menu, or relaunching the app.</li>
-          <li>Read back any range of days, grouped and ordered oldest first.</li>
-          <li>Edit a note's wording, move it to another day, or delete it.</li>
+          <li>
+            Capture a note from the note hotkey, the tray menu, or relaunching
+            the app.
+          </li>
+          <li>
+            File it under a project by starting the line with <code>#name</code>;
+            names you have used already are offered as you type.
+          </li>
+          <li>
+            Read back any range of days — with presets for today, yesterday, this
+            or last week, this or last month — narrowed to one project or not at
+            all.
+          </li>
+          <li>
+            Search every note's text to jump to the day it is filed under.
+          </li>
+          <li>
+            Correct a note's wording, move it to another day or project, or
+            delete it.
+          </li>
+        </ul>
+
+        <h3>Tasks</h3>
+        <ul>
+          <li>
+            Create a task from its own hotkey, in a window that is always ready
+            for the next one.
+          </li>
+          <li>
+            Give it a date, and a time to the minute if you want one.
+          </li>
+          <li>
+            Repeat it daily, weekly on the days you pick, monthly, yearly, or
+            every N of those — one occurrence open at a time, never a backlog of
+            missed ones.
+          </li>
+          <li>
+            A dated task with a time raises a local macOS alert when it comes
+            due. Nothing is sent anywhere; there is nothing to sign in to.
+          </li>
+          <li>
+            Tasks View groups what is open into overdue, today, upcoming, and
+            unscheduled. Completed tasks are their own view, and a recurring
+            task keeps its completed occurrences in a history of its own.
+          </li>
+        </ul>
+
+        <h3>Meetings</h3>
+        <ul>
+          <li>
+            Today's meetings from the macOS calendar can become notes on their
+            own, so the day is not only what you remembered to type.
+          </li>
+          <li>
+            Off until you turn it on, and then only over the calendars you tick.
+            Meetings you declined and events covering the whole day are left
+            alone.
+          </li>
+        </ul>
+
+        <h3>Reading back, and settings</h3>
+        <ul>
           <li>Copy the range you are looking at as Markdown.</li>
-          <li>Export the entire journal to a Markdown file.</li>
-          <li>Remap the hotkey, pick a theme, and start at login.</li>
+          <li>
+            Copy yesterday's digest straight from the tray menu, without opening
+            a window.
+          </li>
+          <li>
+            Export every note and task to a Markdown file, regardless of what
+            is on screen.
+          </li>
+          <li>
+            Remap either hotkey, pick a light, dark, or system theme, and start
+            at login.
+          </li>
         </ul>
       </section>
 
@@ -254,6 +343,9 @@
           MIT licensed.
           <a href="https://github.com/rp-pipecodes/work-journal-ai"
             >Source on GitHub</a
+          >.
+          <a href="https://github.com/rp-pipecodes/work-journal-ai/releases"
+            >Changelog</a
           >.
         </p>
       </footer>
