@@ -193,11 +193,6 @@ export function scheduleOf(task: Task): TaskSchedule | null {
     : { date: task.scheduledDate, time: task.scheduledTime }
 }
 
-/** Whether this Task follows a cadence, or is simply the one commitment. */
-export function isRecurring(task: Task): boolean {
-  return task.recurrence !== null
-}
-
 /** The one Open Task Occurrence, of however many a Task has had. */
 export function openOccurrence(
   occurrences: TaskOccurrence[],
@@ -1289,7 +1284,19 @@ export function createJournal({
       }
 
       const now = clock.now()
-      const anchor = scheduled!.date
+      // Changing only the time keeps the date the series is counted from,
+      // rather than adopting whatever slot it currently stands on: a monthly
+      // Task started on the 31st has to come back to the 31st after February,
+      // and re-anchoring it onto that fallback would silently lose the day the
+      // user actually chose. Any change to the date or the cadence itself is
+      // counted from the date on screen, which is what the user is looking at
+      // while they make it.
+      const anchor =
+        task.recurrenceAnchor !== null &&
+        sameRecurrence(task.recurrence, cadence) &&
+        date === task.scheduledDate
+          ? task.recurrenceAnchor
+          : scheduled!.date
       const opening = openingSlot(anchor, cadence, time, now)
       const reanchored: Task = {
         ...task,
@@ -2345,11 +2352,23 @@ function shiftDay(journalDay: string, days: number): string {
 }
 
 function startOfWeek(journalDay: string): string {
+  return shiftDay(journalDay, -daysSinceMonday(journalDay))
+}
+
+/**
+ * The ISO weekday a `YYYY-MM-DD` falls on: 1 is Monday, 7 is Sunday. A week
+ * begins on Monday everywhere in the app, and this is the one place that says
+ * so — a Preset's week, a weekly cadence's, and the weekday a control
+ * preselects are all the same week.
+ */
+export function weekdayOf(journalDay: string): number {
+  return daysSinceMonday(journalDay) + 1
+}
+
+/** JavaScript counts Sunday as 0; a week here begins on Monday. */
+function daysSinceMonday(journalDay: string): number {
   const [year, month, day] = parts(journalDay)
-  const date = new Date(year, month - 1, day)
-  // JS Sunday=0 … Saturday=6 → days since Monday.
-  const sinceMonday = (date.getDay() + 6) % 7
-  return shiftDay(journalDay, -sinceMonday)
+  return (new Date(year, month - 1, day).getDay() + 6) % 7
 }
 
 function startOfMonth(journalDay: string): string {
@@ -2430,7 +2449,7 @@ function rawSlot(anchor: string, recurrence: Recurrence, index: number): string 
  * the starting date — those are ignored, because a series does not begin
  * before it was asked to.
  */
-function seriesStart(anchor: string, recurrence: Recurrence): number {
+function startIndex(anchor: string, recurrence: Recurrence): number {
   if (recurrence.unit !== 'week') return 0
 
   // One full week block is enough: if no selected weekday in the starting
@@ -2445,7 +2464,7 @@ function seriesStart(anchor: string, recurrence: Recurrence): number {
 
 /** The slot at one index of a series: `0` is the one it opens on. */
 function slotDate(anchor: string, recurrence: Recurrence, index: number): string {
-  return rawSlot(anchor, recurrence, index + seriesStart(anchor, recurrence))
+  return rawSlot(anchor, recurrence, index + startIndex(anchor, recurrence))
 }
 
 /**
@@ -2490,7 +2509,7 @@ function slotIndexOnOrBefore(
   recurrence: Recurrence,
   date: string,
 ): number | null {
-  const start = seriesStart(anchor, recurrence)
+  const start = startIndex(anchor, recurrence)
   let index = Math.max(estimateRawIndex(anchor, recurrence, date), start - 1)
 
   // Slots are strictly increasing in the index, so this converges from either

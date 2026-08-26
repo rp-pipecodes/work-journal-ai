@@ -547,7 +547,9 @@ describe('a Recurring Task in the session', () => {
     await session.stopRecurrence(task.id)
 
     expect(descriptionsOf(now())).toEqual(['water the plants'])
-    expect(occurrencesOf(now(), task.id)).toEqual([])
+    // The rule is gone; what the Task already kept is not.
+    expect(occurrencesOf(now(), task.id)).toHaveLength(1)
+    expect(occurrencesOf(now(), task.id)[0].completedAt).not.toBeNull()
     expect(now().problem).toBeNull()
   })
 

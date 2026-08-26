@@ -400,16 +400,22 @@ export default function TasksView({
       )}
 
       <ConfirmStopRecurrence
-        task={stopping}
-        onConfirm={(task) => {
+        open={stopping !== null}
+        onConfirm={() => {
+          if (stopping === null) return
           setStopping(null)
-          void session.stopRecurrence(task.id)
+          void session.stopRecurrence(stopping.id)
         }}
         onCancel={() => setStopping(null)}
       />
 
       <ConfirmDelete
         task={deleting}
+        history={
+          deleting === null
+            ? []
+            : completedOccurrences(occurrences[deleting.id] ?? [])
+        }
         onConfirm={confirmDelete}
         onCancel={() => setDeleting(null)}
       />
@@ -688,14 +694,17 @@ function TaskEditor({
 
   /**
    * A change to the schedule row. Losing the date takes the cadence with it,
-   * which is Stop Recurrence by another name — so a Task that actually has one
-   * is asked about before the control changes under the user.
+   * which is Stop Recurrence the user did not ask for by name — so a Task that
+   * actually has one is asked about before the control changes under them.
+   *
+   * Only the date. Choosing "Does not repeat" is the user saying it outright,
+   * and a dialog confirming what they just picked would be in the way.
    */
   function changeSchedule(next: {
     schedule: TaskSchedule | null
     recurrence: Recurrence | null
   }) {
-    if (next.recurrence === null && task.recurrence !== null && recurrence !== null) {
+    if (next.schedule === null && schedule !== null && recurrence !== null) {
       setStopping(next)
       return
     }
@@ -755,75 +764,61 @@ function TaskEditor({
         </Button>
       </div>
 
-      <AlertDialog
+      <ConfirmStopRecurrence
         open={stopping !== null}
-        onOpenChange={(open) => {
-          if (!open) setStopping(null)
+        why="A cadence is counted from its date, so clearing the date also stops the recurrence."
+        onConfirm={() => {
+          if (stopping === null) return
+          setSchedule(stopping.schedule)
+          setRecurrence(null)
+          setStopping(null)
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Stop repeating this Task?</AlertDialogTitle>
-            <AlertDialogDescription>
-              A cadence is counted from its date, so clearing the date also
-              stops the recurrence. The Task stays, and so does everything it
-              has already completed.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                if (stopping === null) return
-                setSchedule(stopping.schedule)
-                setRecurrence(null)
-                setStopping(null)
-              }}
-            >
-              Stop repeating
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onCancel={() => setStopping(null)}
+      />
     </div>
   )
 }
 
 /**
- * The guard on ending a series. Not destructive — the Task stays exactly where
- * it stands and every completed occurrence stays under it — but it is the end
- * of something the user set up, so it is asked rather than assumed.
+ * The guard on ending a series, wherever it is reached from — the row's own
+ * action, or clearing the date the cadence is counted from. One dialog because
+ * it is one decision: only why it is being asked differs.
+ *
+ * Not destructive — the Task stays exactly where it stands and every completed
+ * occurrence stays under it — but it is the end of something the user set up,
+ * so it is asked rather than assumed.
  */
 function ConfirmStopRecurrence({
-  task,
+  open,
+  why,
   onConfirm,
   onCancel,
 }: {
-  task: Task | null
-  onConfirm: (task: Task) => void
+  open: boolean
+  /** What brought this on, in the words of whatever the user just did. */
+  why?: string
+  onConfirm: () => void
   onCancel: () => void
 }) {
   return (
     <AlertDialog
-      open={task !== null}
-      onOpenChange={(open) => {
-        if (!open) onCancel()
+      open={open}
+      onOpenChange={(showing) => {
+        if (!showing) onCancel()
       }}
     >
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Stop repeating this Task?</AlertDialogTitle>
           <AlertDialogDescription>
-            “{task?.description}” stays exactly where it is, and so
-            does everything it has already completed. It simply stops coming
-            round again.
+            {why === undefined ? '' : `${why} `}
+            The Task stays exactly where it is, and so does everything it has
+            already completed. It simply stops coming round again.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={() => task !== null && onConfirm(task)}
-          >
+          <AlertDialogAction onClick={onConfirm}>
             Stop repeating
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -838,10 +833,17 @@ function ConfirmStopRecurrence({
  */
 function ConfirmDelete({
   task,
+  history,
   onConfirm,
   onCancel,
 }: {
   task: Task | null
+  /**
+   * What the Task has already kept, which goes with it. Asked of the
+   * occurrences rather than of the cadence: a Task whose recurrence was
+   * stopped still has a history to lose.
+   */
+  history: TaskOccurrence[]
   onConfirm: (task: Task) => void
   onCancel: () => void
 }) {
@@ -857,7 +859,7 @@ function ConfirmDelete({
           <AlertDialogTitle>Delete this Task?</AlertDialogTitle>
           <AlertDialogDescription>
             “{task?.description}” will be gone for good
-            {task?.recurrence === null
+            {history.length === 0
               ? ''
               : ', and every occurrence it has completed with it'}
             . There is no trash and no undo.

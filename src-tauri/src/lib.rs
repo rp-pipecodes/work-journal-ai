@@ -966,17 +966,18 @@ async fn journal_transaction(
     for statement in statements {
         let mut query = sqlx::query(&statement.sql);
         for value in statement.params {
-            // The same handful of shapes the plugin's own binding accepts: the
-            // journal only ever stores text, whole numbers and NULL.
+            // The only three shapes the journal ever stores. Anything else is
+            // a statement built wrong, and refusing it loudly is better than
+            // stringifying it into a column that will read back as nonsense.
             query = match value {
                 serde_json::Value::Null => query.bind(None::<String>),
                 serde_json::Value::String(text) => query.bind(text),
-                serde_json::Value::Bool(flag) => query.bind(flag),
-                serde_json::Value::Number(number) => match number.as_i64() {
-                    Some(whole) => query.bind(whole),
-                    None => query.bind(number.as_f64().unwrap_or_default()),
-                },
-                other => query.bind(other.to_string()),
+                serde_json::Value::Number(number) => query.bind(
+                    number
+                        .as_i64()
+                        .ok_or_else(|| format!("not a whole number: {number}"))?,
+                ),
+                other => return Err(format!("the journal does not store {other}")),
             };
         }
 

@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   formatWeekday,
+  weekdayOf,
   type Recurrence,
   type RecurrenceUnit,
   type TaskSchedule,
@@ -226,11 +227,4 @@ export default function ScheduleFields({
       </div>
     </div>
   )
-}
-
-/** The ISO weekday a `YYYY-MM-DD` falls on: 1 is Monday, 7 is Sunday. */
-function weekdayOf(date: string): number {
-  const [year, month, day] = date.split('-').map(Number)
-  // JavaScript counts Sunday as 0; a week here begins on Monday.
-  return ((new Date(year, month - 1, day).getDay() + 6) % 7) + 1
 }

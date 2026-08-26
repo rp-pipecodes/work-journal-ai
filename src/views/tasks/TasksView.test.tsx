@@ -687,6 +687,32 @@ describe('the recurrence controls', () => {
     expect(cadence().value).toBe('day')
   })
 
+  it('does not ask when the cadence itself is turned off', async () => {
+    const { core, created, desktop } = await showTasks(['water the plants'])
+    await core.editTask(created[0].id, {
+      description: 'water the plants',
+      schedule: { date: '2026-03-16', time: null },
+      recurrence: daily,
+    })
+    await openEditorFor(desktop, 'water the plants', 'Upcoming')
+
+    // Choosing it outright is the user saying it: nothing stands in the way,
+    // and the date they chose stays exactly where it is.
+    fireEvent.change(cadence(), { target: { value: 'none' } })
+
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect((screen.getByLabelText('Scheduled For') as HTMLInputElement).value).toBe(
+      '2026-03-16',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await expect
+      .poll(async () => (await core.openTasks())[0].recurrence)
+      .toBeNull()
+    expect((await core.openTasks())[0].scheduledDate).toBe('2026-03-16')
+  })
+
   it('stops the recurrence once that clearing is confirmed', async () => {
     const { core, created, desktop } = await showTasks(['water the plants'])
     await core.editTask(created[0].id, {
@@ -844,6 +870,26 @@ describe('a Recurring Task in the list', () => {
 
     await expect.poll(async () => await core.openTasks()).toEqual([])
     expect(await core.occurrencesOf(task.id)).toEqual([])
+  })
+
+  it('still warns about the history once the recurrence has been stopped', async () => {
+    const { core, task, desktop } = await showRecurring({ completions: 1 })
+    await core.stopRecurrence(task.id)
+    await desktop.announceTasksChanged()
+    await expect
+      .poll(() =>
+        screen.queryByRole('button', {
+          name: 'Stop repeating “water the plants”',
+        }),
+      )
+      .toBeNull()
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Delete “water the plants”' }),
+    )
+
+    const asked = await screen.findByRole('alertdialog')
+    expect(asked.textContent).toContain('every occurrence it has completed')
   })
 
   it('hears a completion made in another window', async () => {

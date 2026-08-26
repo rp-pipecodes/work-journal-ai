@@ -467,6 +467,74 @@ describe('editing a Recurring Task', () => {
     expect(after.advancedFrom).toBeNull()
   })
 
+  it('keeps the intended day of the month when only the time changes', async () => {
+    const { journal, clock } = await journalAt('2026-01-31T08:00:00')
+
+    const task = await journal.createTask(
+      'invoice',
+      { date: '2026-01-31', time: '09:00' },
+      every(1, 'month'),
+    )
+    clock.set(new Date('2026-01-31T20:00:00'))
+    const february = await journal.completeTask(task.id)
+    expect(february.scheduledDate).toBe('2026-02-28')
+
+    // Retimed while the series stands on February's fallback day. The day the
+    // user actually chose is the 31st, and it has to survive the edit.
+    clock.set(new Date('2026-02-28T08:00:00'))
+    const retimed = await journal.editTask(task.id, {
+      description: 'invoice',
+      schedule: { date: '2026-02-28', time: '07:00' },
+      recurrence: every(1, 'month'),
+    })
+
+    expect(retimed.recurrenceAnchor).toBe('2026-01-31')
+    expect(retimed.scheduledDate).toBe('2026-02-28')
+
+    clock.set(new Date('2026-02-28T20:00:00'))
+    expect((await journal.completeTask(task.id)).scheduledDate).toBe('2026-03-31')
+  })
+
+  it('counts from the date on screen once that date itself is changed', async () => {
+    const { journal, clock } = await journalAt('2026-01-31T08:00:00')
+
+    const task = await journal.createTask(
+      'invoice',
+      { date: '2026-01-31', time: null },
+      every(1, 'month'),
+    )
+    clock.set(new Date('2026-01-31T20:00:00'))
+    await journal.completeTask(task.id)
+
+    clock.set(new Date('2026-02-01T08:00:00'))
+    const moved = await journal.editTask(task.id, {
+      description: 'invoice',
+      schedule: { date: '2026-02-15', time: null },
+      recurrence: every(1, 'month'),
+    })
+
+    expect(moved.recurrenceAnchor).toBe('2026-02-15')
+    expect(moved.scheduledDate).toBe('2026-02-15')
+  })
+
+  it('counts from the date on screen once the cadence itself is changed', async () => {
+    const { journal } = await journalAt('2026-01-31T08:00:00')
+
+    const task = await journal.createTask(
+      'invoice',
+      { date: '2026-01-31', time: null },
+      every(1, 'month'),
+    )
+
+    const yearly = await journal.editTask(task.id, {
+      description: 'invoice',
+      schedule: { date: '2026-01-31', time: null },
+      recurrence: every(1, 'year'),
+    })
+
+    expect(yearly.recurrenceAnchor).toBe('2026-01-31')
+  })
+
   it('reanchors onto the latest elapsed slot, which is Overdue', async () => {
     const { journal } = await journalAt('2026-03-16T10:00:00')
 

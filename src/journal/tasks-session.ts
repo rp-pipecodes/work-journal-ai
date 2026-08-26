@@ -53,11 +53,12 @@ export type TasksState =
       tasks: Task[]
       groups: TaskGroup[]
       /**
-       * The Task Occurrences of every Recurring Task in the list, by Task —
+       * The Task Occurrences of every Task in the list that has any, by Task —
        * its expandable history, and the record that says whether Undo
        * Completion is still safe. Read with the list rather than when a
        * history is opened, so a row can offer the action without asking
-       * again.
+       * again, and kept for a Task whose recurrence was stopped, because
+       * stopping keeps what the Task already completed.
        */
       occurrences: Record<string, TaskOccurrence[]>
     }
@@ -206,11 +207,13 @@ export function createTasksSession({
       const core = await journal
       const tasks =
         tab === 'open' ? await core.openTasks() : await core.completedTasks()
-      // Only the Recurring ones have any, and there are never many of them:
-      // an ordinary Task has no occurrence to ask about.
-      const recurring = tasks.filter((task) => task.recurrence !== null)
+      // Asked of every Task rather than only the repeating ones: Stop
+      // Recurrence keeps the history under a Task that no longer has a
+      // cadence, and that history is still the Task's to show. Most answers
+      // are empty, and a personal journal's list is small enough that one
+      // read each is simpler than a second kind of query.
       const histories = await Promise.all(
-        recurring.map(async (task) =>
+        tasks.map(async (task) =>
           [task.id, await core.occurrencesOf(task.id)] as const,
         ),
       )
