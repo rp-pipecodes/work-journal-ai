@@ -1,8 +1,11 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import {
   CheckCircle2Icon,
+  ChevronRightIcon,
   ListTodoIcon,
   PlusIcon,
+  RepeatIcon,
+  RotateCcwIcon,
   Trash2Icon,
   TriangleAlertIcon,
   type LucideIcon,
@@ -28,6 +31,9 @@ import {
   type TasksSnapshot,
 } from '@/journal/tasks-session'
 import {
+  canUndoCompletion,
+  completedOccurrences,
+  formatRecurrence,
   formatScheduledFor,
   formatTaskCompletedAt,
   msUntilNextJournalDay,
@@ -35,8 +41,10 @@ import {
   taskIdOfAlert,
   type Clock,
   type Journal,
+  type Recurrence,
   type Task,
   type TaskGroupName,
+  type TaskOccurrence,
   type TaskSchedule,
 } from '@/journal/journal'
 import type { Desktop } from '@/platform/desktop'
@@ -98,6 +106,10 @@ export default function TasksView({
   // than the session: a list only ever has one change in progress.
   const [editing, setEditing] = useState<Task | null>(null)
   const [deleting, setDeleting] = useState<Task | null>(null)
+  // And the one whose recurrence is about to be stopped. Confirmed because it
+  // is the end of a series rather than one occurrence, even though the Task
+  // and its history survive it.
+  const [stopping, setStopping] = useState<Task | null>(null)
   // The Task a clicked Task Alert was about. Null until one is clicked: the
   // window opens on the whole list, not on one row.
   const [focused, setFocused] = useState<string | null>(null)
@@ -217,7 +229,7 @@ export default function TasksView({
       setEditing(null)
       return
     }
-    if (deleting !== null) return
+    if (deleting !== null || stopping !== null) return
 
     void desktop.closeWindow()
   }
@@ -226,11 +238,12 @@ export default function TasksView({
     task: Task,
     description: string,
     schedule: TaskSchedule | null,
+    recurrence: Recurrence | null,
   ) {
     setEditing(null)
     // The Task has been dealt with: singling it out has served its purpose.
     setFocused(null)
-    void session.save(task.id, { description, schedule })
+    void session.save(task.id, { description, schedule, recurrence })
   }
 
   /** The one irreversible operation, and the only one that is confirmed. */
@@ -244,17 +257,21 @@ export default function TasksView({
     tasks.state === 'tasks'
       ? tasks.groups.filter((group) => group.tasks.length > 0)
       : []
+  const occurrences = tasks.state === 'tasks' ? tasks.occurrences : {}
 
   function line(task: Task) {
     return (
       <TaskLine
         key={task.id}
         task={task}
+        occurrences={occurrences[task.id] ?? []}
         focused={task.id === focused}
         onToggle={(done) =>
           void (done ? session.complete(task.id) : session.reopen(task.id))
         }
         onEdit={() => setEditing(task)}
+        onUndoCompletion={() => void session.undoCompletion(task.id)}
+        onStopRecurrence={() => setStopping(task)}
         onDelete={() => setDeleting(task)}
       />
     )
@@ -375,12 +392,21 @@ export default function TasksView({
       {editing !== null && (
         <TaskEditor
           task={editing}
-          onSave={(description, schedule) =>
-            commitEdit(editing, description, schedule)
+          onSave={(description, schedule, recurrence) =>
+            commitEdit(editing, description, schedule, recurrence)
           }
           onCancel={() => setEditing(null)}
         />
       )}
+
+      <ConfirmStopRecurrence
+        task={stopping}
+        onConfirm={(task) => {
+          setStopping(null)
+          void session.stopRecurrence(task.id)
+        }}
+        onCancel={() => setStopping(null)}
+      />
 
       <ConfirmDelete
         task={deleting}
@@ -418,31 +444,47 @@ function TaskGroupSection({
 
 /**
  * One Task as it reads now: the checkbox that completes it, what it says, when
- * it is meant to be done, and the way to remove it. Pressing the description
- * opens the Editor — a Task is one line, and changing it is a decision rather
- * than a place to put a cursor.
+ * it is meant to be done, how often it comes round again, and the ways to
+ * change or remove it. Pressing the description opens the Editor — a Task is
+ * one line, and changing it is a decision rather than a place to put a cursor.
  *
  * The checkbox completes immediately and asks nothing: completing is reversible
  * from the row beside it, and a confirmation on the most ordinary action in the
- * app would be in the way every single time.
+ * app would be in the way every single time. Completing a Recurring Task
+ * advances it to its next slot, and offers Undo Completion for exactly as long
+ * as taking that back is safe.
  */
 function TaskLine({
   task,
+  occurrences,
   focused,
   onToggle,
   onEdit,
+  onUndoCompletion,
+  onStopRecurrence,
   onDelete,
 }: {
   task: Task
+  /** Every Task Occurrence of a Recurring Task, and none for any other. */
+  occurrences: TaskOccurrence[]
   /** The one a clicked Task Alert was about, if this is it. */
   focused: boolean
   onToggle: (completed: boolean) => void
   onEdit: () => void
+  onUndoCompletion: () => void
+  onStopRecurrence: () => void
   onDelete: () => void
 }) {
   const done = task.completedAt !== null
   const scheduled = formatScheduledFor(task)
   const row = useRef<HTMLLIElement>(null)
+  // The history is collapsed until it is asked for: a Task is one line, and a
+  // fortnight of kept occurrences under every one would bury the list.
+  const [showingHistory, setShowingHistory] = useState(false)
+  const history = completedOccurrences(occurrences)
+  // The record's own answer, not this view's: undoing is safe exactly while
+  // the Open occurrence still points back at the completion being undone.
+  const undoable = canUndoCompletion(occurrences)
 
   useEffect(() => {
     // Guarded because not every environment the view runs in implements it,
@@ -454,72 +496,162 @@ function TaskLine({
     <li
       ref={row}
       aria-current={focused ? 'true' : undefined}
-      className={`group flex items-start gap-3 rounded-md py-1.5 pl-2 pr-1 type-body hover:bg-muted/40 focus-within:bg-muted/40 ${
+      className={`group rounded-md py-1.5 pl-2 pr-1 type-body hover:bg-muted/40 focus-within:bg-muted/40 ${
         focused ? 'bg-muted/60 ring-2 ring-ring/40' : ''
       }`}
     >
-      <span className="pt-1">
-        <Checkbox
-          checked={done}
-          onCheckedChange={onToggle}
-          aria-label={
-            done ? `Reopen “${task.description}”` : `Complete “${task.description}”`
-          }
-        />
-      </span>
-
-      <button
-        type="button"
-        onClick={onEdit}
-        className={`min-w-0 flex-1 cursor-text rounded-sm py-0.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ${
-          done ? 'text-muted-foreground line-through' : ''
-        }`}
-      >
-        {task.description}
-      </button>
-
-      {/* Only while the commitment is still open: a Task that was kept is
-          about when it was kept, not about when it was meant to be. */}
-      {!done && scheduled !== null && (
-        <span className="shrink-0 pt-1 tabular-nums type-meta text-muted-foreground">
-          {scheduled}
+      <div className="flex items-start gap-3">
+        <span className="pt-1">
+          <Checkbox
+            checked={done}
+            onCheckedChange={onToggle}
+            aria-label={
+              done
+                ? `Reopen \u201C${task.description}\u201D`
+                : `Complete \u201C${task.description}\u201D`
+            }
+          />
         </span>
-      )}
 
-      {task.completedAt !== null && (
-        <time
-          dateTime={task.completedAt}
-          className="shrink-0 pt-1 tabular-nums type-meta text-muted-foreground"
+        <button
+          type="button"
+          onClick={onEdit}
+          className={`min-w-0 flex-1 cursor-text rounded-sm py-0.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ${
+            done ? 'text-muted-foreground line-through' : ''
+          }`}
         >
-          {formatTaskCompletedAt(task.completedAt)}
-        </time>
-      )}
+          {task.description}
+        </button>
 
-      <div className="flex shrink-0 items-center gap-0.5 pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={onDelete}
-          aria-label={`Delete “${task.description}”`}
-          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-        >
-          <Trash2Icon />
-        </Button>
+        {/* What the Task repeats on, in the same words an export writes. */}
+        {task.recurrence !== null && (
+          <span className="flex shrink-0 items-center gap-1 pt-1 type-meta text-muted-foreground">
+            <RepeatIcon className="size-3" aria-hidden />
+            {formatRecurrence(task.recurrence)}
+          </span>
+        )}
+
+        {/* Only while the commitment is still open: a Task that was kept is
+            about when it was kept, not about when it was meant to be. */}
+        {!done && scheduled !== null && (
+          <span className="shrink-0 pt-1 tabular-nums type-meta text-muted-foreground">
+            {scheduled}
+          </span>
+        )}
+
+        {task.completedAt !== null && (
+          <time
+            dateTime={task.completedAt}
+            className="shrink-0 pt-1 tabular-nums type-meta text-muted-foreground"
+          >
+            {formatTaskCompletedAt(task.completedAt)}
+          </time>
+        )}
+
+        <div className="flex shrink-0 items-center gap-0.5 pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
+          {/* Offered only while it is safe. A completion whose successor was
+              edited or completed stays historical, because undoing it would
+              either open two occurrences at once or throw away a later
+              decision. */}
+          {undoable && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={onUndoCompletion}
+              aria-label={`Undo the last completion of \u201C${task.description}\u201D`}
+              className="text-muted-foreground"
+            >
+              <RotateCcwIcon />
+            </Button>
+          )}
+          {task.recurrence !== null && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onStopRecurrence}
+              aria-label={`Stop repeating \u201C${task.description}\u201D`}
+              className="text-muted-foreground"
+            >
+              Stop repeating
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onDelete}
+            aria-label={`Delete \u201C${task.description}\u201D`}
+            className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          >
+            <Trash2Icon />
+          </Button>
+        </div>
       </div>
+
+      {/* Attached to the Task rather than mixed into the ordinary Completed
+          Tasks: what a Recurring Task kept belongs under the Task that is
+          still going. */}
+      {history.length > 0 && (
+        <div className="pl-8">
+          <button
+            type="button"
+            aria-expanded={showingHistory}
+            aria-label={`Completed occurrences of \u201C${task.description}\u201D`}
+            onClick={() => setShowingHistory((open) => !open)}
+            className="flex items-center gap-1 rounded-sm py-0.5 type-meta text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
+          >
+            <ChevronRightIcon
+              aria-hidden
+              className={`size-3 transition-transform ${showingHistory ? 'rotate-90' : ''}`}
+            />
+            {history.length === 1
+              ? '1 completed occurrence'
+              : `${history.length} completed occurrences`}
+          </button>
+
+          {showingHistory && (
+            <ol className="flex flex-col gap-0.5 pb-1 pl-4">
+              {history.map((occurrence) => (
+                <li
+                  key={occurrence.id}
+                  className="flex items-baseline gap-2 tabular-nums type-meta text-muted-foreground"
+                >
+                  <span>
+                    {occurrence.scheduledDate}
+                    {occurrence.scheduledTime === null
+                      ? ''
+                      : ` ${occurrence.scheduledTime}`}
+                  </span>
+                  <time dateTime={occurrence.completedAt!}>
+                    {`kept ${formatTaskCompletedAt(occurrence.completedAt!)}`}
+                  </time>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
     </li>
   )
 }
 
 /**
- * The sheet that changes an existing Task: the wording, and when it is meant to
- * be done. Save commits both; Cancel, Escape and closing all discard. It is
- * inside this window rather than the resident Task Creation one on purpose:
- * reusing that window would throw away an unfinished new Task to edit an old
- * one.
+ * The sheet that changes an existing Task: the wording, when it is meant to be
+ * done, and how often it comes round again. Save commits all of it; Cancel,
+ * Escape and closing all discard. It is inside this window rather than the
+ * resident Task Creation one on purpose: reusing that window would throw away
+ * an unfinished new Task to edit an old one.
  *
- * Schedule words in the description are never read for meaning — the date and
- * the time are chosen with their own controls, and the description stays
- * exactly as written. See CONTEXT.md.
+ * Changing the starting date, the selected weekdays, the cadence or the time
+ * reanchors a continuing series and replaces its Open occurrence — which is a
+ * change to the series rather than an exception on one occurrence, so nothing
+ * here offers a this-and-following choice.
+ *
+ * Clearing the date on a Recurring Task asks first, because it also stops the
+ * recurrence: the date is what the cadence is counted from.
+ *
+ * Schedule words in the description are never read for meaning — the date, the
+ * time and the cadence are chosen with their own controls, and the description
+ * stays exactly as written. See CONTEXT.md.
  */
 function TaskEditor({
   task,
@@ -527,12 +659,23 @@ function TaskEditor({
   onCancel,
 }: {
   task: Task
-  onSave: (description: string, schedule: TaskSchedule | null) => void
+  onSave: (
+    description: string,
+    schedule: TaskSchedule | null,
+    recurrence: Recurrence | null,
+  ) => void
   onCancel: () => void
 }) {
   const [description, setDescription] = useState(task.description)
   const [schedule, setSchedule] = useState(scheduleOf(task))
   const headingId = useId()
+  const [recurrence, setRecurrence] = useState(task.recurrence)
+  // A change to the schedule that would stop an existing recurrence, waiting
+  // to be confirmed. Null until one is asked for.
+  const [stopping, setStopping] = useState<{
+    schedule: TaskSchedule | null
+    recurrence: Recurrence | null
+  } | null>(null)
   const said = description.trim()
   // Only the Task Description is editable while a Task is Completed: reopening
   // is what makes a schedule changeable again, and it is a decision the user
@@ -540,7 +683,25 @@ function TaskEditor({
   const completed = task.completedAt !== null
 
   function save() {
-    onSave(description, schedule)
+    onSave(description, schedule, recurrence)
+  }
+
+  /**
+   * A change to the schedule row. Losing the date takes the cadence with it,
+   * which is Stop Recurrence by another name — so a Task that actually has one
+   * is asked about before the control changes under the user.
+   */
+  function changeSchedule(next: {
+    schedule: TaskSchedule | null
+    recurrence: Recurrence | null
+  }) {
+    if (next.recurrence === null && task.recurrence !== null && recurrence !== null) {
+      setStopping(next)
+      return
+    }
+
+    setSchedule(next.schedule)
+    setRecurrence(next.recurrence)
   }
 
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -578,7 +739,11 @@ function TaskEditor({
           meant to be done.
         </p>
       ) : (
-        <ScheduleFields schedule={schedule} onChange={setSchedule} />
+        <ScheduleFields
+          schedule={schedule}
+          recurrence={recurrence}
+          onChange={changeSchedule}
+        />
       )}
 
       <div className="flex justify-end gap-2">
@@ -589,7 +754,81 @@ function TaskEditor({
           Save
         </Button>
       </div>
+
+      <AlertDialog
+        open={stopping !== null}
+        onOpenChange={(open) => {
+          if (!open) setStopping(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Stop repeating this Task?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A cadence is counted from its date, so clearing the date also
+              stops the recurrence. The Task stays, and so does everything it
+              has already completed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (stopping === null) return
+                setSchedule(stopping.schedule)
+                setRecurrence(null)
+                setStopping(null)
+              }}
+            >
+              Stop repeating
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
+  )
+}
+
+/**
+ * The guard on ending a series. Not destructive — the Task stays exactly where
+ * it stands and every completed occurrence stays under it — but it is the end
+ * of something the user set up, so it is asked rather than assumed.
+ */
+function ConfirmStopRecurrence({
+  task,
+  onConfirm,
+  onCancel,
+}: {
+  task: Task | null
+  onConfirm: (task: Task) => void
+  onCancel: () => void
+}) {
+  return (
+    <AlertDialog
+      open={task !== null}
+      onOpenChange={(open) => {
+        if (!open) onCancel()
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Stop repeating this Task?</AlertDialogTitle>
+          <AlertDialogDescription>
+            “{task?.description}” stays exactly where it is, and so
+            does everything it has already completed. It simply stops coming
+            round again.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => task !== null && onConfirm(task)}
+          >
+            Stop repeating
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 
@@ -617,8 +856,11 @@ function ConfirmDelete({
         <AlertDialogHeader>
           <AlertDialogTitle>Delete this Task?</AlertDialogTitle>
           <AlertDialogDescription>
-            “{task?.description}” will be gone for good. There is no trash and no
-            undo.
+            “{task?.description}” will be gone for good
+            {task?.recurrence === null
+              ? ''
+              : ', and every occurrence it has completed with it'}
+            . There is no trash and no undo.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

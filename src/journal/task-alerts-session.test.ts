@@ -256,6 +256,53 @@ describe('createTaskAlertsSession', () => {
     expect(outcomes).toEqual([false, true])
   })
 
+  it('holds one pending request for a Recurring Task, and replaces it', async () => {
+    const { session, journal, desktop, clock } = await sessionAt(
+      '2026-03-16T08:00:00',
+    )
+    const task = await journal.createTask(
+      'stand-up',
+      { date: '2026-03-16', time: '09:00' },
+      { unit: 'day', interval: 1, weekdays: [] },
+    )
+
+    await session.start()
+
+    expect(desktop.pendingAlerts).toHaveLength(1)
+    expect(desktop.pendingAlerts[0]).toMatchObject({
+      id: `task:${task.id}`,
+      day: 16,
+      hour: 9,
+    })
+
+    // Completing advances the series. The successor claims the same
+    // identifier, so macOS is left holding one request, not two.
+    clock.set(new Date('2026-03-16T09:30:00'))
+    await journal.completeTask(task.id)
+    await desktop.announceTasksChanged()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(desktop.pendingAlerts).toHaveLength(1)
+    expect(desktop.pendingAlerts[0]).toMatchObject({
+      id: `task:${task.id}`,
+      day: 17,
+      hour: 9,
+    })
+  })
+
+  it('never pre-registers the slots a Recurring Task has not reached', async () => {
+    const { session, journal, desktop } = await sessionAt('2026-03-16T08:00:00')
+    await journal.createTask(
+      'gym',
+      { date: '2026-03-16', time: '18:00' },
+      { unit: 'week', interval: 1, weekdays: [1, 3, 5] },
+    )
+
+    await session.start()
+
+    expect(desktop.pendingAlerts).toHaveLength(1)
+  })
+
   it('stops asking once it is stopped', async () => {
     const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
     await session.start()

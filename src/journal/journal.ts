@@ -15,10 +15,30 @@ export interface Clock {
 /** The machine's clock: the one the app runs on, wherever it needs one. */
 export const systemClock: Clock = { now: () => new Date() }
 
-/** The whole of the app's storage surface: a SQL string plus parameters. */
+/** One statement of the app's storage surface: SQL plus its parameters. */
+export interface SqlStatement {
+  sql: string
+  params: unknown[]
+}
+
+/** The whole of the app's storage surface: statements, and a real transaction. */
 export interface SqlDriver {
   execute(sql: string, params: unknown[]): Promise<unknown>
   select<Row>(sql: string, params: unknown[]): Promise<Row[]>
+  /**
+   * Every statement, or none at all. A Recurring Task moves between states by
+   * several writes that only make sense together — complete this occurrence
+   * *and* open the next one — and the one-Open-occurrence invariant cannot
+   * survive an interruption between them; see
+   * docs/adr/0020-recurring-task-transitions-are-transactional.md.
+   *
+   * A list rather than a callback because the whole of a transition is decided
+   * before any of it is written: what the next slot is, is calendar arithmetic
+   * over rows already read, and the statements that write it carry their own
+   * guards so a record that moved underneath them refuses rather than
+   * overwrites.
+   */
+  transaction(statements: SqlStatement[]): Promise<void>
 }
 
 /**
@@ -86,6 +106,66 @@ export interface Task {
    * date is the prerequisite, and a date alone never implies a default time.
    */
   scheduledTime: string | null
+  /**
+   * The cadence this Task repeats on, or null when it does not repeat — which
+   * is every Task until somebody says otherwise. A Recurring Task is one Task
+   * following a rule rather than a stream of cloned ones; see
+   * docs/adr/0016-recurring-tasks-have-one-open-occurrence.md.
+   */
+  recurrence: Recurrence | null
+  /**
+   * `YYYY-MM-DD`: the starting date the series is counted from, or null when
+   * the Task does not repeat. Distinct from `scheduledDate`, which is the one
+   * Open Task Occurrence and moves with every completion — every-N weeks are
+   * counted from the Monday-based week containing this date, and a monthly or
+   * yearly cadence keeps this date's day of the month through shorter months
+   * rather than drifting after a fallback.
+   */
+  recurrenceAnchor: string | null
+}
+
+/** The calendar units a cadence counts in, and there is no fifth. */
+export type RecurrenceUnit = 'day' | 'week' | 'month' | 'year'
+
+/**
+ * A fixed civil-time cadence: a unit, how many of them apart, and — weekly
+ * only — which days of the week are selected. It says nothing about when the
+ * series starts or ends: the start is the Task's recurrence anchor, and there
+ * is no end, because a recurrence runs until it is stopped.
+ */
+export interface Recurrence {
+  unit: RecurrenceUnit
+  /** Every N units. 1 is every one of them; never 0 and never negative. */
+  interval: number
+  /**
+   * ISO weekdays — 1 is Monday, 7 is Sunday — ascending and without
+   * duplicates. Non-empty for a weekly cadence and empty for every other,
+   * which takes its day from the starting date.
+   */
+  weekdays: number[]
+}
+
+/**
+ * One scheduled commitment within a Recurring Task. Exactly one is Open at any
+ * moment; the rest are the Task's own history, which stays attached to it
+ * rather than joining the ordinary Completed Tasks.
+ */
+export interface TaskOccurrence {
+  id: string
+  taskId: string
+  /** The slot: civil time, exactly as a Task's own schedule is stored. */
+  scheduledDate: string
+  scheduledTime: string | null
+  /** When this occurrence was completed, or null while it is the Open one. */
+  completedAt: string | null
+  createdAt: string
+  /**
+   * The occurrence whose completion produced this one, and null when nothing
+   * did — a series just created, or one an edit reanchored. What makes Undo
+   * Completion safe to offer: it is available exactly while the Open
+   * occurrence still points back at the completion being undone.
+   */
+  advancedFrom: string | null
 }
 
 /**
@@ -111,6 +191,49 @@ export function scheduleOf(task: Task): TaskSchedule | null {
   return task.scheduledDate === null
     ? null
     : { date: task.scheduledDate, time: task.scheduledTime }
+}
+
+/** Whether this Task follows a cadence, or is simply the one commitment. */
+export function isRecurring(task: Task): boolean {
+  return task.recurrence !== null
+}
+
+/** The one Open Task Occurrence, of however many a Task has had. */
+export function openOccurrence(
+  occurrences: TaskOccurrence[],
+): TaskOccurrence | null {
+  return occurrences.find((one) => one.completedAt === null) ?? null
+}
+
+/**
+ * The Task's own history: the occurrences it has already kept, most recently
+ * completed first. Never mixed into the ordinary Completed Tasks — a Recurring
+ * Task is still Open, and what it kept belongs under it.
+ */
+export function completedOccurrences(
+  occurrences: TaskOccurrence[],
+): TaskOccurrence[] {
+  return occurrences
+    .filter((one) => one.completedAt !== null)
+    .sort((one, other) => (one.completedAt! < other.completedAt! ? 1 : -1))
+}
+
+/**
+ * Whether the latest completion can still be taken back. Only while the
+ * occurrence it advanced to is the Open one and is still the one that
+ * completion produced: an edit reanchors the series and replaces that
+ * occurrence, and completing it again buries it, and either way undoing would
+ * destroy a later decision rather than correct a mistaken tick.
+ *
+ * Asked of the occurrences rather than worked out again from the calendar,
+ * because the record already says it: the Open occurrence points back at the
+ * completion that produced it, and nothing else ever sets that.
+ */
+export function canUndoCompletion(occurrences: TaskOccurrence[]): boolean {
+  const open = openOccurrence(occurrences)
+  if (open === null || open.advancedFrom === null) return false
+
+  return completedOccurrences(occurrences)[0]?.id === open.advancedFrom
 }
 
 /**
@@ -318,7 +441,11 @@ export interface Journal {
    * can owe the same thing — so nothing is checked against what is already
    * there.
    */
-  createTask(description: string, schedule?: TaskSchedule | null): Promise<Task>
+  createTask(
+    description: string,
+    schedule?: TaskSchedule | null,
+    recurrence?: Recurrence | null,
+  ): Promise<Task>
   /**
    * The commitments that remain: the scheduled ones earliest Scheduled For
    * first, and the Unscheduled ones after them, newest created first. Which of
@@ -348,7 +475,23 @@ export interface Journal {
    */
   editTask(
     id: string,
-    change: { description: string; schedule: TaskSchedule | null },
+    change: {
+      description: string
+      schedule: TaskSchedule | null
+      /**
+       * The cadence the Task is left following. Omitted leaves whatever it
+       * already has — clearing the date still stops it, because a cadence
+       * with nothing to count from is not one.
+       *
+       * Changing the starting date, the selected weekdays, the cadence or the
+       * time immediately reanchors the continuing series and replaces its
+       * Open occurrence without recording a completion: its latest elapsed
+       * slot becomes Overdue, or its next future slot becomes Upcoming. There
+       * are no per-occurrence exceptions and no this-and-following edits — see
+       * docs/adr/0016-recurring-tasks-have-one-open-occurrence.md.
+       */
+      recurrence?: Recurrence | null
+    },
   ): Promise<Task>
   /**
    * Marks the commitment kept, recording when. Never asks first — completing
@@ -359,8 +502,36 @@ export interface Journal {
   /** Puts the commitment back: Task Completed At is removed, not kept. */
   reopenTask(id: string): Promise<Task>
   /**
-   * Removes a Task permanently. There is no trash, no archive and no undo —
-   * which is why this one is the only Task action that is confirmed.
+   * Takes back the most recent completion of a Recurring Task: the occurrence
+   * that completion advanced to is removed and the one before it becomes the
+   * single Open occurrence again, atomically, so the invariant holds however
+   * the machine is interrupted.
+   *
+   * Only while that successor is still Open and still the one that completion
+   * produced. Older completions, and any whose successor was edited or
+   * completed, stay historical: undoing them would either open two occurrences
+   * at once or throw away a later decision. `canUndoCompletion` is the same
+   * question asked without changing anything, which is what a screen offering
+   * the action needs.
+   */
+  undoCompletion(id: string): Promise<Task>
+  /**
+   * Removes the recurrence rule while retaining the Task itself, exactly where
+   * the series left it, and every completed Task Occurrence under it. There
+   * are no one-occurrence exceptions: this is what stopping a series means.
+   */
+  stopRecurrence(id: string): Promise<Task>
+  /**
+   * One Recurring Task's Task Occurrences, newest slot first, the Open one
+   * among them — the expandable history under the Task, and the record a
+   * screen asks whether Undo Completion is still safe.
+   */
+  occurrencesOf(taskId: string): Promise<TaskOccurrence[]>
+  /**
+   * Removes a Task permanently, and with it every Task Occurrence it ever had.
+   * There is no trash, no archive and no undo — which is why this one is the
+   * only Task action that is confirmed, and why the confirmation says the
+   * history goes too.
    */
   deleteTask(id: string): Promise<void>
   /**
@@ -408,16 +579,39 @@ interface TaskRow {
   completed_at: string | null
   scheduled_date: string | null
   scheduled_time: string | null
+  recurrence_unit: string | null
+  recurrence_interval: number | null
+  recurrence_weekdays: string | null
+  recurrence_anchor_date: string | null
 }
 
+interface TaskOccurrenceRow {
+  id: string
+  task_id: string
+  scheduled_date: string
+  scheduled_time: string | null
+  completed_at: string | null
+  created_at: string
+  advanced_from: string | null
+}
+
+/** The recurrence columns, in the order every Task statement writes them. */
+const RECURRENCE_COLUMNS =
+  'recurrence_unit, recurrence_interval, recurrence_weekdays, recurrence_anchor_date'
+
 const INSERT_TASK = `
-  INSERT INTO tasks (id, description, created_at, completed_at, scheduled_date, scheduled_time)
-  VALUES (?, ?, ?, NULL, ?, ?)
+  INSERT INTO tasks (
+    id, description, created_at, completed_at, scheduled_date, scheduled_time,
+    ${RECURRENCE_COLUMNS}
+  )
+  VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
 `
 
 /** Every read returns a whole Task; only the predicate and the order differ. */
 const SELECT_TASKS = `
-  SELECT id, description, created_at, completed_at, scheduled_date, scheduled_time
+  SELECT
+    id, description, created_at, completed_at, scheduled_date, scheduled_time,
+    ${RECURRENCE_COLUMNS}
   FROM tasks
 `
 
@@ -476,12 +670,133 @@ const UPDATE_TASK = `
   WHERE id = ?
 `
 
+/**
+ * An edit that reanchors a continuing series, or one that stops it: the
+ * cadence and the starting date move with the schedule, in one statement,
+ * because a rule whose anchor half landed would count from a date nobody
+ * chose.
+ */
+const UPDATE_TASK_WITH_RECURRENCE = `
+  UPDATE tasks
+  SET
+    description = ?,
+    scheduled_date = ?,
+    scheduled_time = ?,
+    recurrence_unit = ?,
+    recurrence_interval = ?,
+    recurrence_weekdays = ?,
+    recurrence_anchor_date = ?
+  WHERE id = ?
+`
+
+/** Where the series now stands: the slot its one Open occurrence asks for. */
+const UPDATE_TASK_SCHEDULE = `
+  UPDATE tasks SET scheduled_date = ?, scheduled_time = ? WHERE id = ?
+`
+
+/**
+ * The same, but only while the occurrence it is meant to follow really is the
+ * Open one again. Undo removes a successor and reopens its predecessor, and a
+ * head moved without them would point at a slot no occurrence holds.
+ */
+const UPDATE_TASK_SCHEDULE_IF_OPEN = `
+  UPDATE tasks
+  SET scheduled_date = ?, scheduled_time = ?
+  WHERE id = ?
+    AND EXISTS (
+      SELECT 1 FROM task_occurrences
+      WHERE id = ? AND completed_at IS NULL
+    )
+`
+
 const UPDATE_TASK_COMPLETED_AT = `
   UPDATE tasks SET completed_at = ? WHERE id = ?
 `
 
 const DELETE_TASK = `
   DELETE FROM tasks WHERE id = ?
+`
+
+const INSERT_TASK_OCCURRENCE = `
+  INSERT INTO task_occurrences (
+    id, task_id, scheduled_date, scheduled_time, completed_at, created_at, advanced_from
+  )
+  VALUES (?, ?, ?, ?, NULL, ?, ?)
+`
+
+const SELECT_TASK_OCCURRENCES = `
+  SELECT id, task_id, scheduled_date, scheduled_time, completed_at, created_at, advanced_from
+  FROM task_occurrences
+`
+
+/**
+ * One Recurring Task's whole history, newest slot first, the Open occurrence
+ * among them. Ordered by the slot rather than by completion, because that is
+ * the order the commitments were made in and the order the history reads in.
+ */
+const SELECT_OCCURRENCES_OF_TASK = `
+  ${SELECT_TASK_OCCURRENCES}
+  WHERE task_id = ?
+  ORDER BY scheduled_date DESC, scheduled_time IS NULL, scheduled_time DESC, id DESC
+`
+
+/** Every completed occurrence in the journal, oldest first: export order. */
+const SELECT_COMPLETED_OCCURRENCES_FOR_EXPORT = `
+  ${SELECT_TASK_OCCURRENCES}
+  WHERE completed_at IS NOT NULL
+  ORDER BY scheduled_date ASC, scheduled_time IS NOT NULL, scheduled_time ASC, id ASC
+`
+
+/**
+ * Keeps the commitment this occurrence stands for, and only while it is still
+ * the Open one: a second window that completed it first leaves this a no-op,
+ * and the insert that follows then collides with the one-Open index and takes
+ * the whole transaction down rather than opening a second occurrence.
+ */
+const COMPLETE_TASK_OCCURRENCE = `
+  UPDATE task_occurrences
+  SET completed_at = ?
+  WHERE id = ? AND completed_at IS NULL
+`
+
+/**
+ * Takes the successor away, and only while the completion being undone is
+ * still on file — so a completion that has since been undone elsewhere does
+ * not cost the user the occurrence they are looking at.
+ */
+const DELETE_ADVANCED_OCCURRENCE = `
+  DELETE FROM task_occurrences
+  WHERE id = ?
+    AND completed_at IS NULL
+    AND advanced_from = ?
+    AND EXISTS (
+      SELECT 1 FROM task_occurrences WHERE id = ? AND completed_at IS NOT NULL
+    )
+`
+
+/**
+ * Puts the mistaken tick back, and only into the room the delete above just
+ * made: the one-Open invariant is the point of the whole transaction, so it is
+ * asked for here as well as enforced by the index.
+ */
+const REOPEN_TASK_OCCURRENCE = `
+  UPDATE task_occurrences
+  SET completed_at = NULL
+  WHERE id = ?
+    AND completed_at IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM task_occurrences WHERE task_id = ? AND completed_at IS NULL
+    )
+`
+
+/** The Open occurrence of a series that is no longer one. History stays. */
+const DELETE_OPEN_OCCURRENCE = `
+  DELETE FROM task_occurrences WHERE task_id = ? AND completed_at IS NULL
+`
+
+/** Permanent deletion takes the whole history with it, in one transaction. */
+const DELETE_OCCURRENCES_OF_TASK = `
+  DELETE FROM task_occurrences WHERE task_id = ?
 `
 
 const INSERT_NOTE = `
@@ -826,9 +1141,13 @@ export function createJournal({
     },
 
     async exportJournal() {
-      const [noteRows, taskRows] = await Promise.all([
+      const [noteRows, taskRows, occurrenceRows] = await Promise.all([
         driver.select<NoteRow>(SELECT_ALL_NOTES_FOR_EXPORT, []),
         driver.select<TaskRow>(SELECT_ALL_TASKS_FOR_EXPORT, []),
+        driver.select<TaskOccurrenceRow>(
+          SELECT_COMPLETED_OCCURRENCES_FOR_EXPORT,
+          [],
+        ),
       ])
       // An export always spans whatever the journal holds, so every day is
       // named — a file with unlabelled bullets is not a journal — and it is
@@ -838,28 +1157,59 @@ export function createJournal({
         projectPrefixes: true,
       })
 
-      return renderExport(notes, taskRows.map(toTask))
+      return renderExport(
+        notes,
+        taskRows.map(toTask),
+        occurrenceRows.map(toOccurrence),
+      )
     },
 
-    async createTask(description, schedule = null) {
+    async createTask(description, schedule = null, recurrence = null) {
       const said = taskDescription(description)
       const scheduled = taskSchedule(schedule)
+      const cadence = taskRecurrence(recurrence, scheduled)
+      const now = clock.now()
+      // A cadence is counted from the date the user chose, which is not
+      // necessarily the slot the series opens on: one started in the past
+      // opens Overdue on its latest elapsed slot rather than on all of them.
+      const anchor = cadence === null ? null : scheduled!.date
+      const opening =
+        cadence === null || anchor === null
+          ? scheduled?.date ?? null
+          : openingSlot(anchor, cadence, scheduled!.time, now)
+
       const task: Task = {
         id: crypto.randomUUID(),
         description: said,
-        createdAt: clock.now().toISOString(),
+        createdAt: now.toISOString(),
         completedAt: null,
-        scheduledDate: scheduled?.date ?? null,
+        scheduledDate: opening,
         scheduledTime: scheduled?.time ?? null,
+        recurrence: cadence,
+        recurrenceAnchor: anchor,
       }
 
-      await driver.execute(INSERT_TASK, [
-        task.id,
-        task.description,
-        task.createdAt,
-        task.scheduledDate,
-        task.scheduledTime,
-      ])
+      const stored: SqlStatement = {
+        sql: INSERT_TASK,
+        params: [
+          task.id,
+          task.description,
+          task.createdAt,
+          task.scheduledDate,
+          task.scheduledTime,
+          ...recurrenceParams(cadence, anchor),
+        ],
+      }
+
+      if (cadence === null) {
+        await driver.execute(stored.sql, stored.params)
+        return task
+      }
+
+      // The Task and its one Open occurrence come into existence together: a
+      // Recurring Task with no occurrence would be a series asking for
+      // nothing.
+      await driver.transaction([stored, opensOccurrence(task, now, null)])
 
       return task
     },
@@ -874,7 +1224,7 @@ export function createJournal({
       return rows.map(toTask)
     },
 
-    async editTask(id, { description, schedule }) {
+    async editTask(id, { description, schedule, recurrence }) {
       const said = taskDescription(description)
       const scheduled = taskSchedule(schedule)
       const task = await readTask(driver, id)
@@ -894,9 +1244,81 @@ export function createJournal({
         )
       }
 
-      await driver.execute(UPDATE_TASK, [said, date, time, id])
+      // The cadence this edit leaves behind: the one it was handed, the one
+      // the Task already had when it was not asked about, and none at all
+      // once the date it would be counted from is gone.
+      const asked = recurrence === undefined ? task.recurrence : recurrence
+      const cadence = scheduled === null ? null : taskRecurrence(asked, scheduled)
 
-      return { ...task, description: said, scheduledDate: date, scheduledTime: time }
+      if (!isOpen(task) && !sameRecurrence(task.recurrence, cadence)) {
+        throw new Error(
+          'A Completed Task keeps its recurrence: reopen it to change one.',
+        )
+      }
+
+      if (cadence === null) {
+        // Nothing to stop, so this is the ordinary edit it has always been.
+        if (task.recurrence === null) {
+          await driver.execute(UPDATE_TASK, [said, date, time, id])
+          return {
+            ...task,
+            description: said,
+            scheduledDate: date,
+            scheduledTime: time,
+          }
+        }
+
+        return stopRecurring(driver, task, {
+          description: said,
+          date,
+          time,
+        })
+      }
+
+      // Only these reanchor. Rewording alone leaves the series exactly where
+      // it stands, because what a Task says is not part of when it repeats.
+      const reanchors =
+        task.recurrence === null ||
+        !sameRecurrence(task.recurrence, cadence) ||
+        date !== task.scheduledDate ||
+        time !== task.scheduledTime
+
+      if (!reanchors) {
+        await driver.execute(UPDATE_TASK, [said, date, time, id])
+        return { ...task, description: said }
+      }
+
+      const now = clock.now()
+      const anchor = scheduled!.date
+      const opening = openingSlot(anchor, cadence, time, now)
+      const reanchored: Task = {
+        ...task,
+        description: said,
+        scheduledDate: opening,
+        scheduledTime: time,
+        recurrence: cadence,
+        recurrenceAnchor: anchor,
+      }
+
+      // Replaced rather than completed: an edit is not a commitment kept, so
+      // nothing goes into the history and the rule and its one Open
+      // occurrence move together or not at all.
+      await driver.transaction([
+        {
+          sql: UPDATE_TASK_WITH_RECURRENCE,
+          params: [
+            said,
+            opening,
+            time,
+            ...recurrenceParams(cadence, anchor),
+            id,
+          ],
+        },
+        { sql: DELETE_OPEN_OCCURRENCE, params: [id] },
+        opensOccurrence(reanchored, now, null),
+      ])
+
+      return reanchored
     },
 
     async completeTask(id) {
@@ -908,10 +1330,41 @@ export function createJournal({
         return task
       }
 
-      const completedAt = clock.now().toISOString()
-      await driver.execute(UPDATE_TASK_COMPLETED_AT, [completedAt, id])
+      const now = clock.now()
 
-      return { ...task, completedAt }
+      if (task.recurrence === null || task.recurrenceAnchor === null) {
+        const completedAt = now.toISOString()
+        await driver.execute(UPDATE_TASK_COMPLETED_AT, [completedAt, id])
+        return { ...task, completedAt }
+      }
+
+      // A Recurring Task is never itself Completed: the occurrence is kept,
+      // stays in the Task's own history, and the Task carries on asking for
+      // the next slot that is still ahead.
+      const open = await readOpenOccurrence(driver, id)
+      const next = advancedSlot(
+        task.recurrenceAnchor,
+        task.recurrence,
+        open.scheduledTime,
+        open.scheduledDate,
+        now,
+      )
+      const advanced: Task = {
+        ...task,
+        scheduledDate: next,
+        scheduledTime: open.scheduledTime,
+      }
+
+      await driver.transaction([
+        { sql: COMPLETE_TASK_OCCURRENCE, params: [now.toISOString(), open.id] },
+        opensOccurrence(advanced, now, open.id),
+        {
+          sql: UPDATE_TASK_SCHEDULE,
+          params: [next, open.scheduledTime, id],
+        },
+      ])
+
+      return advanced
     },
 
     async reopenTask(id) {
@@ -926,9 +1379,80 @@ export function createJournal({
       return { ...task, completedAt: null }
     },
 
+    async undoCompletion(id) {
+      const task = await readTask(driver, id)
+      const occurrences = await readOccurrences(driver, id)
+
+      if (!canUndoCompletion(occurrences)) {
+        throw new Error(
+          'Only the latest completion can be undone, and only while what it advanced to is untouched.',
+        )
+      }
+
+      const successor = openOccurrence(occurrences)!
+      const restored = completedOccurrences(occurrences)[0]
+
+      // Removed before reopened, and never the other way round: the one-Open
+      // index would refuse the moment in between, and a transaction that
+      // cannot hold its own middle is not one.
+      await driver.transaction([
+        {
+          sql: DELETE_ADVANCED_OCCURRENCE,
+          params: [successor.id, restored.id, restored.id],
+        },
+        { sql: REOPEN_TASK_OCCURRENCE, params: [restored.id, id] },
+        {
+          sql: UPDATE_TASK_SCHEDULE_IF_OPEN,
+          params: [
+            restored.scheduledDate,
+            restored.scheduledTime,
+            id,
+            restored.id,
+          ],
+        },
+      ])
+
+      // The statements guard themselves against a record that moved while
+      // this was being decided, which means they can all decline. Saying so is
+      // better than reporting an undo that did not happen.
+      const after = await readOccurrences(driver, id)
+      if (openOccurrence(after)?.id !== restored.id) {
+        throw new Error('That completion could no longer be undone.')
+      }
+
+      return {
+        ...task,
+        scheduledDate: restored.scheduledDate,
+        scheduledTime: restored.scheduledTime,
+      }
+    },
+
+    async stopRecurrence(id) {
+      const task = await readTask(driver, id)
+
+      if (task.recurrence === null) {
+        return task
+      }
+
+      return stopRecurring(driver, task, {
+        description: task.description,
+        date: task.scheduledDate,
+        time: task.scheduledTime,
+      })
+    },
+
+    async occurrencesOf(taskId) {
+      return readOccurrences(driver, taskId)
+    },
+
     async deleteTask(id) {
       await readTask(driver, id)
-      await driver.execute(DELETE_TASK, [id])
+      // The history goes with the Task, in one transaction: an occurrence left
+      // behind would belong to nothing.
+      await driver.transaction([
+        { sql: DELETE_OCCURRENCES_OF_TASK, params: [id] },
+        { sql: DELETE_TASK, params: [id] },
+      ])
     },
 
     async projectPredictions(prefix) {
@@ -1001,9 +1525,15 @@ function renderDigest(
  *
  * `tasks` must be in export order: oldest first, both states together.
  */
-function renderExport(notes: Digest, tasks: Task[]): JournalExport {
+function renderExport(
+  notes: Digest,
+  tasks: Task[],
+  occurrences: TaskOccurrence[],
+): JournalExport {
   const open = tasks.filter(isOpen)
   const completed = tasks.filter((task) => !isOpen(task))
+  const history = historyByTask(occurrences)
+  const bullet = (task: Task) => taskBullet(task, history.get(task.id) ?? [])
 
   const sections: string[] = []
 
@@ -1014,10 +1544,10 @@ function renderExport(notes: Digest, tasks: Task[]): JournalExport {
   if (tasks.length > 0) {
     const parts: string[] = ['# Tasks']
     if (open.length > 0) {
-      parts.push(`## Open\n${open.map(taskBullet).join('\n')}`)
+      parts.push(`## Open\n${open.map(bullet).join('\n')}`)
     }
     if (completed.length > 0) {
-      parts.push(`## Completed\n${completed.map(taskBullet).join('\n')}`)
+      parts.push(`## Completed\n${completed.map(bullet).join('\n')}`)
     }
     sections.push(parts.join('\n\n'))
   }
@@ -1040,7 +1570,7 @@ function renderExport(notes: Digest, tasks: Task[]): JournalExport {
  * instant: it is a day and a minute in the user's own calendar, and an export
  * that resolved it to a moment would say something the record does not.
  */
-function taskBullet(task: Task): string {
+function taskBullet(task: Task, history: TaskOccurrence[]): string {
   const metadata: string[] = []
   const schedule = scheduleOf(task)
 
@@ -1049,13 +1579,49 @@ function taskBullet(task: Task): string {
       `scheduled ${schedule.date}${schedule.time === null ? '' : ` ${schedule.time}`}`,
     )
   }
+  if (task.recurrence !== null) {
+    metadata.push(`repeats ${formatRecurrence(task.recurrence)}`)
+  }
   if (task.completedAt !== null) {
     metadata.push(`completed ${formatExportInstant(task.completedAt)}`)
   }
 
   const said = metadata.length > 0 ? ` (${metadata.join('; ')})` : ''
+  const bullet = `- [${task.completedAt === null ? ' ' : 'x'}] ${task.description}${said}`
 
-  return `- [${task.completedAt === null ? ' ' : 'x'}] ${task.description}${said}`
+  if (history.length === 0) return bullet
+
+  // Nested under the Task rather than beside it: a Task Occurrence is one
+  // commitment within a Recurring Task, and a file that gave it a bullet of
+  // its own would read as a second Task the user never wrote.
+  return [bullet, ...history.map(occurrenceBullet)].join('\n')
+}
+
+/** One kept occurrence: the slot it stood for, and when it was kept. */
+function occurrenceBullet(occurrence: TaskOccurrence): string {
+  const slot = `${occurrence.scheduledDate}${
+    occurrence.scheduledTime === null ? '' : ` ${occurrence.scheduledTime}`
+  }`
+
+  return `  - occurrence ${slot} (completed ${formatExportInstant(occurrence.completedAt!)})`
+}
+
+/** The kept occurrences of each Task, in the order the export writes them. */
+function historyByTask(
+  occurrences: TaskOccurrence[],
+): Map<string, TaskOccurrence[]> {
+  const history = new Map<string, TaskOccurrence[]>()
+
+  for (const occurrence of occurrences) {
+    const kept = history.get(occurrence.taskId)
+    if (kept === undefined) {
+      history.set(occurrence.taskId, [occurrence])
+    } else {
+      kept.push(occurrence)
+    }
+  }
+
+  return history
 }
 
 /**
@@ -1797,6 +2363,282 @@ function daysInMonth(year: number, month: number): number {
 }
 
 /**
+ * How many calendar days apart two `YYYY-MM-DD` labels are. Counted in UTC,
+ * where every day is the same length, because these are labels rather than
+ * instants.
+ */
+function daysBetween(from: string, to: string): number {
+  const [fromYear, fromMonth, fromDay] = parts(from)
+  const [toYear, toMonth, toDay] = parts(to)
+
+  return Math.round(
+    (Date.UTC(toYear, toMonth - 1, toDay) -
+      Date.UTC(fromYear, fromMonth - 1, fromDay)) /
+      DAY_MS,
+  )
+}
+
+/**
+ * The slot at one index of a cadence counted from a starting date, before the
+ * ones that fall before that date are dropped. Every rule of how a cadence
+ * lands on the calendar is here, and there is nowhere else it is decided:
+ *
+ * - a daily cadence steps whole days from the starting date;
+ * - a weekly one is counted in Monday-based weeks from the week containing the
+ *   starting date, and walks its selected weekdays in order inside each active
+ *   week — which is why an index is a week block plus a weekday rather than a
+ *   number of days;
+ * - a monthly one keeps the starting date's day of the month, falling back to
+ *   the last day of a month too short for it and returning to its own day the
+ *   month after: January 31 becomes February 28 and then March 31, rather than
+ *   drifting to the 28th for good;
+ * - a yearly one keeps the starting date's month and day the same way, so
+ *   February 29 becomes February 28 in an ordinary year and is February 29
+ *   again in the next leap year.
+ */
+function rawSlot(anchor: string, recurrence: Recurrence, index: number): string {
+  const [year, month, day] = parts(anchor)
+
+  switch (recurrence.unit) {
+    case 'day':
+      return shiftDay(anchor, index * recurrence.interval)
+    case 'week': {
+      const chosen = recurrence.weekdays
+      const block = Math.floor(index / chosen.length)
+      const weekday = chosen[index % chosen.length]
+      return shiftDay(
+        startOfWeek(anchor),
+        block * recurrence.interval * 7 + weekday - 1,
+      )
+    }
+    case 'month': {
+      const months = month - 1 + index * recurrence.interval
+      const inYear = year + Math.floor(months / 12)
+      const inMonth = (months % 12) + 1
+      return dayLabel(inYear, inMonth, Math.min(day, daysInMonth(inYear, inMonth)))
+    }
+    case 'year': {
+      const inYear = year + index * recurrence.interval
+      return dayLabel(inYear, month, Math.min(day, daysInMonth(inYear, month)))
+    }
+  }
+}
+
+/**
+ * Which raw index the series actually begins at. Zero for every cadence but
+ * the weekly one, whose first active week may hold selected weekdays before
+ * the starting date — those are ignored, because a series does not begin
+ * before it was asked to.
+ */
+function seriesStart(anchor: string, recurrence: Recurrence): number {
+  if (recurrence.unit !== 'week') return 0
+
+  // One full week block is enough: if no selected weekday in the starting
+  // week is on or after the starting date, the first one of the next active
+  // week is.
+  for (let index = 0; index <= recurrence.weekdays.length; index += 1) {
+    if (rawSlot(anchor, recurrence, index) >= anchor) return index
+  }
+
+  return 0
+}
+
+/** The slot at one index of a series: `0` is the one it opens on. */
+function slotDate(anchor: string, recurrence: Recurrence, index: number): string {
+  return rawSlot(anchor, recurrence, index + seriesStart(anchor, recurrence))
+}
+
+/**
+ * Roughly which raw index a date falls at — close enough that the exact one is
+ * a step or two away, which is what keeps finding a slot from being a walk
+ * from the starting date however long ago that was.
+ */
+function estimateRawIndex(
+  anchor: string,
+  recurrence: Recurrence,
+  date: string,
+): number {
+  const [anchorYear, anchorMonth] = parts(anchor)
+  const [year, month] = parts(date)
+
+  switch (recurrence.unit) {
+    case 'day':
+      return Math.floor(daysBetween(anchor, date) / recurrence.interval)
+    case 'week': {
+      const weeks = Math.floor(
+        daysBetween(startOfWeek(anchor), startOfWeek(date)) / 7,
+      )
+      return (
+        Math.floor(weeks / recurrence.interval) * recurrence.weekdays.length
+      )
+    }
+    case 'month':
+      return Math.floor(
+        ((year - anchorYear) * 12 + (month - anchorMonth)) / recurrence.interval,
+      )
+    case 'year':
+      return Math.floor((year - anchorYear) / recurrence.interval)
+  }
+}
+
+/**
+ * The latest slot of a series that is on or before a date, as its index, or
+ * null when the series has not started by then.
+ */
+function slotIndexOnOrBefore(
+  anchor: string,
+  recurrence: Recurrence,
+  date: string,
+): number | null {
+  const start = seriesStart(anchor, recurrence)
+  let index = Math.max(estimateRawIndex(anchor, recurrence, date), start - 1)
+
+  // Slots are strictly increasing in the index, so this converges from either
+  // side of the estimate and only one of the two loops ever runs.
+  while (rawSlot(anchor, recurrence, index + 1) <= date) index += 1
+  while (index >= start && rawSlot(anchor, recurrence, index) > date) index -= 1
+
+  return index < start ? null : index - start
+}
+
+/**
+ * Whether a slot's moment has been and gone — the same reading of a schedule
+ * that makes an Open Task Overdue, so a series never opens on, or advances to,
+ * something the user could not still act on. A date-only slot is elapsed only
+ * once its whole day is behind them.
+ */
+function slotHasPassed(
+  slot: TaskSchedule,
+  now: Date,
+  timeZone: string,
+): boolean {
+  const today = civilDateIn(now, timeZone)
+
+  if (slot.date < today) return true
+  if (slot.date > today) return false
+  if (slot.time === null) return false
+
+  return scheduledInstant(slot, timeZone).getTime() <= now.getTime()
+}
+
+/**
+ * The slot a series opens on, whether it was just created or an edit has just
+ * reanchored it: its first, unless that has already elapsed, in which case its
+ * latest elapsed one — which is Overdue on screen.
+ *
+ * A series started in the past therefore opens on one occurrence rather than
+ * on every slot it missed: a backlog of cloned commitments after time away is
+ * the thing this design exists to avoid; see
+ * docs/adr/0016-recurring-tasks-have-one-open-occurrence.md.
+ */
+export function openingSlot(
+  anchor: string,
+  recurrence: Recurrence,
+  time: string | null,
+  now: Date,
+  timeZone: string = localTimeZone(),
+): string {
+  const first = slotDate(anchor, recurrence, 0)
+  if (!slotHasPassed({ date: first, time }, now, timeZone)) return first
+
+  const index = slotIndexOnOrBefore(anchor, recurrence, civilDateIn(now, timeZone)) ?? 0
+  const latest = slotDate(anchor, recurrence, index)
+
+  // Today's slot may still be ahead of its own minute, in which case the
+  // latest one that has actually elapsed is the slot before it.
+  return slotHasPassed({ date: latest, time }, now, timeZone)
+    ? latest
+    : slotDate(anchor, recurrence, Math.max(index - 1, 0))
+}
+
+/**
+ * The slot a completion advances to: the first one after the occurrence just
+ * kept whose moment is still ahead. Slots that were missed while the user was
+ * away are stepped over rather than materialized, which is what makes coming
+ * back to a Recurring Task one commitment rather than a fortnight of them.
+ */
+export function advancedSlot(
+  anchor: string,
+  recurrence: Recurrence,
+  time: string | null,
+  from: string,
+  now: Date,
+  timeZone: string = localTimeZone(),
+): string {
+  let index = (slotIndexOnOrBefore(anchor, recurrence, from) ?? -1) + 1
+
+  // Jump the missed ones rather than walking them: a daily Task left for a
+  // year is a year of slots nobody is going to be asked about.
+  const elapsed = slotIndexOnOrBefore(
+    anchor,
+    recurrence,
+    civilDateIn(now, timeZone),
+  )
+  if (elapsed !== null && elapsed > index) index = elapsed
+
+  while (
+    slotHasPassed({ date: slotDate(anchor, recurrence, index), time }, now, timeZone)
+  ) {
+    index += 1
+  }
+
+  return slotDate(anchor, recurrence, index)
+}
+
+/** Whether two cadences say the same thing, so an edit knows it changed one. */
+export function sameRecurrence(
+  one: Recurrence | null,
+  other: Recurrence | null,
+): boolean {
+  if (one === null || other === null) return one === other
+
+  return (
+    one.unit === other.unit &&
+    one.interval === other.interval &&
+    one.weekdays.length === other.weekdays.length &&
+    one.weekdays.every((weekday, at) => weekday === other.weekdays[at])
+  )
+}
+
+/** Monday first, because a week here begins on Monday wherever it is read. */
+const WEEKDAY_NAMES = [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
+]
+
+/** One ISO weekday as it reads: 1 is Monday, 7 is Sunday. */
+export function formatWeekday(weekday: number): string {
+  return WEEKDAY_NAMES[weekday - 1] ?? String(weekday)
+}
+
+/**
+ * A cadence as one line of English, used wherever one is shown or written
+ * down: under a Task in Tasks View, and under one in an export. Deliberately
+ * the same words in both, so a file reads as the app does.
+ */
+export function formatRecurrence(recurrence: Recurrence): string {
+  const { unit, interval, weekdays } = recurrence
+  const every = interval === 1 ? `every ${unit}` : `every ${interval} ${unit}s`
+
+  if (unit !== 'week') return every
+
+  return `${every} on ${listOfWeekdays(weekdays)}`
+}
+
+/** The selected weekdays, read out: "Monday, Wednesday and Friday". */
+function listOfWeekdays(weekdays: number[]): string {
+  const names = weekdays.map(formatWeekday)
+  if (names.length <= 1) return names.join('')
+
+  return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+}
+
+/**
  * A newly captured Note against the days on screen. A Note filed under a day
  * in view belongs in the list; one filed outside it must not move the list
  * under a reader, so it becomes a nudge naming the day that gained content —
@@ -1884,6 +2726,98 @@ async function readTask(driver: SqlDriver, id: string): Promise<Task> {
 }
 
 /**
+ * Every Task Occurrence of one Task, newest slot first, the Open one among
+ * them. A Task that does not repeat has none, which is not a failure.
+ */
+async function readOccurrences(
+  driver: SqlDriver,
+  taskId: string,
+): Promise<TaskOccurrence[]> {
+  const rows = await driver.select<TaskOccurrenceRow>(
+    SELECT_OCCURRENCES_OF_TASK,
+    [taskId],
+  )
+  return rows.map(toOccurrence)
+}
+
+/**
+ * The one Open Task Occurrence a Recurring Task always has. Its absence is a
+ * broken invariant rather than an empty result, so it fails loudly instead of
+ * quietly opening a second one.
+ */
+async function readOpenOccurrence(
+  driver: SqlDriver,
+  taskId: string,
+): Promise<TaskOccurrence> {
+  const open = openOccurrence(await readOccurrences(driver, taskId))
+
+  if (open === null) {
+    throw new Error(`That Recurring Task has no Open Task Occurrence: ${taskId}.`)
+  }
+
+  return open
+}
+
+/**
+ * The statement that opens an occurrence at wherever the Task now stands.
+ * `advancedFrom` is the occurrence whose completion produced it, and null when
+ * nothing did — which is the whole of what makes Undo Completion safe to
+ * offer later.
+ */
+function opensOccurrence(
+  task: Task,
+  createdAt: Date,
+  advancedFrom: string | null,
+): SqlStatement {
+  return {
+    sql: INSERT_TASK_OCCURRENCE,
+    params: [
+      crypto.randomUUID(),
+      task.id,
+      task.scheduledDate,
+      task.scheduledTime,
+      createdAt.toISOString(),
+      advancedFrom,
+    ],
+  }
+}
+
+/**
+ * Stopping a series: the rule goes and the Open occurrence with it, while the
+ * Task stays exactly where it stands and every completed occurrence stays
+ * under it. One transaction, because a Task that kept its rule and lost its
+ * occurrence would be a series asking for nothing.
+ */
+async function stopRecurring(
+  driver: SqlDriver,
+  task: Task,
+  said: { description: string; date: string | null; time: string | null },
+): Promise<Task> {
+  await driver.transaction([
+    {
+      sql: UPDATE_TASK_WITH_RECURRENCE,
+      params: [
+        said.description,
+        said.date,
+        said.time,
+        ...recurrenceParams(null, null),
+        task.id,
+      ],
+    },
+    { sql: DELETE_OPEN_OCCURRENCE, params: [task.id] },
+  ])
+
+  return {
+    ...task,
+    description: said.description,
+    scheduledDate: said.date,
+    scheduledTime: said.time,
+    recurrence: null,
+    recurrenceAnchor: null,
+  }
+}
+
+/**
  * A Task Description as the journal stores it: trimmed at its ends, and
  * otherwise exactly what was written — internal whitespace and every kind of
  * Unicode survive verbatim, and nothing in it is read for meaning. There is no
@@ -1955,6 +2889,8 @@ function isWallClockTime(time: string): boolean {
 }
 
 function toTask(row: TaskRow): Task {
+  const recurrence = toRecurrence(row)
+
   return {
     id: row.id,
     description: row.description,
@@ -1964,7 +2900,125 @@ function toTask(row: TaskRow): Task {
     // A time without a date is not a schedule; a row that somehow holds one is
     // read as the date-only schedule it actually is.
     scheduledTime: row.scheduled_date === null ? null : row.scheduled_time,
+    recurrence,
+    // A cadence with no starting date could not be counted, so the two only
+    // ever exist together — a row written before recurrence did has neither.
+    recurrenceAnchor: recurrence === null ? null : row.recurrence_anchor_date,
   }
+}
+
+/**
+ * The cadence a row holds, or null for the Tasks that do not repeat — which is
+ * every Task written before recurrence existed, and every ordinary one since.
+ * A rule missing any of the parts it is counted from is read as no rule at
+ * all rather than as a cadence nobody can work out.
+ */
+function toRecurrence(row: TaskRow): Recurrence | null {
+  const unit = row.recurrence_unit
+  if (
+    unit !== 'day' &&
+    unit !== 'week' &&
+    unit !== 'month' &&
+    unit !== 'year'
+  ) {
+    return null
+  }
+
+  const interval = Number(row.recurrence_interval)
+  if (!Number.isInteger(interval) || interval < 1) return null
+  if (row.recurrence_anchor_date === null) return null
+
+  const weekdays = toWeekdays(row.recurrence_weekdays)
+  if (unit === 'week' && weekdays.length === 0) return null
+
+  return { unit, interval, weekdays: unit === 'week' ? weekdays : [] }
+}
+
+/** The selected weekdays as the column spells them: `1,3,5`. */
+function toWeekdays(column: string | null): number[] {
+  if (column === null || column === '') return []
+
+  return column
+    .split(',')
+    .map(Number)
+    .filter((weekday) => Number.isInteger(weekday) && weekday >= 1 && weekday <= 7)
+    .sort((one, other) => one - other)
+}
+
+/** And back, for the one statement that writes a cadence down. */
+function weekdaysColumn(recurrence: Recurrence | null): string | null {
+  if (recurrence === null || recurrence.unit !== 'week') return null
+  return recurrence.weekdays.join(',')
+}
+
+/** The four recurrence parameters, in the order every statement writes them. */
+function recurrenceParams(
+  recurrence: Recurrence | null,
+  anchor: string | null,
+): unknown[] {
+  return [
+    recurrence?.unit ?? null,
+    recurrence?.interval ?? null,
+    weekdaysColumn(recurrence),
+    recurrence === null ? null : anchor,
+  ]
+}
+
+function toOccurrence(row: TaskOccurrenceRow): TaskOccurrence {
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    scheduledDate: row.scheduled_date,
+    scheduledTime: row.scheduled_time,
+    completedAt: row.completed_at,
+    createdAt: row.created_at,
+    advancedFrom: row.advanced_from,
+  }
+}
+
+/**
+ * A cadence as the journal stores it: a real unit, a whole interval of at
+ * least one, and — weekly only — at least one selected weekday, ascending and
+ * without duplicates. Null passes through as a Task that does not repeat.
+ *
+ * Recurrence requires a date, and the check is here rather than in a view
+ * because it is the rule and not the control: a cadence with nothing to count
+ * from is not a cadence.
+ */
+function taskRecurrence(
+  recurrence: Recurrence | null,
+  schedule: TaskSchedule | null,
+): Recurrence | null {
+  if (recurrence === null) return null
+
+  if (schedule === null) {
+    throw new Error(
+      'A Recurring Task needs a Scheduled For date to be counted from.',
+    )
+  }
+
+  if (!Number.isInteger(recurrence.interval) || recurrence.interval < 1) {
+    throw new Error(
+      `A cadence repeats every whole unit or more: ${recurrence.interval} is not one.`,
+    )
+  }
+
+  if (recurrence.unit !== 'week') {
+    return { unit: recurrence.unit, interval: recurrence.interval, weekdays: [] }
+  }
+
+  const weekdays = [...new Set(recurrence.weekdays)].sort(
+    (one, other) => one - other,
+  )
+
+  if (
+    weekdays.length === 0 ||
+    weekdays.some((weekday) => !Number.isInteger(weekday) || weekday < 1 || weekday > 7)
+  ) {
+    throw new Error('A weekly cadence repeats on at least one weekday.')
+  }
+
+  return { unit: 'week', interval: recurrence.interval, weekdays }
 }
 
 /**

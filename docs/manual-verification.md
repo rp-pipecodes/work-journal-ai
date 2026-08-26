@@ -186,11 +186,11 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 
 ## Scheduling a Task
 
-- [ ] The Task Creation window shows a date control and a time control under the field, and opens with both empty however the last Task Creation ended.
+- [ ] The Task Creation window shows a date control, a time control and a cadence control under the field, and opens with all three empty however the last Task Creation ended.
 - [ ] Typing a line, choosing a date and a time, and pressing `Enter` creates one Task with that schedule; **View Tasks** shows it under the right heading.
 - [ ] Typing a line and pressing `Enter` with no date chosen creates an Unscheduled Task.
 - [ ] With no date chosen in the Task Creation window, the time control cannot be used; **Clear** empties both.
-- [ ] The Task Creation window is tall enough for the field and the schedule row, with no clipped control and no transparent band under the panel.
+- [ ] The Task Creation window is tall enough for the field, the schedule row and the cadence row, with no clipped control and no transparent band under the panel — including with **Weekly** chosen and all seven weekday buttons showing.
 - [ ] The Editor shows a date control and a time control; with no date chosen, the time control cannot be used.
 - [ ] Choosing a date and saving moves the Task into **Today** or **Upcoming**, under a heading, with the date beside it.
 - [ ] Adding a time to that date and saving keeps it in the same group and shows the time beside it.
@@ -202,6 +202,29 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 - [ ] Leaving Tasks View open across local midnight, or sleeping and waking the machine, re-groups it without a manual refresh.
 - [ ] Changing the Mac's timezone and returning to Tasks View leaves each Task at the wall-clock time it was given.
 - [ ] On the day the clocks go forward, a Task scheduled inside the skipped hour still groups as the day's own — it is never lost from every group.
+
+## Recurring Tasks
+
+- [ ] With no date chosen, the cadence control cannot be used in either the Task Creation window or the Editor; choosing a date enables it, and **Clear** turns it off again.
+- [ ] Creating a Task with a date and **Daily** puts one Task in the list with `every day` beside it — one Task, not one per day.
+- [ ] **Weekly** preselects the weekday the chosen date falls on; adding Wednesday and Friday shows `every week on Monday, Wednesday and Friday`.
+- [ ] Completing that Task from its checkbox advances it to the next selected weekday immediately, with no confirmation, and it never appears in **Completed**.
+- [ ] **every 2 weeks** starting from a Friday first lands on the Monday of the week after next — the week containing the starting date is the first active week, and its earlier weekdays are ignored.
+- [ ] A series created with a starting date a fortnight in the past opens as a single **Overdue** Task on its latest elapsed slot, not as a fortnight of Tasks.
+- [ ] Completing that overdue Task advances it to the next slot still ahead, skipping the ones that were missed.
+- [ ] A monthly Task starting on the 31st falls back to the last day of February and returns to the 31st in March.
+- [ ] A yearly Task starting on 29 February falls back to 28 February in an ordinary year and returns to the 29th in the next leap year.
+- [ ] After a completion, the row offers **Undo**; using it restores the occurrence just completed and removes the one it advanced to.
+- [ ] Editing the Task's date, time, weekdays or cadence and saving replaces its Open occurrence without recording a completion, and **Undo** is no longer offered.
+- [ ] Completing again after a completion also stops **Undo** reaching the older one: only the latest is ever offered.
+- [ ] The row shows an expandable count of completed occurrences; opening it lists each slot and when it was kept, and none of them appear in **Completed Tasks**.
+- [ ] **Stop repeating** asks first, then leaves the Task exactly where it stands with its history still under it; the Task can then be completed like any other.
+- [ ] Clearing the date on a Recurring Task in the Editor asks before doing it, and cancelling leaves the cadence untouched.
+- [ ] **Delete** on a Recurring Task says the occurrence history goes too; confirming removes both.
+- [ ] Quitting and relaunching leaves every Recurring Task on exactly the slot it was on, with its history intact — and force-quitting during a completion leaves either the old slot or the new one, never both and never neither.
+- [ ] Completing a Recurring Task in one Tasks View updates a second one, and the Task Creation window, without a manual refresh.
+- [ ] Changing the Mac's timezone leaves each Recurring Task at the wall-clock time it was given, and its next slot on the same civil day.
+- [ ] A daily Recurring Task set to a wall-clock time the spring transition skips still advances across that day rather than being lost.
 
 ## Task Alerts
 
@@ -218,6 +241,8 @@ Requires the release build: macOS will not hold a notification for a binary with
 - [ ] Quitting the app before the moment arrives still delivers the Alert.
 - [ ] A Task with a date and **no** time never alerts — not at 09:00, and not at any other hour.
 - [ ] Editing the time, completing, reopening or deleting a Task before its moment cancels or moves the Alert accordingly; nothing arrives for a Task that is gone.
+- [ ] A Recurring Task with a time has exactly one pending Alert, whatever its cadence: completing it cancels that one and registers the next slot's, so two never arrive for the same series.
+- [ ] Editing a Recurring Task's cadence or time replaces its pending Alert rather than adding one, and nothing arrives for the slot it was reanchored away from.
 - [ ] A schedule already in the past produces no Alert at all, and none arrives when the app is relaunched.
 - [ ] Refusing the prompt still saves the Task and its schedule; Tasks View says the Task is unaffected, and **Settings › Task Alerts** reads **Not allowed** with the path `System Settings › Notifications › Work Journal` and an **Open System Settings** button that opens that pane.
 - [ ] Turning notifications back on there and returning to the Settings window changes **Task Alerts** to **Allowed** without a relaunch, and the Tasks still ahead are registered; none of the past ones are replayed.
@@ -235,6 +260,8 @@ Daylight saving is macOS's to resolve, not the app's: the app registers the civi
 - [ ] The file holds a `# Notes` section and a `# Tasks` section, each record exactly once, including Notes on days outside the Filter History was last showing.
 - [ ] Under `# Tasks`, Open Tasks read as `- [ ]` and Completed ones as `- [x]` with the day and time they were completed.
 - [ ] A scheduled Task carries `(scheduled YYYY-MM-DD)` — with ` HH:mm` after it when it has a time — on both Open and Completed bullets, and an Unscheduled one carries nothing.
+- [ ] A Recurring Task carries `repeats …` in the same words the row shows, with a time when it has one and without when it does not, and a Task whose recurrence was stopped carries none.
+- [ ] Its completed occurrences are nested `- occurrence …` lines under it, indented; each Recurring Task appears exactly once and no occurrence appears as a Task of its own.
 - [ ] The line under the button names both counts — Notes and Tasks — and matches what is in the file.
 - [ ] A journal holding only Tasks exports the Tasks section alone and reports the Task count.
 - [ ] Exporting twice leaves two files rather than overwriting the first.

@@ -371,3 +371,79 @@ describe('scheduling a Task as it is created', () => {
     expect((await journal.openTasks())[0].scheduledTime).toBe('14:00')
   })
 })
+
+describe('repeating a Task as it is created', () => {
+  function cadenceField(): HTMLSelectElement {
+    return screen.getByLabelText('Repeats') as HTMLSelectElement
+  }
+
+  it('has no cadence until there is a date to count it from', async () => {
+    showTaskCreation(fakeDesktop(), await openJournal())
+
+    expect(cadenceField().disabled).toBe(true)
+
+    pick(dateField(), '2026-03-16')
+
+    expect(cadenceField().disabled).toBe(false)
+  })
+
+  it('commits the cadence chosen beside the date', async () => {
+    const journal = await openJournal()
+    showTaskCreation(fakeDesktop(), journal)
+
+    type('water the plants')
+    pick(dateField(), '2026-03-16')
+    fireEvent.change(cadenceField(), { target: { value: 'day' } })
+    fireEvent.change(
+      screen.getByLabelText('How many days between occurrences'),
+      { target: { value: '3' } },
+    )
+    pressEnter()
+
+    await expect.poll(async () => await journal.openTasks()).toHaveLength(1)
+    const [task] = await journal.openTasks()
+    expect(task.recurrence).toEqual({ unit: 'day', interval: 3, weekdays: [] })
+    expect(task.recurrenceAnchor).toBe('2026-03-16')
+  })
+
+  it('commits a weekly cadence on several weekdays', async () => {
+    const journal = await openJournal()
+    showTaskCreation(fakeDesktop(), journal)
+
+    type('gym')
+    // 16 March 2026 is a Monday.
+    pick(dateField(), '2026-03-16')
+    fireEvent.change(cadenceField(), { target: { value: 'week' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Wednesday' }))
+    pressEnter()
+
+    await expect.poll(async () => await journal.openTasks()).toHaveLength(1)
+    expect((await journal.openTasks())[0].recurrence?.weekdays).toEqual([1, 3])
+  })
+
+  it('clears the cadence along with the date', async () => {
+    showTaskCreation(fakeDesktop(), await openJournal())
+    type('water the plants')
+    pick(dateField(), '2026-03-16')
+    fireEvent.change(cadenceField(), { target: { value: 'day' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the schedule' }))
+
+    expect(cadenceField().value).toBe('none')
+    expect(cadenceField().disabled).toBe(true)
+  })
+
+  it('leaves the next Task Creation with no cadence at all', async () => {
+    const journal = await openJournal()
+    showTaskCreation(fakeDesktop(), journal)
+
+    type('water the plants')
+    pick(dateField(), '2026-03-16')
+    fireEvent.change(cadenceField(), { target: { value: 'week' } })
+    pressEnter()
+
+    await expect.poll(async () => await journal.openTasks()).toHaveLength(1)
+    await expect.poll(() => cadenceField().value).toBe('none')
+    expect(dateField().value).toBe('')
+  })
+})

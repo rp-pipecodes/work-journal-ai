@@ -122,6 +122,14 @@ const CAPTURE_HEIGHT = CAPTURE_FIELD_HEIGHT + CAPTURE_PANEL_MARGIN
 export const TASK_CREATION_SCHEDULE_ROW = 44
 
 /**
+ * The row under that one holding the cadence: whether the Task repeats, how
+ * often, and — for a weekly one — on which days. Also always there and also a
+ * fixed height, for the same reason: a window whose resting size depended on
+ * which cadence was chosen would jump under the user as they chose one.
+ */
+export const TASK_CREATION_RECURRENCE_ROW = 44
+
+/**
  * The Task Creation panel is the Capture panel's shape — the same width and
  * the same gutter — because they are the same gesture over a different record.
  * It differs in what sits under the field: a Note has only a Body, while a Task
@@ -137,6 +145,7 @@ export function taskCreationWindowHeight(refused: boolean): number {
     CAPTURE_HEIGHT +
     CAPTURE_HAIRLINE +
     TASK_CREATION_SCHEDULE_ROW +
+    TASK_CREATION_RECURRENCE_ROW +
     (refused ? CAPTURE_REFUSAL_HEIGHT : 0)
   )
 }

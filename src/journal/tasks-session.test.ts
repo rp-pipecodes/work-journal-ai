@@ -468,3 +468,115 @@ describe('a Task created elsewhere', () => {
     expect(descriptionsOf(now())).toEqual(['done elsewhere'])
   })
 })
+
+describe('a Recurring Task in the session', () => {
+  const daily = { unit: 'day' as const, interval: 1, weekdays: [] }
+
+  /** The occurrences the snapshot carries for one Task. */
+  function occurrencesOf(snapshot: TasksSnapshot, taskId: string) {
+    return snapshot.tasks.state === 'tasks'
+      ? (snapshot.tasks.occurrences[taskId] ?? [])
+      : []
+  }
+
+  it('carries the occurrences of every Recurring Task in the list', async () => {
+    const { session, core, clock, now } = await tasksSession()
+    const repeating = await core.createTask(
+      'water the plants',
+      { date: '2026-03-09', time: null },
+      daily,
+    )
+    const ordinary = await core.createTask('once', { date: '2026-03-09', time: null })
+
+    clock.set(new Date('2026-03-09T20:00:00'))
+    await core.completeTask(repeating.id)
+    await session.open()
+
+    expect(occurrencesOf(now(), repeating.id)).toHaveLength(2)
+    expect(occurrencesOf(now(), ordinary.id)).toEqual([])
+  })
+
+  it('completing advances the series and leaves it in the Open list', async () => {
+    const { session, core, clock, now } = await tasksSession()
+    const task = await core.createTask(
+      'water the plants',
+      { date: '2026-03-09', time: null },
+      daily,
+    )
+    await session.open()
+
+    clock.set(new Date('2026-03-09T20:00:00'))
+    await session.complete(task.id)
+
+    expect(groupsOf(now())).toEqual({ upcoming: ['water the plants'] })
+    expect(now().problem).toBeNull()
+  })
+
+  it('undoes the latest completion and says so when it cannot', async () => {
+    const { session, core, clock, now } = await tasksSession()
+    const task = await core.createTask(
+      'water the plants',
+      { date: '2026-03-09', time: null },
+      daily,
+    )
+    await session.open()
+
+    clock.set(new Date('2026-03-09T20:00:00'))
+    await session.complete(task.id)
+    await session.undoCompletion(task.id)
+
+    expect(now().problem).toBeNull()
+    expect(occurrencesOf(now(), task.id)).toHaveLength(1)
+
+    // Nothing left to take back.
+    await session.undoCompletion(task.id)
+    expect(now().problem).toMatch(/only the latest one can be/)
+  })
+
+  it('stops the recurrence and keeps the Task and its history', async () => {
+    const { session, core, clock, now } = await tasksSession()
+    const task = await core.createTask(
+      'water the plants',
+      { date: '2026-03-09', time: null },
+      daily,
+    )
+    clock.set(new Date('2026-03-09T20:00:00'))
+    await core.completeTask(task.id)
+    await session.open()
+
+    await session.stopRecurrence(task.id)
+
+    expect(descriptionsOf(now())).toEqual(['water the plants'])
+    expect(occurrencesOf(now(), task.id)).toEqual([])
+    expect(now().problem).toBeNull()
+  })
+
+  it('saves a cadence from the Editor', async () => {
+    const { session, core, now } = await tasksSession()
+    const task = await core.createTask('gym', { date: '2026-03-09', time: null })
+    await session.open()
+
+    await session.save(task.id, {
+      description: 'gym',
+      schedule: { date: '2026-03-09', time: null },
+      recurrence: { unit: 'week', interval: 2, weekdays: [1, 4] },
+    })
+
+    expect(now().problem).toBeNull()
+    expect(occurrencesOf(now(), task.id)).toHaveLength(1)
+  })
+
+  it('says so when a cadence the record refuses is saved', async () => {
+    const { session, core, now } = await tasksSession()
+    const task = await core.createTask('gym', { date: '2026-03-09', time: null })
+    await session.open()
+
+    await session.save(task.id, {
+      description: 'gym',
+      schedule: { date: '2026-03-09', time: null },
+      recurrence: { unit: 'week', interval: 1, weekdays: [] },
+    })
+
+    expect(now().problem).toBe('That Task could not be saved.')
+  })
+})
