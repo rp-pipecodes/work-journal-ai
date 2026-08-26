@@ -1,4 +1,4 @@
-import type { CalendarEvent, SqlDriver } from '../../journal/journal'
+import type { CalendarEvent, SqlDriver, TaskAlert } from '../../journal/journal'
 import type { HotkeyStatuses } from '../../settings/hotkey'
 import type { SettingsStore } from '../../settings/settings'
 import type { Theme } from '../../settings/theme'
@@ -9,6 +9,7 @@ import type {
   CaptureFit,
   Desktop,
   ExportedFile,
+  TaskAlertPermission,
   Unlisten,
 } from '../desktop'
 
@@ -48,6 +49,28 @@ export interface FakeDesktop extends Desktop {
   windowVisible: boolean
   /** The window loses focus, as it does when another application takes it. */
   blur(): void
+  /** The window gets focus back, as it does when the user returns to it. */
+  focus(): void
+  /** What macOS allows of Task Alerts; writable, as a revocation is. */
+  alertPermission: TaskAlertPermission
+  /** Whether the app has ever asked for Task Alert permission. */
+  alertPrompted: boolean
+  /** The pending requests macOS holds, as the last reconciliation left them. */
+  pendingAlerts: TaskAlert[]
+  /** Every reconciliation asked for, most recent last. */
+  reconciliations: TaskAlert[][]
+  /** Whether reconciling fails, as it does when the OS refuses. */
+  alertsFail: boolean
+  /** The user clicks a Task Alert. */
+  openTaskAlert(taskId: string): void
+  /**
+   * The Alert waiting to be claimed by the window it opened — what a click
+   * that built the window leaves behind. Null when the window was opened any
+   * other way.
+   */
+  pendingTaskAlert: string | null
+  /** How many times System Settings was opened at Notifications. */
+  notificationSettingsOpened: number
   /** What the OS allows of the calendars; writable, as a revocation is. */
   access: CalendarAccess
   /** Whether the user was ever asked, and what they said if they were. */
@@ -67,6 +90,8 @@ export function fakeDesktop({
   openSettingsStore,
   access = 'undetermined',
   answersPrompt = 'granted',
+  alertPermission = 'undetermined',
+  answersAlertPrompt = 'granted',
   calendars = [],
   events = [],
 }: {
@@ -81,6 +106,10 @@ export function fakeDesktop({
   access?: CalendarAccess
   /** What answering the prompt comes to. */
   answersPrompt?: CalendarAccess
+  /** What macOS allows of Task Alerts before anybody asks. */
+  alertPermission?: TaskAlertPermission
+  /** What answering the Task Alert prompt comes to. */
+  answersAlertPrompt?: TaskAlertPermission
   calendars?: CalendarInfo[]
   events?: CalendarEvent[]
 } = {}): FakeDesktop {
@@ -94,6 +123,9 @@ export function fakeDesktop({
   const noteCaptured = subscribers<string>()
   const journalChanged = subscribers<void>()
   const themeChanged = subscribers<Theme>()
+  const windowFocused = subscribers<void>()
+  const taskAlertOpened = subscribers<string>()
+  const taskAlertsReconciled = subscribers<boolean>()
 
   const desktop: FakeDesktop = {
     stored,
@@ -108,6 +140,13 @@ export function fakeDesktop({
     taskCreationsBegun: 0,
     taskCreationsDismissed: 0,
     taskCreationFits: [],
+    alertPermission,
+    alertPrompted: false,
+    pendingAlerts: [],
+    reconciliations: [],
+    alertsFail: false,
+    notificationSettingsOpened: 0,
+    pendingTaskAlert: null,
 
     beginCapture: () => captureShown.announce(undefined),
     showTaskCreation: () => taskCreationShown.announce(undefined),
@@ -119,7 +158,9 @@ export function fakeDesktop({
     closeWindow: async () => {},
     windowVisible: true,
     blur: () => windowBlurred.announce(undefined),
+    focus: () => windowFocused.announce(undefined),
     onWindowBlurred: async (handle) => windowBlurred.add(handle),
+    onWindowFocused: async (handle) => windowFocused.add(handle),
     isWindowVisible: async () => desktop.windowVisible,
     onCloseRequested: async () => () => {},
 
@@ -165,6 +206,47 @@ export function fakeDesktop({
     },
     announceTasksChanged: async () => tasksChanged.announce(undefined),
     onTasksChanged: async (handle) => tasksChanged.add(handle),
+
+    taskAlertPermission: async () => desktop.alertPermission,
+    requestTaskAlertPermission: async () => {
+      desktop.alertPrompted = true
+      // macOS answers for the user once it has an answer on file: after a
+      // denial the prompt never appears again, whatever the app does.
+      if (desktop.alertPermission === 'undetermined') {
+        desktop.alertPermission = answersAlertPrompt
+      }
+      return desktop.alertPermission
+    },
+    reconcileTaskAlerts: async (alerts) => {
+      if (desktop.alertsFail) {
+        throw new Error('macOS refused the Task Alerts.')
+      }
+      desktop.reconciliations.push(alerts)
+      // Nothing is pending without permission, exactly as macOS has it.
+      desktop.pendingAlerts =
+        desktop.alertPermission === 'granted' ? alerts : []
+    },
+    onTaskAlertOpened: async (handle) => taskAlertOpened.add(handle),
+    announceTaskAlertsReconciled: async (held) =>
+      taskAlertsReconciled.announce(held),
+    onTaskAlertsReconciled: async (handle) => taskAlertsReconciled.add(handle),
+    openTaskAlert: (taskId) => {
+      // Both, exactly as the Rust side does it: written down for a Tasks View
+      // that this very click is about to build, and announced for one that is
+      // already on screen. Whichever claims it, it is claimed once.
+      desktop.pendingTaskAlert = taskId
+      taskAlertOpened.announce(taskId)
+    },
+    openedTaskAlert: async () => {
+      // Handed over exactly once, as the real one is: an Alert singles a Task
+      // out for the window it opened, not for every window after it.
+      const waiting = desktop.pendingTaskAlert
+      desktop.pendingTaskAlert = null
+      return waiting
+    },
+    openNotificationSettings: async () => {
+      desktop.notificationSettingsOpened += 1
+    },
     onYesterdayDigestRequested: async (handle) =>
       yesterdayDigestRequested.add(handle),
 

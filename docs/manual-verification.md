@@ -184,11 +184,57 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 - [ ] Tasks created before quitting are still there after relaunching the app, and after a restart of the machine.
 - [ ] Tasks View and the history window can be open at the same time, and neither changes the other.
 
+## Scheduling a Task
+
+- [ ] The Task Creation window shows a date control and a time control under the field, and opens with both empty however the last Task Creation ended.
+- [ ] Typing a line, choosing a date and a time, and pressing `Enter` creates one Task with that schedule; **View Tasks** shows it under the right heading.
+- [ ] Typing a line and pressing `Enter` with no date chosen creates an Unscheduled Task.
+- [ ] With no date chosen in the Task Creation window, the time control cannot be used; **Clear** empties both.
+- [ ] The Task Creation window is tall enough for the field and the schedule row, with no clipped control and no transparent band under the panel.
+- [ ] The Editor shows a date control and a time control; with no date chosen, the time control cannot be used.
+- [ ] Choosing a date and saving moves the Task into **Today** or **Upcoming**, under a heading, with the date beside it.
+- [ ] Adding a time to that date and saving keeps it in the same group and shows the time beside it.
+- [ ] **Clear** removes the date and the time together, and the Task returns to **Unscheduled**.
+- [ ] A description holding words like "tomorrow at 9" is saved exactly as typed and changes no date or time.
+- [ ] A date in the past saves, and the Task appears under **Overdue** immediately.
+- [ ] Completing a scheduled Task and opening its Editor offers no date or time, only the wording; reopening it restores both, and an elapsed schedule leaves it **Overdue**.
+- [ ] Open Tasks are grouped **Overdue**, **Today**, **Upcoming**, **Unscheduled**, each sorted earliest first except **Unscheduled**, which is newest created first; empty groups are absent.
+- [ ] Leaving Tasks View open across local midnight, or sleeping and waking the machine, re-groups it without a manual refresh.
+- [ ] Changing the Mac's timezone and returning to Tasks View leaves each Task at the wall-clock time it was given.
+- [ ] On the day the clocks go forward, a Task scheduled inside the skipped hour still groups as the day's own — it is never lost from every group.
+
+## Task Alerts
+
+Requires the release build: macOS will not hold a notification for a binary with no bundle. Run these on a machine whose notification settings for Work Journal you are willing to change.
+
+- [ ] Creating the first Task with a date **and** a time from the Task Creation window raises the macOS notification prompt after the window has gone, in front of whatever is on screen.
+- [ ] Saving the first Task with a date **and** a time raises the macOS notification prompt — and nothing raised it at first launch, before any Task had a time.
+- [ ] Allowing it leaves the Task exactly as saved; **Settings › Task Alerts** then reads **Allowed**.
+- [ ] The Alert arrives at the minute chosen, shows the whole Task Description, and plays a sound.
+- [ ] It arrives while Work Journal is the active application too, rather than being swallowed.
+- [ ] Clicking the Alert opens Tasks View with that Task singled out. There is no Complete and no Snooze on it.
+- [ ] Clicking an Alert with Tasks View closed — including one delivered while the app was quit — opens the window with that Task singled out, not on a plain list.
+- [ ] Switching to **Completed** and back stops singling it out, and opening Tasks View from the Tray Menu afterwards singles out nothing.
+- [ ] Quitting the app before the moment arrives still delivers the Alert.
+- [ ] A Task with a date and **no** time never alerts — not at 09:00, and not at any other hour.
+- [ ] Editing the time, completing, reopening or deleting a Task before its moment cancels or moves the Alert accordingly; nothing arrives for a Task that is gone.
+- [ ] A schedule already in the past produces no Alert at all, and none arrives when the app is relaunched.
+- [ ] Refusing the prompt still saves the Task and its schedule; Tasks View says the Task is unaffected, and **Settings › Task Alerts** reads **Not allowed** with the path `System Settings › Notifications › Work Journal` and an **Open System Settings** button that opens that pane.
+- [ ] Turning notifications back on there and returning to the Settings window changes **Task Alerts** to **Allowed** without a relaunch, and the Tasks still ahead are registered; none of the past ones are replayed.
+- [ ] With Work Journal denied, everything else about Tasks — creating, scheduling, completing, exporting — still works.
+
+Daylight saving is macOS's to resolve, not the app's: the app registers the civil date and minute, and the OS matches its own clock against them. These are what verify it — run them by setting the Mac's clock and date forward to the transition, or on the day itself.
+
+- [ ] A Task scheduled at a wall-clock time the spring transition skips still alerts, at the first valid minute after the clocks move — not silently never.
+- [ ] A Task scheduled at a wall-clock time the autumn transition repeats alerts exactly once, at the first of the two occurrences.
+- [ ] Reconciling while an Alert's minute is arriving — saving another Task at that moment — does not swallow the Alert that was due.
+
 ## Export
 
 - [ ] **Export all to Markdown** writes a file to the Downloads folder and names the path it wrote to.
 - [ ] The file holds a `# Notes` section and a `# Tasks` section, each record exactly once, including Notes on days outside the Filter History was last showing.
 - [ ] Under `# Tasks`, Open Tasks read as `- [ ]` and Completed ones as `- [x]` with the day and time they were completed.
+- [ ] A scheduled Task carries `(scheduled YYYY-MM-DD)` — with ` HH:mm` after it when it has a time — on both Open and Completed bullets, and an Unscheduled one carries nothing.
 - [ ] The line under the button names both counts — Notes and Tasks — and matches what is in the file.
 - [ ] A journal holding only Tasks exports the Tasks section alone and reports the Task count.
 - [ ] Exporting twice leaves two files rather than overwriting the first.

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
 import ThemeProvider from '@/components/ThemeProvider'
 import { createAppSettings } from '@/settings/app-settings'
@@ -337,3 +337,69 @@ function escape(element: HTMLElement) {
     new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
   )
 }
+
+describe('Task Alerts', () => {
+  it('reports what macOS allows, asked afresh every time', async () => {
+    showSettings(fakeDesktop({
+      stored: { startAtLogin: false },
+      alertPermission: 'granted',
+    }))
+
+    const row = await screen.findByText('Task Alerts')
+    expect(row.closest('div')?.parentElement?.textContent).toContain('Allowed')
+    expect(
+      screen.queryByRole('button', { name: 'Open System Settings' }),
+    ).toBeNull()
+  })
+
+  it('says the app has not asked yet, and why', async () => {
+    showSettings(fakeDesktop({
+      stored: { startAtLogin: false },
+      alertPermission: 'undetermined',
+    }))
+
+    await screen.findByText('Task Alerts')
+    expect(
+      screen.getByText(/asks the first time you save a Task with a time/),
+    ).toBeTruthy()
+  })
+
+  it('notices a permission restored in System Settings, and says so', async () => {
+    const desktop = fakeDesktop({
+      stored: { startAtLogin: false },
+      alertPermission: 'denied',
+    })
+    let announced = 0
+    void desktop.onTasksChanged(() => (announced += 1))
+    showSettings(desktop)
+    await screen.findByText('Task Alerts')
+
+    // The user goes to System Settings, turns it on, and comes back.
+    desktop.alertPermission = 'granted'
+    desktop.focus()
+
+    await expect.poll(() => screen.queryByText('Allowed')).not.toBeNull()
+    // The Tasks still ahead have Alerts nobody has registered yet.
+    expect(announced).toBe(1)
+  })
+
+  it('points a denial at System Settings rather than asking again', async () => {
+    const desktop = fakeDesktop({
+      stored: { startAtLogin: false },
+      alertPermission: 'denied',
+    })
+    showSettings(desktop)
+
+    await screen.findByText('Task Alerts')
+    expect(
+      screen.getByText(/System Settings › Notifications › Work Journal/),
+    ).toBeTruthy()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Open System Settings' }),
+    )
+
+    await expect.poll(() => desktop.notificationSettingsOpened).toBe(1)
+    // Never a second prompt: macOS answers for the user once it has an answer.
+    expect(desktop.alertPrompted).toBe(false)
+  })
+})

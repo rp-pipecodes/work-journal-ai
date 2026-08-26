@@ -15,7 +15,7 @@ import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import Database from '@tauri-apps/plugin-sql'
 import { load } from '@tauri-apps/plugin-store'
-import type { CalendarEvent } from '@/journal/journal'
+import type { CalendarEvent, TaskAlert } from '@/journal/journal'
 import type { HotkeyAction, HotkeyStatuses } from '@/settings/hotkey'
 import type { Theme } from '@/settings/theme'
 import {
@@ -29,6 +29,8 @@ import {
   NOTE_CAPTURED_EVENT,
   SETTINGS_FILE,
   SYSTEM_WOKE_EVENT,
+  TASK_ALERT_OPENED_EVENT,
+  TASK_ALERTS_RECONCILED_EVENT,
   TASK_CREATION_SHOWN_EVENT,
   taskCreationWindowHeight,
   TASKS_CHANGED_EVENT,
@@ -37,6 +39,7 @@ import {
   type CalendarInfo,
   type Desktop,
   type ExportedFile,
+  type TaskAlertPermission,
 } from './desktop'
 
 export function createTauriDesktop(): Desktop {
@@ -64,6 +67,11 @@ export function createTauriDesktop(): Desktop {
     onWindowBlurred: (handle) =>
       getCurrentWindow().onFocusChanged(({ payload: focused }) => {
         if (!focused) handle()
+      }),
+
+    onWindowFocused: (handle) =>
+      getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+        if (focused) handle()
       }),
 
     isWindowVisible: () => getCurrentWindow().isVisible(),
@@ -131,6 +139,26 @@ export function createTauriDesktop(): Desktop {
 
     announceTasksChanged: () => emit(TASKS_CHANGED_EVENT),
     onTasksChanged: (handle) => listen(TASKS_CHANGED_EVENT, () => handle()),
+
+    taskAlertPermission: () =>
+      invoke<TaskAlertPermission>('task_alert_permission'),
+    requestTaskAlertPermission: () =>
+      invoke<TaskAlertPermission>('request_task_alert_permission'),
+    reconcileTaskAlerts: (alerts: TaskAlert[]) =>
+      invoke('reconcile_task_alerts', { alerts }),
+    onTaskAlertOpened: (handle) =>
+      listen<{ taskId: string }>(TASK_ALERT_OPENED_EVENT, ({ payload }) =>
+        handle(payload.taskId),
+      ),
+    announceTaskAlertsReconciled: (held) =>
+      emit(TASK_ALERTS_RECONCILED_EVENT, { held }),
+    onTaskAlertsReconciled: (handle) =>
+      listen<{ held: boolean }>(TASK_ALERTS_RECONCILED_EVENT, ({ payload }) =>
+        handle(payload.held),
+      ),
+    openedTaskAlert: async () =>
+      (await invoke<string | null>('opened_task_alert')) ?? null,
+    openNotificationSettings: () => invoke('open_notification_settings'),
 
     onYesterdayDigestRequested: (handle) =>
       listen(COPY_YESTERDAY_DIGEST_EVENT, () => handle()),

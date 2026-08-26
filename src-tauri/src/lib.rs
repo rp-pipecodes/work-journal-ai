@@ -1,7 +1,9 @@
+mod alerts;
 mod calendar;
 mod export;
 mod hotkey;
 
+use alerts::{Permission, TaskAlert};
 use calendar::{Access, CalendarEvent, CalendarInfo};
 use export::ExportedFile;
 use hotkey::{HotkeyAction, Hotkeys};
@@ -85,6 +87,23 @@ const COPY_YESTERDAY_DIGEST_EVENT: &str = "digest://yesterday";
 /// in `src/platform/desktop.ts`.
 const SYSTEM_WOKE_EVENT: &str = "system://woke";
 
+/// The user clicked a Task Alert. macOS hands the click to this side, which is
+/// the only part of the app it talks to; Tasks View opens focused on the Task.
+/// Must match `TASK_ALERT_OPENED_EVENT` in `src/platform/desktop.ts`.
+const TASK_ALERT_OPENED_EVENT: &str = "task-alert://opened";
+
+/// The resting height of each resident window: the panel its view draws, plus
+/// the transparent gutter the view's own drop shadow needs on every side. They
+/// differ because a Task may say when it is meant to be done and a Note may
+/// not, so the Task Creation panel has a second row under its field. Must match
+/// `CAPTURE_HEIGHT` and `TASK_CREATION_HEIGHT` in `src/platform/desktop.ts`.
+const CAPTURE_HEIGHT: f64 = 130.0;
+const TASK_CREATION_HEIGHT: f64 = 175.0;
+
+/// Both resident windows are this wide. Must match `CAPTURE_WIDTH` in
+/// `src/platform/desktop.ts`.
+const RESIDENT_WINDOW_WIDTH: f64 = 626.0;
+
 /// Relative, so plugin-sql resolves it inside the app's data directory and the
 /// journal survives a restart of the app and of the machine.
 const DATABASE_URL: &str = "sqlite:work-journal.db";
@@ -93,6 +112,16 @@ const DATABASE_URL: &str = "sqlite:work-journal.db";
 /// Hotkey can update the combination shown beside its own item.
 struct NewNoteMenuItem(MenuItem<tauri::Wry>);
 struct NewTaskMenuItem(MenuItem<tauri::Wry>);
+
+/// The Task Alert the user clicked, waiting for a window to claim it.
+///
+/// The event alone is not enough: a click on an Alert delivered while Work
+/// Journal was not running arrives before Tasks View has a webview, so nothing
+/// is listening and the focus would be dropped — which is precisely the case
+/// the Alert exists for. It is kept here instead, and the window asks for it as
+/// it opens. Taken rather than read: an Alert opens the window once.
+#[derive(Default)]
+struct OpenedTaskAlert(Mutex<Option<String>>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -125,7 +154,12 @@ pub fn run() {
             calendar_access,
             request_calendar_access,
             calendars,
-            todays_calendar_events
+            todays_calendar_events,
+            opened_task_alert,
+            task_alert_permission,
+            request_task_alert_permission,
+            reconcile_task_alerts,
+            open_notification_settings
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -149,14 +183,28 @@ pub fn run() {
             // and the two windows are separate so that unfinished text in one
             // survives the other being used — see
             // docs/adr/0019-task-creation-has-its-own-resident-window.md.
-            build_resident_window(app.handle(), CAPTURE_WINDOW, "New Note")?;
-            build_resident_window(app.handle(), TASK_CREATION_WINDOW, "New Task")?;
+            build_resident_window(app.handle(), CAPTURE_WINDOW, "New Note", CAPTURE_HEIGHT)?;
+            build_resident_window(
+                app.handle(),
+                TASK_CREATION_WINDOW,
+                "New Task",
+                TASK_CREATION_HEIGHT,
+            )?;
             build_tray(app.handle())?;
+
+            // Nothing has been clicked yet, but a click can arrive before any
+            // window exists — so somewhere to keep it has to.
+            app.manage(OpenedTaskAlert::default());
 
             // Told to whichever window is sweeping the calendar. Set up after
             // the capture window, because that is the window that hears it.
             #[cfg(target_os = "macos")]
             watch_for_wake(app.handle());
+
+            // Before launching finishes: a click on a Task Alert that macOS
+            // delivered while Work Journal was not running arrives as the app
+            // starts, and a delegate set any later would never hear it.
+            watch_for_task_alerts(app.handle());
 
             // Start at login is offered once, and only once: the app must
             // never add itself to the login items without being asked, and
@@ -199,6 +247,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0004_create_tasks.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 5,
+            description: "task schedule",
+            sql: include_str!("../migrations/0005_task_schedule.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -208,15 +262,21 @@ fn migrations() -> Vec<Migration> {
 /// and an unfinished Task Creation can both be waiting at once; see
 /// docs/adr/0019-task-creation-has-its-own-resident-window.md.
 ///
-/// Both are the same shape, so they are built by the same function: the panel
-/// the user sees is smaller than the window on every side, because the view
-/// draws the panel's own drop shadow and a window sized to the panel would clip
-/// it. Must match `CAPTURE_WIDTH` and the resting height in
+/// Both are nearly the same shape, so they are built by the same function: the
+/// panel the user sees is smaller than the window on every side, because the
+/// view draws the panel's own drop shadow and a window sized to the panel would
+/// clip it. They differ only in how tall they rest, which is why the height is
+/// passed in. Must match `CAPTURE_WIDTH` and the resting heights in
 /// `src/platform/desktop.ts`.
-fn build_resident_window(app: &tauri::AppHandle, label: &str, title: &str) -> tauri::Result<()> {
+fn build_resident_window(
+    app: &tauri::AppHandle,
+    label: &str,
+    title: &str,
+    height: f64,
+) -> tauri::Result<()> {
     WebviewWindowBuilder::new(app, label, WebviewUrl::default())
         .title(title)
-        .inner_size(626.0, 130.0)
+        .inner_size(RESIDENT_WINDOW_WIDTH, height)
         .resizable(false)
         .decorations(false)
         // The rounded corners and the shadow are drawn by the view, so the
@@ -733,6 +793,89 @@ fn calendars() -> Vec<CalendarInfo> {
 #[tauri::command(async)]
 fn todays_calendar_events() -> Vec<CalendarEvent> {
     calendar::todays_events()
+}
+
+/// What the OS allows the app to deliver as Task Alerts. Asked rather than
+/// remembered: a grant is revoked in System Settings without the app hearing of
+/// it. Never prompts.
+#[tauri::command(async)]
+fn task_alert_permission() -> Permission {
+    alerts::permission()
+}
+
+/// Asks the user, through the OS, and answers with what it came to. Off the
+/// main thread: the dialog is the system's, and the app must not sit frozen
+/// behind it while the user reads it.
+#[tauri::command(async)]
+fn request_task_alert_permission() -> Permission {
+    alerts::request_permission()
+}
+
+/// Makes the OS's pending requests say exactly what the journal says. A failure
+/// is reported back and goes no further: the Task it was about is already
+/// stored, and a Task Alert is derived from it — see
+/// docs/adr/0017-the-os-schedules-task-alerts.md.
+#[tauri::command(async)]
+fn reconcile_task_alerts(alerts: Vec<TaskAlert>) -> Result<(), String> {
+    alerts::reconcile(&alerts)
+}
+
+/// Opens System Settings at Notifications. The only way back after a denial,
+/// because macOS never shows its own prompt a second time.
+#[tauri::command(async)]
+fn open_notification_settings() -> Result<(), String> {
+    alerts::open_settings()
+}
+
+/// Listens for clicks on Task Alerts, and turns each one into an open Tasks
+/// View focused on that Task. The identifier is passed through untouched: which
+/// Task it names is the journal's to say, in `taskIdOfAlert`.
+fn watch_for_task_alerts(app: &tauri::AppHandle) {
+    let handle = app.clone();
+
+    alerts::watch_for_clicks(alerts::Clicks {
+        opened: Box::new(move |identifier| {
+            // Written down first, and always: a Tasks View built by this very
+            // click has no webview yet and would never hear the event, so it
+            // asks for this as it opens instead.
+            if let Some(pending) = handle.try_state::<OpenedTaskAlert>() {
+                if let Ok(mut waiting) = pending.0.lock() {
+                    *waiting = Some(identifier.clone());
+                }
+            }
+
+            open_tasks(&handle);
+
+            // And announced too, for the window that was already open and has
+            // long since asked. Addressed rather than broadcast: only Tasks
+            // View has anything to do with it.
+            if let Err(error) = handle.emit_to(
+                TASKS_WINDOW,
+                TASK_ALERT_OPENED_EVENT,
+                TaskAlertOpened {
+                    task_id: identifier,
+                },
+            ) {
+                log::warn!("could not pass on the Task Alert: {error}");
+            }
+        }),
+    });
+}
+
+/// The Task Alert that opened this window, if one did — asked for by Tasks View
+/// as it opens. Taken rather than read: an Alert singles a Task out once, and a
+/// window opened for any other reason must not inherit the last click.
+#[tauri::command]
+fn opened_task_alert(pending: tauri::State<'_, OpenedTaskAlert>) -> Option<String> {
+    pending.0.lock().ok()?.take()
+}
+
+/// Which Task an Alert the user clicked was about. Must match the payload
+/// `onTaskAlertOpened` reads in `src/platform/tauri-desktop.ts`.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskAlertOpened {
+    task_id: String,
 }
 
 /// Passes on the one thing the OS says that the webviews cannot hear for

@@ -16,6 +16,12 @@ import {
   isProjectName,
   formatTrayCount,
   exportFileName,
+  groupOpenTasks,
+  scheduledInstant,
+  scheduleOf,
+  taskAlertId,
+  taskAlerts,
+  taskIdOfAlert,
   msUntilNextJournalDay,
   groupByJournalDay,
   journalDayFor,
@@ -29,6 +35,8 @@ import {
   type CalendarEvent,
   type Journal,
   type ProjectConstraint,
+  type TaskGroup,
+  type TaskGroupName,
 } from './journal'
 import { fixedClock, migrationSql, openTestDatabase } from './testing/database'
 
@@ -2156,16 +2164,16 @@ describe('completeTask and reopenTask', () => {
   })
 })
 
-describe('editTaskDescription', () => {
+describe('editTask', () => {
   it('rewords a Task without touching Task Created At', async () => {
     const { journal, clock } = await journalAt('2026-03-09T10:00:00')
     const task = await journal.createTask('renew the cert')
     clock.set(local('2026-03-09T12:00:00'))
 
-    const reworded = await journal.editTaskDescription(
-      task.id,
-      '  renew the TLS certificate  ',
-    )
+    const reworded = await journal.editTask(task.id, {
+      description: '  renew the TLS certificate  ',
+      schedule: null,
+    })
 
     expect(reworded.description).toBe('renew the TLS certificate')
     expect(reworded.createdAt).toBe(task.createdAt)
@@ -2178,7 +2186,10 @@ describe('editTaskDescription', () => {
     clock.set(local('2026-03-09T16:00:00'))
     const completed = await journal.completeTask(task.id)
 
-    const reworded = await journal.editTaskDescription(task.id, 'renewed it')
+    const reworded = await journal.editTask(task.id, {
+      description: 'renewed it',
+      schedule: null,
+    })
 
     expect(reworded.completedAt).toBe(completed.completedAt)
     expect(await journal.completedTasks()).toEqual([reworded])
@@ -2188,7 +2199,9 @@ describe('editTaskDescription', () => {
     const { journal } = await journalAt('2026-03-09T10:00:00')
     const task = await journal.createTask('renew the cert')
 
-    await expect(journal.editTaskDescription(task.id, '  ')).rejects.toThrow()
+    await expect(
+      journal.editTask(task.id, { description: '  ', schedule: null }),
+    ).rejects.toThrow()
     expect(await journal.openTasks()).toEqual([task])
   })
 
@@ -2196,8 +2209,31 @@ describe('editTaskDescription', () => {
     const { journal } = await journalAt('2026-03-09T10:00:00')
 
     await expect(
-      journal.editTaskDescription('missing', 'anything'),
+      journal.editTask('missing', { description: 'anything', schedule: null }),
     ).rejects.toThrow(/No such Task/)
+  })
+
+  it('writes the wording and the schedule in one go', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the cert')
+
+    const saved = await journal.editTask(task.id, {
+      description: 'renew the TLS certificate',
+      schedule: { date: '2026-03-16', time: '14:00' },
+    })
+
+    expect(saved.description).toBe('renew the TLS certificate')
+    expect(scheduleOf(saved)).toEqual({ date: '2026-03-16', time: '14:00' })
+    expect(await journal.openTasks()).toEqual([saved])
+  })
+
+  it('refuses a description holding a line break', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the cert')
+
+    await expect(
+      journal.editTask(task.id, { description: 'two\nlines', schedule: null }),
+    ).rejects.toThrow()
   })
 })
 
@@ -2334,5 +2370,419 @@ describe('describeExport', () => {
     expect(
       describeExport({ markdown: '', noteCount: 0, taskCount: 0 }, '/tmp/a.md'),
     ).toBe('Exported an empty journal to /tmp/a.md.')
+  })
+})
+
+describe('Scheduled For', () => {
+  it('stores the civil date and time as written, not an instant', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+
+    const task = await journal.createTask('renew the certificate', {
+      date: '2026-03-16',
+      time: '14:00',
+    })
+
+    expect(task.scheduledDate).toBe('2026-03-16')
+    expect(task.scheduledTime).toBe('14:00')
+    expect(scheduleOf(task)).toEqual({ date: '2026-03-16', time: '14:00' })
+    expect(await journal.openTasks()).toEqual([task])
+  })
+
+  it('leaves a Task Unscheduled when nothing is said about a schedule', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+
+    const task = await journal.createTask('renew the certificate')
+
+    expect(task.scheduledDate).toBeNull()
+    expect(task.scheduledTime).toBeNull()
+    expect(scheduleOf(task)).toBeNull()
+  })
+
+  it('keeps a date without a time as date-only', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+
+    const task = await journal.createTask('renew the certificate', {
+      date: '2026-03-16',
+      time: null,
+    })
+
+    expect(scheduleOf(task)).toEqual({ date: '2026-03-16', time: null })
+  })
+
+  it('accepts a date already in the past', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+
+    const task = await journal.createTask('chase the invoice', {
+      date: '2026-02-01',
+      time: '09:00',
+    })
+
+    expect(task.scheduledDate).toBe('2026-02-01')
+  })
+
+  it('refuses a date the calendar does not have', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+
+    await expect(
+      journal.createTask('x', { date: '2026-02-31', time: null }),
+    ).rejects.toThrow()
+    await expect(
+      journal.createTask('x', { date: '0002-07-31', time: null }),
+    ).rejects.toThrow()
+    expect(await journal.openTasks()).toEqual([])
+  })
+
+  it('refuses a time that is not a minute of the day', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+
+    await expect(
+      journal.createTask('x', { date: '2026-03-16', time: '24:00' }),
+    ).rejects.toThrow()
+    await expect(
+      journal.createTask('x', { date: '2026-03-16', time: '9:00' }),
+    ).rejects.toThrow()
+  })
+})
+
+describe('editTask and Scheduled For', () => {
+  it('gives an Unscheduled Task a schedule', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the certificate')
+
+    const scheduled = await journal.editTask(task.id, {
+      description: task.description,
+      schedule: { date: '2026-03-16', time: '14:00' },
+    })
+
+    expect(scheduleOf(scheduled)).toEqual({ date: '2026-03-16', time: '14:00' })
+    expect(await journal.openTasks()).toEqual([scheduled])
+  })
+
+  it('clears the time with the date', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the certificate', {
+      date: '2026-03-16',
+      time: '14:00',
+    })
+
+    const cleared = await journal.editTask(task.id, {
+      description: task.description,
+      schedule: null,
+    })
+
+    expect(cleared.scheduledDate).toBeNull()
+    expect(cleared.scheduledTime).toBeNull()
+  })
+
+  it('leaves Task Created At alone', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the certificate')
+
+    clock.set(local('2026-03-10T10:00:00'))
+    const scheduled = await journal.editTask(task.id, {
+      description: task.description,
+      schedule: { date: '2026-03-16', time: null },
+    })
+
+    expect(scheduled.createdAt).toBe(task.createdAt)
+    expect(scheduled.description).toBe(task.description)
+  })
+
+  it('refuses to move the schedule of a Completed Task', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the certificate', {
+      date: '2026-03-16',
+      time: '14:00',
+    })
+    await journal.completeTask(task.id)
+
+    await expect(
+      journal.editTask(task.id, {
+        description: task.description,
+        schedule: { date: '2026-03-17', time: null },
+      }),
+    ).rejects.toThrow()
+    expect(scheduleOf((await journal.completedTasks())[0])).toEqual({
+      date: '2026-03-16',
+      time: '14:00',
+    })
+  })
+
+  it('preserves the schedule across completing and reopening', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the certificate', {
+      date: '2026-03-16',
+      time: '14:00',
+    })
+
+    await journal.completeTask(task.id)
+    const reopened = await journal.reopenTask(task.id)
+
+    expect(scheduleOf(reopened)).toEqual({ date: '2026-03-16', time: '14:00' })
+  })
+
+  it('still rewords a Completed Task, so long as its schedule stays put', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the certificate', {
+      date: '2026-03-16',
+      time: '14:00',
+    })
+    await journal.completeTask(task.id)
+
+    const reworded = await journal.editTask(task.id, {
+      description: 'renewed it',
+      schedule: { date: '2026-03-16', time: '14:00' },
+    })
+
+    expect(reworded.description).toBe('renewed it')
+  })
+})
+
+describe('openTasks in Scheduled For order', () => {
+  it('reads the scheduled ones earliest first and the Unscheduled after them', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T10:00:00')
+
+    await journal.createTask('first written', null)
+    clock.set(local('2026-03-09T11:00:00'))
+    await journal.createTask('second written', null)
+    await journal.createTask('later', { date: '2026-03-20', time: '09:00' })
+    await journal.createTask('sooner', { date: '2026-03-16', time: '17:00' })
+    await journal.createTask('all that day', { date: '2026-03-16', time: null })
+
+    expect((await journal.openTasks()).map((task) => task.description)).toEqual([
+      'all that day',
+      'sooner',
+      'later',
+      'second written',
+      'first written',
+    ])
+  })
+})
+
+describe('scheduledInstant', () => {
+  it('resolves a wall-clock time in the timezone the user is in now', () => {
+    expect(
+      scheduledInstant({ date: '2026-06-01', time: '14:00' }, 'Europe/Lisbon'),
+    ).toEqual(new Date('2026-06-01T13:00:00.000Z'))
+  })
+
+  it('keeps the same wall clock after the user travels', () => {
+    const schedule = { date: '2026-06-01', time: '14:00' }
+
+    expect(scheduledInstant(schedule, 'America/New_York')).toEqual(
+      new Date('2026-06-01T18:00:00.000Z'),
+    )
+    expect(scheduledInstant(schedule, 'Asia/Tokyo')).toEqual(
+      new Date('2026-06-01T05:00:00.000Z'),
+    )
+  })
+
+  it('resolves a date-only schedule to the start of its day', () => {
+    expect(
+      scheduledInstant({ date: '2026-06-01', time: null }, 'Europe/Lisbon'),
+    ).toEqual(new Date('2026-05-31T23:00:00.000Z'))
+  })
+
+  it('fires a time the clocks skipped at the first valid instant after it', () => {
+    // Lisbon jumps 01:00 → 02:00 on 2026-03-29: 01:30 never happens.
+    expect(
+      scheduledInstant({ date: '2026-03-29', time: '01:30' }, 'Europe/Lisbon'),
+    ).toEqual(new Date('2026-03-29T01:00:00.000Z'))
+  })
+
+  it('fires a repeated time once, at its first occurrence', () => {
+    // Lisbon falls 02:00 → 01:00 on 2026-10-25: 01:30 happens twice.
+    expect(
+      scheduledInstant({ date: '2026-10-25', time: '01:30' }, 'Europe/Lisbon'),
+    ).toEqual(new Date('2026-10-25T00:30:00.000Z'))
+  })
+})
+
+describe('groupOpenTasks', () => {
+  async function scheduledTasks() {
+    const { journal } = await journalAt('2026-03-16T10:00:00')
+
+    await journal.createTask('last week', { date: '2026-03-09', time: null })
+    await journal.createTask('this morning', { date: '2026-03-16', time: '08:00' })
+    await journal.createTask('this afternoon', { date: '2026-03-16', time: '17:00' })
+    await journal.createTask('all day today', { date: '2026-03-16', time: null })
+    await journal.createTask('next week', { date: '2026-03-23', time: '09:00' })
+    await journal.createTask('someday')
+
+    return journal.openTasks()
+  }
+
+  function named(groups: TaskGroup[], name: TaskGroupName): string[] {
+    return (
+      groups
+        .find((group) => group.name === name)
+        ?.tasks.map((task) => task.description) ?? []
+    )
+  }
+
+  it('puts every Open Task in exactly one of the four groups', async () => {
+    const groups = groupOpenTasks(
+      await scheduledTasks(),
+      local('2026-03-16T10:00:00'),
+      'Europe/Lisbon',
+    )
+
+    expect(groups.map((group) => group.name)).toEqual([
+      'overdue',
+      'today',
+      'upcoming',
+      'unscheduled',
+    ])
+    expect(named(groups, 'overdue')).toEqual(['last week', 'this morning'])
+    expect(named(groups, 'today')).toEqual(['all day today', 'this afternoon'])
+    expect(named(groups, 'upcoming')).toEqual(['next week'])
+    expect(named(groups, 'unscheduled')).toEqual(['someday'])
+  })
+
+  it('leaves a date-only Task in Today until its whole day is behind', async () => {
+    const tasks = await scheduledTasks()
+
+    expect(
+      named(
+        groupOpenTasks(tasks, local('2026-03-16T23:59:00'), 'Europe/Lisbon'),
+        'today',
+      ),
+    ).toContain('all day today')
+    expect(
+      named(
+        groupOpenTasks(tasks, local('2026-03-17T00:01:00'), 'Europe/Lisbon'),
+        'overdue',
+      ),
+    ).toContain('all day today')
+  })
+
+  it('re-groups at local midnight without re-reading the Tasks', async () => {
+    const tasks = await scheduledTasks()
+
+    const tomorrow = groupOpenTasks(
+      tasks,
+      local('2026-03-17T09:00:00'),
+      'Europe/Lisbon',
+    )
+
+    expect(named(tomorrow, 'today')).toEqual([])
+    expect(named(tomorrow, 'overdue')).toEqual([
+      'last week',
+      'all day today',
+      'this morning',
+      'this afternoon',
+    ])
+  })
+})
+
+describe('taskAlerts', () => {
+  async function tasks() {
+    const { journal } = await journalAt('2026-03-16T10:00:00')
+
+    await journal.createTask('timed and ahead', { date: '2026-03-16', time: '17:00' })
+    await journal.createTask('date only', { date: '2026-03-16', time: null })
+    await journal.createTask('timed and gone', { date: '2026-03-16', time: '08:00' })
+    await journal.createTask('unscheduled')
+
+    return journal
+  }
+
+  it('registers only future Open Tasks that have a time', async () => {
+    const journal = await tasks()
+
+    const alerts = taskAlerts(
+      await journal.openTasks(),
+      local('2026-03-16T10:00:00'),
+      'Europe/Lisbon',
+    )
+
+    expect(alerts.map((alert) => alert.description)).toEqual(['timed and ahead'])
+    expect(alerts[0]).toMatchObject({
+      year: 2026,
+      month: 3,
+      day: 16,
+      hour: 17,
+      minute: 0,
+    })
+  })
+
+  it('gives every Task the same identifier every time', async () => {
+    const journal = await tasks()
+    const [task] = await journal.openTasks()
+
+    expect(taskAlertId(task.id)).toBe(`task:${task.id}`)
+    expect(taskIdOfAlert(taskAlertId(task.id))).toBe(task.id)
+    expect(taskIdOfAlert('something-else')).toBeNull()
+  })
+
+  it('gives up the Alert of a Task once it is completed', async () => {
+    const journal = await tasks()
+    const [ahead] = (await journal.openTasks()).filter(
+      (task) => task.description === 'timed and ahead',
+    )
+
+    await journal.completeTask(ahead.id)
+
+    expect(
+      taskAlerts(
+        await journal.openTasks(),
+        local('2026-03-16T10:00:00'),
+        'Europe/Lisbon',
+      ),
+    ).toEqual([])
+  })
+
+  it('shows the whole Task Description', async () => {
+    const { journal } = await journalAt('2026-03-16T10:00:00')
+    const long = 'renew the certificate '.repeat(20).trim()
+    await journal.createTask(long, { date: '2026-03-16', time: '17:00' })
+
+    const [alert] = taskAlerts(
+      await journal.openTasks(),
+      local('2026-03-16T10:00:00'),
+      'Europe/Lisbon',
+    )
+
+    expect(alert.description).toBe(long)
+  })
+})
+
+describe('exportJournal with Scheduled For', () => {
+  it('writes the schedule on Open and Completed bullets, and omits it when absent', async () => {
+    const { journal, clock } = await journalAt('2026-03-16T09:00:00')
+
+    // Export order is oldest created first, whatever each one is scheduled
+    // for, so the clock moves between them.
+    await journal.createTask('renew the certificate', {
+      date: '2026-03-20',
+      time: '14:00',
+    })
+    clock.set(local('2026-03-16T09:10:00'))
+    await journal.createTask('all that day', { date: '2026-03-21', time: null })
+    clock.set(local('2026-03-16T09:20:00'))
+    await journal.createTask('someday')
+    clock.set(local('2026-03-16T09:30:00'))
+    const done = await journal.createTask('chase the invoice', {
+      date: '2026-03-16',
+      time: '08:00',
+    })
+    clock.set(local('2026-03-16T10:30:00'))
+    await journal.completeTask(done.id)
+
+    const exported = await journal.exportJournal()
+
+    expect(exported.markdown).toBe(
+      [
+        '# Tasks',
+        '',
+        '## Open',
+        '- [ ] renew the certificate (scheduled 2026-03-20 14:00)',
+        '- [ ] all that day (scheduled 2026-03-21)',
+        '- [ ] someday',
+        '',
+        '## Completed',
+        '- [x] chase the invoice (scheduled 2026-03-16 08:00; completed Mon 16 Mar, 10:30)',
+      ].join('\n'),
+    )
   })
 })

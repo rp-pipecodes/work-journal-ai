@@ -8,7 +8,7 @@
  * "must match" pair are one screen apart rather than four files apart.
  */
 
-import type { CalendarEvent, SqlDriver } from '@/journal/journal'
+import type { CalendarEvent, SqlDriver, TaskAlert } from '@/journal/journal'
 import type { HotkeyAction, HotkeyStatuses } from '@/settings/hotkey'
 import type { SettingsStore } from '@/settings/settings'
 import type { Theme } from '@/settings/theme'
@@ -113,14 +113,40 @@ export const CAPTURE_WIDTH = CAPTURE_PANEL_WIDTH + CAPTURE_PANEL_MARGIN
 const CAPTURE_HEIGHT = CAPTURE_FIELD_HEIGHT + CAPTURE_PANEL_MARGIN
 
 /**
- * The Task Creation panel is the Capture panel's shape — one field, the same
- * width and the same gutter — because they are the same gesture over a
- * different record. It has nothing under the field but a refusal, so its whole
- * geometry is that one question.
+ * The row under the Task Creation field holding Scheduled For: the date, the
+ * time, and the way to clear both. Always there rather than revealed, because
+ * a control nobody can see is a feature nobody knows the window has — and its
+ * height is fixed, so the window's resting size is a constant rather than
+ * something measured.
+ */
+export const TASK_CREATION_SCHEDULE_ROW = 44
+
+/**
+ * The Task Creation panel is the Capture panel's shape — the same width and
+ * the same gutter — because they are the same gesture over a different record.
+ * It differs in what sits under the field: a Note has only a Body, while a Task
+ * may also say when it is meant to be done, so the schedule row is part of the
+ * resting height rather than something that grows it.
+ *
+ * The refusal grows the window on top of that, exactly as it does for a
+ * Capture: the description being refused has to stay in sight and stay
+ * editable.
  */
 export function taskCreationWindowHeight(refused: boolean): number {
-  return CAPTURE_HEIGHT + (refused ? CAPTURE_REFUSAL_HEIGHT : 0)
+  return (
+    CAPTURE_HEIGHT +
+    CAPTURE_HAIRLINE +
+    TASK_CREATION_SCHEDULE_ROW +
+    (refused ? CAPTURE_REFUSAL_HEIGHT : 0)
+  )
 }
+
+/**
+ * What the Task Creation window is built at, before its view has asked for
+ * anything. Must match `.inner_size` in `build_task_creation_window`
+ * (`src-tauri/src/lib.rs`).
+ */
+export const TASK_CREATION_HEIGHT = taskCreationWindowHeight(false)
 
 /** How tall the window has to be to show the field and everything under it. */
 export function captureWindowHeight(fit: CaptureFit): number {
@@ -180,6 +206,24 @@ export const JOURNAL_CHANGED_EVENT = 'journal://changed'
  */
 export const TASKS_CHANGED_EVENT = 'tasks://changed'
 
+/**
+ * The user clicked a Task Alert. Spoken by the Rust side, which is the only
+ * part of the app macOS hands the click to, and carried to Tasks View so it can
+ * open focused on that Task. Must match `TASK_ALERT_OPENED_EVENT` in
+ * `src-tauri/src/lib.rs`.
+ */
+export const TASK_ALERT_OPENED_EVENT = 'task-alert://opened'
+
+/**
+ * How a reconciliation went: whether the OS is now holding what the journal
+ * says it should. Spoken by the reconciliation, which runs in the capture
+ * window and has no screen of its own, and heard by Tasks View, which does. A
+ * failure never rolls a Task back — this is only how it stops being silent; see
+ * docs/adr/0017-the-os-schedules-task-alerts.md. Spoken and heard entirely on
+ * this side, so the Rust side keeps no copy of it.
+ */
+export const TASK_ALERTS_RECONCILED_EVENT = 'task-alert://reconciled'
+
 /** Where an export ended up — the Rust side's `ExportedFile`. */
 export interface ExportedFile {
   path: string
@@ -200,6 +244,18 @@ export interface AppIdentity {
  */
 export type CalendarAccess = 'granted' | 'denied' | 'undetermined'
 
+/**
+ * What the OS is currently allowing the app to deliver as Task Alerts.
+ * `undetermined` is the state before the user has been asked — which is where
+ * every install starts, because the app asks in context when the first timed
+ * Task is saved rather than at first launch.
+ *
+ * After a denial macOS will not prompt again, whatever the app does, which is
+ * why Settings shows the status and the way back rather than a button that
+ * would silently do nothing.
+ */
+export type TaskAlertPermission = 'granted' | 'denied' | 'undetermined'
+
 /** One of the user's calendars, as Settings lists it to be ticked. */
 export interface CalendarInfo {
   /** Stable enough to remember a tick against; opaque to the journal. */
@@ -218,6 +274,12 @@ export interface Desktop {
   closeWindow(): Promise<void>
   /** The window lost focus — for a Capture, a discard. */
   onWindowBlurred(handle: () => void): Promise<Unlisten>
+  /**
+   * The window regained focus. A list grouped as Overdue, Today and Upcoming
+   * stops being true while nobody is looking at it, so the window that is
+   * looked at again asks the question afresh.
+   */
+  onWindowFocused(handle: () => void): Promise<Unlisten>
   /**
    * Whether the caller's own window is on screen. Asked by the two resident
    * windows when they lose focus: losing it to another application is the user
@@ -275,6 +337,61 @@ export interface Desktop {
 
   announceTasksChanged(): Promise<void>
   onTasksChanged(handle: () => void): Promise<Unlisten>
+
+  /**
+   * What macOS allows the app to deliver right now, asked rather than
+   * remembered: a grant is revoked in System Settings without the app hearing
+   * of it. Never prompts.
+   */
+  taskAlertPermission(): Promise<TaskAlertPermission>
+  /**
+   * Asks for alert and sound authorization, through the OS, and answers with
+   * what it came to. Asked in context when the first timed Task is saved and
+   * never at first launch; asking again after a refusal does not re-prompt,
+   * because macOS answers for the user.
+   */
+  requestTaskAlertPermission(): Promise<TaskAlertPermission>
+  /**
+   * Makes the OS's pending requests say exactly this and nothing else: whatever
+   * is here is registered, and every other Task Alert the app owns is
+   * cancelled. One call rather than a schedule and a cancel, because the
+   * journal is authoritative and the pending requests are a copy of its answer
+   * — reconciling is the only operation that can be repeated safely on launch,
+   * on wake and after every change.
+   *
+   * Rejects when the OS refuses. That never rolls back a Task: the schedule is
+   * already stored, and the Alert is derived from it.
+   */
+  reconcileTaskAlerts(alerts: TaskAlert[]): Promise<void>
+  /**
+   * The user clicked a Task Alert. Carries the Task it was about, so a Tasks
+   * View already on screen can single it out.
+   */
+  onTaskAlertOpened(handle: (taskId: string) => void): Promise<Unlisten>
+  /**
+   * Whether the OS took what the journal asked it to hold. Said by the window
+   * that reconciles, which is headless, so that the window with a screen can
+   * say it to the user — and said either way, so a failure that has since been
+   * put right stops being on screen.
+   */
+  announceTaskAlertsReconciled(held: boolean): Promise<void>
+  onTaskAlertsReconciled(handle: (held: boolean) => void): Promise<Unlisten>
+  /**
+   * The Task Alert that opened this window, if one did — asked for by Tasks
+   * View as it opens, and null when it was opened any other way.
+   *
+   * The announcement above is not enough on its own: an Alert delivered while
+   * Work Journal was not running builds the window with its click, and no
+   * webview is listening yet. The Rust side keeps it until it is asked for, and
+   * hands it over exactly once.
+   */
+  openedTaskAlert(): Promise<string | null>
+  /**
+   * Opens System Settings at Notifications — the only way back after a denial,
+   * since macOS will not show its prompt a second time. The pane is opened by
+   * its documented identifier; the app never guesses a per-app deep link.
+   */
+  openNotificationSettings(): Promise<void>
   /** The Tray Menu wants yesterday's Digest on the clipboard. */
   onYesterdayDigestRequested(handle: () => void): Promise<Unlisten>
 
