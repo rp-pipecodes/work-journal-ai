@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createJournal, type Journal, type Task } from './journal'
 import {
-  ALERT_REFUSED,
   createTasksSession,
   openingTasksSnapshot,
   type TasksSession,
   type TasksSnapshot,
 } from './tasks-session'
 import { fixedClock, openTestDatabase } from './testing/database'
+import { ALERT_REFUSED } from './task-alerts'
 import { fakeDesktop, type FakeDesktop } from '../platform/testing/desktop'
 
 // Every test drives a real journal over real SQL. Nothing here asserts that a
@@ -241,11 +241,34 @@ describe('scheduling a Task from the Editor', () => {
     expect(groupsOf(now())).toEqual({ today: ['renew it'] })
   })
 
-  it('leaves the schedule of a Completed Task alone', async () => {
+  it('rewords a Completed Task while its schedule stays put', async () => {
     const { session, core, created, now } = await tasksSession(['renew it'])
-    await core.setTaskSchedule(created[0].id, {
-      date: '2026-03-16',
-      time: '14:00',
+    await core.editTask(created[0].id, {
+      description: 'renew it',
+      schedule: { date: '2026-03-16', time: '14:00' },
+    })
+    await core.completeTask(created[0].id)
+    await session.show('completed')
+
+    // What the Editor sends for a Completed Task: the new wording, and the
+    // schedule it was completed with, because it offers no way to change one.
+    await session.save(created[0].id, {
+      description: 'renewed it',
+      schedule: { date: '2026-03-16', time: '14:00' },
+    })
+
+    const [task] = await core.completedTasks()
+    expect(task.description).toBe('renewed it')
+    expect(task.scheduledDate).toBe('2026-03-16')
+    expect(now().problem).toBeNull()
+  })
+
+  it('refuses to move the schedule of a Completed Task, and says so', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { session, core, created, now } = await tasksSession(['renew it'])
+    await core.editTask(created[0].id, {
+      description: 'renew it',
+      schedule: { date: '2026-03-16', time: '14:00' },
     })
     await core.completeTask(created[0].id)
     await session.show('completed')
@@ -255,10 +278,25 @@ describe('scheduling a Task from the Editor', () => {
       schedule: null,
     })
 
+    expect(now().problem).toBe('That Task could not be saved.')
     const [task] = await core.completedTasks()
-    expect(task.description).toBe('renewed it')
+    expect(task.description).toBe('renew it')
     expect(task.scheduledDate).toBe('2026-03-16')
-    expect(now().problem).toBeNull()
+  })
+
+  it('never asks about an Alert for a Task already completed', async () => {
+    const { session, core, created, desktop } = await tasksSession(['renew it'], {
+      alertPermission: 'undetermined',
+    })
+    await core.completeTask(created[0].id)
+    await session.show('completed')
+
+    await session.save(created[0].id, {
+      description: 'renewed it',
+      schedule: null,
+    })
+
+    expect(desktop.alertPrompted).toBe(false)
   })
 })
 

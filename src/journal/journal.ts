@@ -329,24 +329,27 @@ export interface Journal {
   /** The commitments that were kept, most recently completed first. */
   completedTasks(): Promise<Task[]>
   /**
-   * Rewords a Task. Task Created At is untouched, and so is the state: a Task
-   * remains editable whether it is Open or Completed.
-   */
-  editTaskDescription(id: string, description: string): Promise<Task>
-  /**
-   * Moves Scheduled For, or clears it. Null is Unscheduled, and a schedule
-   * whose time is null is date-only; a time is never stored without a date,
-   * because clearing the date clears the time with it.
+   * Changes a Task: what it says, and when it is meant to be done. One
+   * operation and one write, because the Task Editor commits both at once and
+   * a save that half landed would leave the user unable to say which half.
    *
-   * Refused while the Task is Completed: only the Task Description is editable
-   * there, so a schedule is changed by reopening first — which preserves the
-   * former one, and may make the Task Overdue the moment it comes back.
-   *
-   * A date in the past is accepted exactly like any other. It is a real
+   * Task Created At is untouched, and so is the state. `schedule` is null for
+   * Unscheduled, and a schedule whose time is null is date-only; a time is
+   * never stored without a date, because clearing the date clears the time with
+   * it. A date in the past is accepted exactly like any other — it is a real
    * commitment that was missed, and it becomes Overdue rather than being
    * refused or quietly moved.
+   *
+   * While a Task is Completed only its Task Description may change: a schedule
+   * that differs from the one it was completed with is refused rather than
+   * written, because reopening is what makes a schedule changeable again — and
+   * reopening preserves the former one, which may make the Task Overdue the
+   * moment it comes back.
    */
-  setTaskSchedule(id: string, schedule: TaskSchedule | null): Promise<Task>
+  editTask(
+    id: string,
+    change: { description: string; schedule: TaskSchedule | null },
+  ): Promise<Task>
   /**
    * Marks the commitment kept, recording when. Never asks first — completing
    * is reversible, and a confirmation on the most ordinary action in the app
@@ -458,26 +461,25 @@ const SELECT_ALL_TASKS_FOR_EXPORT = `
 `
 
 /**
- * The description is the only changeable column. `created_at` is never in an
- * UPDATE anywhere in the app, and `completed_at` moves only through completing
- * and reopening — which are states, not edits.
+ * What an edit may change, and the whole of it: the wording and both halves of
+ * Scheduled For, in one statement. `created_at` is never in an UPDATE anywhere
+ * in the app, and `completed_at` moves only through completing and reopening —
+ * which are states, not edits.
+ *
+ * Both halves of the schedule move together, always: a time is never written
+ * without a date, and clearing the date clears the time in the same statement
+ * rather than leaving an orphan behind.
  */
-const UPDATE_TASK_DESCRIPTION = `
-  UPDATE tasks SET description = ? WHERE id = ?
+const UPDATE_TASK = `
+  UPDATE tasks
+  SET description = ?, scheduled_date = ?, scheduled_time = ?
+  WHERE id = ?
 `
 
 const UPDATE_TASK_COMPLETED_AT = `
   UPDATE tasks SET completed_at = ? WHERE id = ?
 `
 
-/**
- * Both halves of Scheduled For move together, always: a time is never written
- * without a date, and clearing the date clears the time in the same statement
- * rather than leaving an orphan behind.
- */
-const UPDATE_TASK_SCHEDULE = `
-  UPDATE tasks SET scheduled_date = ?, scheduled_time = ? WHERE id = ?
-`
 
 const DELETE_TASK = `
   DELETE FROM tasks WHERE id = ?
@@ -873,38 +875,29 @@ export function createJournal({
       return rows.map(toTask)
     },
 
-    async editTaskDescription(id, description) {
+    async editTask(id, { description, schedule }) {
       const said = taskDescription(description)
-      const task = await readTask(driver, id)
-
-      if (said === task.description) {
-        return task
-      }
-
-      await driver.execute(UPDATE_TASK_DESCRIPTION, [said, id])
-
-      return { ...task, description: said }
-    },
-
-    async setTaskSchedule(id, schedule) {
       const scheduled = taskSchedule(schedule)
       const task = await readTask(driver, id)
 
+      const date = scheduled?.date ?? null
+      const time = scheduled?.time ?? null
+
       // A Completed Task keeps the schedule it was completed with. Reopening
       // is the way back to changing it, and it is a decision the user makes
-      // rather than one this silently makes for them.
-      if (!isOpen(task)) {
+      // rather than one an edit makes quietly on their behalf.
+      if (
+        !isOpen(task) &&
+        (date !== task.scheduledDate || time !== task.scheduledTime)
+      ) {
         throw new Error(
           'A Completed Task keeps its Scheduled For: reopen it to change one.',
         )
       }
 
-      const date = scheduled?.date ?? null
-      const time = scheduled?.time ?? null
+      await driver.execute(UPDATE_TASK, [said, date, time, id])
 
-      await driver.execute(UPDATE_TASK_SCHEDULE, [date, time, id])
-
-      return { ...task, scheduledDate: date, scheduledTime: time }
+      return { ...task, description: said, scheduledDate: date, scheduledTime: time }
     },
 
     async completeTask(id) {

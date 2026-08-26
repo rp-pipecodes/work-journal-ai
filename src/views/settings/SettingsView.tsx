@@ -175,6 +175,32 @@ export default function SettingsView({
     })()
   }, [desktop, settings])
 
+  // Coming back from System Settings is the one moment a revoked or restored
+  // Task Alert permission can be noticed: macOS never tells the app, and this
+  // window is where the user was sent to change it. A permission that has just
+  // been given is a set of Alerts nobody has registered yet, so the window that
+  // registers them is told.
+  useEffect(() => {
+    const refocused = desktop.onWindowFocused(() => {
+      void desktop.taskAlertPermission().then(
+        (permission) => {
+          setAlerts((before) => {
+            if (before === permission) return before
+            if (permission === 'granted') void desktop.announceTasksChanged()
+            return permission
+          })
+        },
+        (error: unknown) => {
+          console.error('could not re-read the Task Alert permission', error)
+        },
+      )
+    })
+
+    return () => {
+      void refocused.then((stop) => stop())
+    }
+  }, [desktop])
+
   useEffect(() => {
     if (!asking) return
 

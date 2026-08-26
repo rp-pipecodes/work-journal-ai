@@ -2164,16 +2164,16 @@ describe('completeTask and reopenTask', () => {
   })
 })
 
-describe('editTaskDescription', () => {
+describe('editTask', () => {
   it('rewords a Task without touching Task Created At', async () => {
     const { journal, clock } = await journalAt('2026-03-09T10:00:00')
     const task = await journal.createTask('renew the cert')
     clock.set(local('2026-03-09T12:00:00'))
 
-    const reworded = await journal.editTaskDescription(
-      task.id,
-      '  renew the TLS certificate  ',
-    )
+    const reworded = await journal.editTask(task.id, {
+      description: '  renew the TLS certificate  ',
+      schedule: null,
+    })
 
     expect(reworded.description).toBe('renew the TLS certificate')
     expect(reworded.createdAt).toBe(task.createdAt)
@@ -2186,7 +2186,10 @@ describe('editTaskDescription', () => {
     clock.set(local('2026-03-09T16:00:00'))
     const completed = await journal.completeTask(task.id)
 
-    const reworded = await journal.editTaskDescription(task.id, 'renewed it')
+    const reworded = await journal.editTask(task.id, {
+      description: 'renewed it',
+      schedule: null,
+    })
 
     expect(reworded.completedAt).toBe(completed.completedAt)
     expect(await journal.completedTasks()).toEqual([reworded])
@@ -2196,7 +2199,9 @@ describe('editTaskDescription', () => {
     const { journal } = await journalAt('2026-03-09T10:00:00')
     const task = await journal.createTask('renew the cert')
 
-    await expect(journal.editTaskDescription(task.id, '  ')).rejects.toThrow()
+    await expect(
+      journal.editTask(task.id, { description: '  ', schedule: null }),
+    ).rejects.toThrow()
     expect(await journal.openTasks()).toEqual([task])
   })
 
@@ -2204,8 +2209,31 @@ describe('editTaskDescription', () => {
     const { journal } = await journalAt('2026-03-09T10:00:00')
 
     await expect(
-      journal.editTaskDescription('missing', 'anything'),
+      journal.editTask('missing', { description: 'anything', schedule: null }),
     ).rejects.toThrow(/No such Task/)
+  })
+
+  it('writes the wording and the schedule in one go', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the cert')
+
+    const saved = await journal.editTask(task.id, {
+      description: 'renew the TLS certificate',
+      schedule: { date: '2026-03-16', time: '14:00' },
+    })
+
+    expect(saved.description).toBe('renew the TLS certificate')
+    expect(scheduleOf(saved)).toEqual({ date: '2026-03-16', time: '14:00' })
+    expect(await journal.openTasks()).toEqual([saved])
+  })
+
+  it('refuses a description holding a line break', async () => {
+    const { journal } = await journalAt('2026-03-09T10:00:00')
+    const task = await journal.createTask('renew the cert')
+
+    await expect(
+      journal.editTask(task.id, { description: 'two\nlines', schedule: null }),
+    ).rejects.toThrow()
   })
 })
 
@@ -2416,14 +2444,14 @@ describe('Scheduled For', () => {
   })
 })
 
-describe('setTaskSchedule', () => {
+describe('editTask and Scheduled For', () => {
   it('gives an Unscheduled Task a schedule', async () => {
     const { journal } = await journalAt('2026-03-09T10:00:00')
     const task = await journal.createTask('renew the certificate')
 
-    const scheduled = await journal.setTaskSchedule(task.id, {
-      date: '2026-03-16',
-      time: '14:00',
+    const scheduled = await journal.editTask(task.id, {
+      description: task.description,
+      schedule: { date: '2026-03-16', time: '14:00' },
     })
 
     expect(scheduleOf(scheduled)).toEqual({ date: '2026-03-16', time: '14:00' })
@@ -2437,20 +2465,23 @@ describe('setTaskSchedule', () => {
       time: '14:00',
     })
 
-    const cleared = await journal.setTaskSchedule(task.id, null)
+    const cleared = await journal.editTask(task.id, {
+      description: task.description,
+      schedule: null,
+    })
 
     expect(cleared.scheduledDate).toBeNull()
     expect(cleared.scheduledTime).toBeNull()
   })
 
-  it('leaves Task Created At and the description alone', async () => {
+  it('leaves Task Created At alone', async () => {
     const { journal, clock } = await journalAt('2026-03-09T10:00:00')
     const task = await journal.createTask('renew the certificate')
 
     clock.set(local('2026-03-10T10:00:00'))
-    const scheduled = await journal.setTaskSchedule(task.id, {
-      date: '2026-03-16',
-      time: null,
+    const scheduled = await journal.editTask(task.id, {
+      description: task.description,
+      schedule: { date: '2026-03-16', time: null },
     })
 
     expect(scheduled.createdAt).toBe(task.createdAt)
@@ -2466,8 +2497,15 @@ describe('setTaskSchedule', () => {
     await journal.completeTask(task.id)
 
     await expect(
-      journal.setTaskSchedule(task.id, { date: '2026-03-17', time: null }),
+      journal.editTask(task.id, {
+        description: task.description,
+        schedule: { date: '2026-03-17', time: null },
+      }),
     ).rejects.toThrow()
+    expect(scheduleOf((await journal.completedTasks())[0])).toEqual({
+      date: '2026-03-16',
+      time: '14:00',
+    })
   })
 
   it('preserves the schedule across completing and reopening', async () => {
@@ -2483,12 +2521,18 @@ describe('setTaskSchedule', () => {
     expect(scheduleOf(reopened)).toEqual({ date: '2026-03-16', time: '14:00' })
   })
 
-  it('still rewords a Completed Task', async () => {
+  it('still rewords a Completed Task, so long as its schedule stays put', async () => {
     const { journal } = await journalAt('2026-03-09T10:00:00')
-    const task = await journal.createTask('renew the certificate')
+    const task = await journal.createTask('renew the certificate', {
+      date: '2026-03-16',
+      time: '14:00',
+    })
     await journal.completeTask(task.id)
 
-    const reworded = await journal.editTaskDescription(task.id, 'renewed it')
+    const reworded = await journal.editTask(task.id, {
+      description: 'renewed it',
+      schedule: { date: '2026-03-16', time: '14:00' },
+    })
 
     expect(reworded.description).toBe('renewed it')
   })

@@ -49,6 +49,18 @@ function pressEscape() {
   fireEvent.keyDown(field(), { key: 'Escape' })
 }
 
+function dateField(): HTMLInputElement {
+  return screen.getByLabelText('Scheduled For') as HTMLInputElement
+}
+
+function timeField(): HTMLInputElement {
+  return screen.getByLabelText('Time') as HTMLInputElement
+}
+
+function pick(control: HTMLInputElement, value: string) {
+  fireEvent.change(control, { target: { value } })
+}
+
 describe('committing a Task', () => {
   it('creates one Task and dismisses the window', async () => {
     const journal = await openJournal()
@@ -227,5 +239,135 @@ describe('the two resident windows', () => {
     // pass on a value that was about to go.
     expect(capture.value).toBe('half a Note')
     expect(field().value).toBe('half a Task')
+  })
+})
+
+describe('scheduling a Task as it is created', () => {
+  it('commits the date and the time chosen', async () => {
+    const journal = await openJournal()
+    const desktop = fakeDesktop()
+    showTaskCreation(desktop, journal)
+
+    type('renew the TLS certificate')
+    pick(dateField(), '2026-03-16')
+    pick(timeField(), '14:00')
+    pressEnter()
+
+    await expect.poll(async () => await journal.openTasks()).toHaveLength(1)
+    const [task] = await journal.openTasks()
+    expect(task.description).toBe('renew the TLS certificate')
+    expect(task.scheduledDate).toBe('2026-03-16')
+    expect(task.scheduledTime).toBe('14:00')
+  })
+
+  it('commits an Unscheduled Task when no date is chosen', async () => {
+    const journal = await openJournal()
+    const desktop = fakeDesktop()
+    showTaskCreation(desktop, journal)
+
+    type('someday')
+    pressEnter()
+
+    await expect.poll(async () => await journal.openTasks()).toHaveLength(1)
+    const [task] = await journal.openTasks()
+    expect(task.scheduledDate).toBeNull()
+    expect(task.scheduledTime).toBeNull()
+  })
+
+  it('has no time until there is a date for it to be a minute of', async () => {
+    showTaskCreation(fakeDesktop(), await openJournal())
+
+    expect(timeField().disabled).toBe(true)
+
+    pick(dateField(), '2026-03-16')
+
+    expect(timeField().disabled).toBe(false)
+  })
+
+  it('clears the time along with the date', async () => {
+    const journal = await openJournal()
+    showTaskCreation(fakeDesktop(), journal)
+    type('renew it')
+    pick(dateField(), '2026-03-16')
+    pick(timeField(), '14:00')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the schedule' }))
+
+    expect(dateField().value).toBe('')
+    expect(timeField().value).toBe('')
+    expect(timeField().disabled).toBe(true)
+  })
+
+  it('leaves the description exactly as typed, schedule words and all', async () => {
+    const journal = await openJournal()
+    showTaskCreation(fakeDesktop(), journal)
+
+    type('ship it tomorrow at 9am')
+    pressEnter()
+
+    await expect.poll(async () => await journal.openTasks()).toHaveLength(1)
+    const [task] = await journal.openTasks()
+    expect(task.description).toBe('ship it tomorrow at 9am')
+    expect(task.scheduledDate).toBeNull()
+  })
+
+  it('starts the next Task Creation Unscheduled, whether it committed or not', async () => {
+    const journal = await openJournal()
+    const desktop = fakeDesktop()
+    showTaskCreation(desktop, journal)
+
+    type('renew it')
+    pick(dateField(), '2026-03-16')
+    pressEnter()
+
+    await expect.poll(() => dateField().value).toBe('')
+    expect(field().value).toBe('')
+
+    type('abandoned')
+    pick(dateField(), '2026-03-20')
+    pressEscape()
+
+    await expect.poll(() => dateField().value).toBe('')
+  })
+
+  it('asks about Task Alerts once a Task with a time is committed', async () => {
+    const journal = await openJournal()
+    const desktop = fakeDesktop({ alertPermission: 'undetermined' })
+    showTaskCreation(desktop, journal)
+
+    type('renew it')
+    pick(dateField(), '2026-03-16')
+    pick(timeField(), '14:00')
+    pressEnter()
+
+    await expect.poll(() => desktop.alertPrompted).toBe(true)
+  })
+
+  it('never asks for a Task with a date and no time', async () => {
+    const journal = await openJournal()
+    const desktop = fakeDesktop({ alertPermission: 'undetermined' })
+    showTaskCreation(desktop, journal)
+
+    type('renew it')
+    pick(dateField(), '2026-03-16')
+    pressEnter()
+
+    await expect.poll(async () => await journal.openTasks()).toHaveLength(1)
+    expect(desktop.alertPrompted).toBe(false)
+  })
+
+  it('commits the Task before the window goes, and asks afterwards', async () => {
+    const journal = await openJournal()
+    const desktop = fakeDesktop({ alertPermission: 'denied' })
+    showTaskCreation(desktop, journal)
+
+    type('renew it')
+    pick(dateField(), '2026-03-16')
+    pick(timeField(), '14:00')
+    pressEnter()
+
+    // Refused by macOS, and the Task is stored all the same.
+    await expect.poll(() => desktop.taskCreationsDismissed).toBe(1)
+    expect((await journal.openTasks())[0].scheduledTime).toBe('14:00')
   })
 })

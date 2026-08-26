@@ -63,6 +63,12 @@ export interface FakeDesktop extends Desktop {
   alertsFail: boolean
   /** The user clicks a Task Alert. */
   openTaskAlert(taskId: string): void
+  /**
+   * The Alert waiting to be claimed by the window it opened — what a click
+   * that built the window leaves behind. Null when the window was opened any
+   * other way.
+   */
+  pendingTaskAlert: string | null
   /** How many times System Settings was opened at Notifications. */
   notificationSettingsOpened: number
   /** What the OS allows of the calendars; writable, as a revocation is. */
@@ -139,6 +145,7 @@ export function fakeDesktop({
     reconciliations: [],
     alertsFail: false,
     notificationSettingsOpened: 0,
+    pendingTaskAlert: null,
 
     beginCapture: () => captureShown.announce(undefined),
     showTaskCreation: () => taskCreationShown.announce(undefined),
@@ -220,6 +227,13 @@ export function fakeDesktop({
     },
     onTaskAlertOpened: async (handle) => taskAlertOpened.add(handle),
     openTaskAlert: (taskId) => taskAlertOpened.announce(taskId),
+    openedTaskAlert: async () => {
+      // Handed over exactly once, as the real one is: an Alert singles a Task
+      // out for the window it opened, not for every window after it.
+      const waiting = desktop.pendingTaskAlert
+      desktop.pendingTaskAlert = null
+      return waiting
+    },
     openNotificationSettings: async () => {
       desktop.notificationSettingsOpened += 1
     },

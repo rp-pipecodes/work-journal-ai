@@ -161,7 +161,10 @@ describe('createTaskAlertsSession', () => {
     await session.start()
     const [before] = desktop.pendingAlerts
 
-    await journal.setTaskSchedule(task.id, { date: '2026-03-18', time: '09:30' })
+    await journal.editTask(task.id, {
+      description: task.description,
+      schedule: { date: '2026-03-18', time: '09:30' },
+    })
     await desktop.announceTasksChanged()
     await vi.advanceTimersByTimeAsync(0)
     const [after] = desktop.pendingAlerts

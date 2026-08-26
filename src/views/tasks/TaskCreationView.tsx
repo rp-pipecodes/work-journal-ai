@@ -1,20 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import KeyHint from '@/components/KeyHint'
-import type { Journal } from '@/journal/journal'
+import type { Journal, TaskSchedule } from '@/journal/journal'
+import { askAboutTaskAlerts } from '@/journal/task-alerts'
 import {
   CAPTURE_FIELD_HEIGHT,
+  CAPTURE_HAIRLINE,
   CAPTURE_PANEL_BORDER,
   CAPTURE_REFUSAL_HEIGHT,
   CAPTURE_SHADOW_GUTTER,
+  TASK_CREATION_SCHEDULE_ROW,
   type Desktop,
 } from '@/platform/desktop'
+import ScheduleFields from './ScheduleFields'
 
 /**
- * One line, one keystroke — a Task rather than a Note. The window behind this
- * view is created at startup and only ever shown and hidden, and it is its own
- * window rather than a mode of the capture one so that an unfinished Capture
- * and an unfinished Task Creation can both be sitting there at once; see
+ * One line, one keystroke — a Task rather than a Note — and, if the user wants
+ * one, the day it is meant to be done on. The window behind this view is
+ * created at startup and only ever shown and hidden, and it is its own window
+ * rather than a mode of the capture one so that an unfinished Capture and an
+ * unfinished Task Creation can both be sitting there at once; see
  * docs/adr/0019-task-creation-has-its-own-resident-window.md.
+ *
+ * Scheduled For is optional and explicit. The description is committed
+ * verbatim whatever it says — a line reading "tomorrow at 9" schedules
+ * nothing, because nothing here reads it for meaning.
  *
  * The field is reset when a Task Creation *ends* rather than when one begins:
  * an Entry Point reached while the window is already up focuses it and changes
@@ -33,6 +42,10 @@ export default function TaskCreationView({
   journal: Promise<Journal>
 }) {
   const [description, setDescription] = useState('')
+  // Scheduled For as the row under the field has it. Null is Unscheduled,
+  // which is where every Task Creation starts: a Task without a date is a
+  // complete Task, not a draft waiting for one.
+  const [schedule, setSchedule] = useState<TaskSchedule | null>(null)
   // How many times this Task Creation has been refused. Counted rather than
   // flagged so a second refusal is a second thing on screen: the message
   // invites another Enter, and one that changed nothing would read as the
@@ -41,20 +54,23 @@ export default function TaskCreationView({
   const field = useRef<HTMLInputElement>(null)
 
   const dismiss = useCallback(async () => {
-    // The next Task Creation starts empty, whether this one committed or not.
+    // The next Task Creation starts empty, whether this one committed or not —
+    // and empty means Unscheduled too, not the last date that happened to be
+    // chosen.
     setDescription('')
+    setSchedule(null)
     setRefusals(0)
     await desktop.dismissTaskCreation()
   }, [desktop])
 
   const commit = useCallback(
-    async (said: string) => {
+    async (said: string, scheduledFor: TaskSchedule | null) => {
       // Nothing to commit is not a refusal: it is a keystroke that means
       // nothing yet, exactly as it is during a Capture.
       if (said.trim() === '') return
 
       try {
-        await (await journal).createTask(said)
+        await (await journal).createTask(said, scheduledFor)
       } catch (error) {
         // A Task that could not be stored must not vanish: leave the window
         // open with the description still in it, and say so, since a window
@@ -75,6 +91,14 @@ export default function TaskCreationView({
       }
 
       await dismiss()
+
+      // Asked after the window has gone, and never waited on: the prompt is
+      // the system's and belongs in front of whatever the user is doing, not
+      // behind a panel held open for it. The Task is stored either way — see
+      // docs/adr/0017-the-os-schedules-task-alerts.md.
+      if (scheduledFor !== null && scheduledFor.time !== null) {
+        void askAboutTaskAlerts(desktop)
+      }
     },
     [desktop, journal, dismiss],
   )
@@ -125,7 +149,7 @@ export default function TaskCreationView({
       return
     }
     if (event.key === 'Enter') {
-      void commit(description)
+      void commit(description, schedule)
     }
   }
 
@@ -167,11 +191,25 @@ export default function TaskCreationView({
               reading="Return creates the Task."
               what="creates"
               action="Create Task"
-              onPress={() => void commit(description)}
+              onPress={() => void commit(description, schedule)}
             />
             <KeyHint glyph="esc" reading="Escape abandons." what="abandons" />
           </div>
         </div>
+        {/* Under the field rather than beside it: the description is what a
+            Task is, and the day it is meant to be done on is a second thought
+            the user may never have. Its height is part of the window's resting
+            size, so choosing a date never resizes anything. */}
+        <div
+          style={{
+            height: TASK_CREATION_SCHEDULE_ROW,
+            borderTopWidth: CAPTURE_HAIRLINE,
+          }}
+          className="flex shrink-0 items-center border-border px-4"
+        >
+          <ScheduleFields schedule={schedule} onChange={setSchedule} />
+        </div>
+
         {refusals > 0 && (
           <p
             key={refusals}

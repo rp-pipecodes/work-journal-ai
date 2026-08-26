@@ -20,7 +20,11 @@ afterEach(() => {
 })
 
 /** Tasks View over a real journal, already showing its first list. */
-async function showTasks(descriptions: string[] = []) {
+async function showTasks(
+  descriptions: string[] = [],
+  /** The Alert that opened the window, as a click that built it would leave. */
+  { pendingTaskAlert = null as string | null } = {},
+) {
   const { driver, close } = await openTestDatabase()
   openDatabases.push(close)
 
@@ -34,6 +38,7 @@ async function showTasks(descriptions: string[] = []) {
   }
 
   const desktop = fakeDesktop({ driver })
+  desktop.pendingTaskAlert = pendingTaskAlert
   render(
     <TasksView desktop={desktop} journal={Promise.resolve(core)} clock={clock} />,
   )
@@ -347,16 +352,16 @@ describe('the schedule controls', () => {
     expect((screen.getByLabelText('Time') as HTMLInputElement).disabled).toBe(
       true,
     )
-    expect(screen.getByLabelText('Scheduled For').textContent).toContain(
-      'Add a date',
-    )
+    expect(
+      (screen.getByLabelText('Scheduled For') as HTMLInputElement).value,
+    ).toBe('')
   })
 
   it('saves the date and the time chosen', async () => {
     const { core, created, desktop } = await showTasks(['renew the cert'])
-    await core.setTaskSchedule(created[0].id, {
-      date: '2026-03-16',
-      time: null,
+    await core.editTask(created[0].id, {
+      description: 'renew the cert',
+      schedule: { date: '2026-03-16', time: null },
     })
     await openEditorFor(desktop, 'renew the cert', 'Upcoming')
 
@@ -373,9 +378,9 @@ describe('the schedule controls', () => {
 
   it('clears the time along with the date', async () => {
     const { core, created, desktop } = await showTasks(['renew the cert'])
-    await core.setTaskSchedule(created[0].id, {
-      date: '2026-03-16',
-      time: '14:00',
+    await core.editTask(created[0].id, {
+      description: 'renew the cert',
+      schedule: { date: '2026-03-16', time: '14:00' },
     })
     await openEditorFor(desktop, 'renew the cert', 'Upcoming')
 
@@ -421,9 +426,9 @@ describe('asking about Task Alerts', () => {
   it('asks the first time a Task with a time is saved, and never before', async () => {
     const { core, created, desktop } = await showTasks(['renew the cert'])
     desktop.alertPermission = 'undetermined'
-    await core.setTaskSchedule(created[0].id, {
-      date: '2026-03-16',
-      time: null,
+    await core.editTask(created[0].id, {
+      description: 'renew the cert',
+      schedule: { date: '2026-03-16', time: null },
     })
     await openEditorFor(desktop, 'renew the cert', 'Upcoming')
     expect(desktop.alertPrompted).toBe(false)
@@ -439,9 +444,9 @@ describe('asking about Task Alerts', () => {
   it('keeps the Task when macOS refuses, and says the Task is unaffected', async () => {
     const { core, created, desktop } = await showTasks(['renew the cert'])
     desktop.alertPermission = 'denied'
-    await core.setTaskSchedule(created[0].id, {
-      date: '2026-03-16',
-      time: null,
+    await core.editTask(created[0].id, {
+      description: 'renew the cert',
+      schedule: { date: '2026-03-16', time: null },
     })
     await openEditorFor(desktop, 'renew the cert', 'Upcoming')
 
@@ -456,14 +461,75 @@ describe('asking about Task Alerts', () => {
 })
 
 describe('a clicked Task Alert', () => {
+  it('singles out the Task even when the click built the window', async () => {
+    const { driver, close } = await openTestDatabase()
+    openDatabases.push(close)
+    const core = createJournal({
+      clock: fixedClock('2026-03-09T09:00:00'),
+      driver,
+    })
+    const task = await core.createTask('renew the cert', {
+      date: '2026-03-16',
+      time: '14:00',
+    })
+    // Nothing is listening when a cold-launched window is built, so the Alert
+    // is waiting to be claimed rather than announced.
+    const desktop = fakeDesktop({ driver })
+    desktop.pendingTaskAlert = `task:${task.id}`
+    render(
+      <TasksView
+        desktop={desktop}
+        journal={Promise.resolve(core)}
+        clock={fixedClock('2026-03-09T09:00:00')}
+      />,
+    )
+
+    await expect
+      .poll(() =>
+        screen
+          .queryByText('renew the cert')
+          ?.closest('li')
+          ?.getAttribute('aria-current'),
+      )
+      .toBe('true')
+    // Claimed once: a window opened any other way must not inherit the click.
+    expect(await desktop.openedTaskAlert()).toBeNull()
+  })
+
+  it('stops singling it out once the user moves on', async () => {
+    const { desktop, created } = await showTasks(['renew the cert'])
+    await screen.findByText('renew the cert')
+    desktop.openTaskAlert(`task:${created[0].id}`)
+    await expect
+      .poll(() =>
+        screen
+          .queryByText('renew the cert')
+          ?.closest('li')
+          ?.getAttribute('aria-current'),
+      )
+      .toBe('true')
+
+    fireEvent.click(tab('Completed'))
+    fireEvent.click(tab('Open'))
+
+    await expect
+      .poll(() =>
+        screen
+          .queryByText('renew the cert')
+          ?.closest('li')
+          ?.getAttribute('aria-current'),
+      )
+      .toBeNull()
+  })
+
   it('shows the Open list with that Task singled out', async () => {
     const { desktop, core, created } = await showTasks([
       'renew the cert',
       'chase the invoice',
     ])
-    await core.setTaskSchedule(created[0].id, {
-      date: '2026-03-16',
-      time: '14:00',
+    await core.editTask(created[0].id, {
+      description: 'renew the cert',
+      schedule: { date: '2026-03-16', time: '14:00' },
     })
     await screen.findByText('renew the cert')
     fireEvent.click(tab('Completed'))

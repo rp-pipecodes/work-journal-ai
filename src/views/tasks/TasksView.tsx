@@ -1,26 +1,16 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import {
-  CalendarIcon,
   CheckCircle2Icon,
-  ClockIcon,
   ListTodoIcon,
   PlusIcon,
   Trash2Icon,
   TriangleAlertIcon,
-  XIcon,
   type LucideIcon,
 } from 'lucide-react'
 import WindowTitleBar from '@/components/WindowTitleBar'
 import { Button } from '@/components/ui/button'
-import { Calendar } from '@/components/ui/calendar'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   AlertDialog,
@@ -40,8 +30,8 @@ import {
 import {
   formatScheduledFor,
   formatTaskCompletedAt,
-  journalDayFor,
   msUntilNextJournalDay,
+  scheduleOf,
   systemClock,
   taskIdOfAlert,
   type Clock,
@@ -52,6 +42,7 @@ import {
 } from '@/journal/journal'
 import type { Desktop } from '@/platform/desktop'
 import { keysOfHotkey, type HotkeyStatuses } from '@/settings/hotkey'
+import ScheduleFields from './ScheduleFields'
 
 /**
  * What each group is called on screen. Overdue first because it is the one
@@ -168,14 +159,26 @@ export default function TasksView({
   }, [clock, session])
 
   useEffect(() => {
-    // macOS handed the app a click on a Task Alert. Which Task it named is the
-    // journal's to say; the window's job is to put it in front of the user.
-    const opened = desktop.onTaskAlertOpened((alertId) => {
+    /** Which Task the Alert named — the journal's to say, not this window's. */
+    function single(alertId: string) {
       const taskId = taskIdOfAlert(alertId)
       if (taskId === null) return
       setFocused(taskId)
       void session.show('open')
+    }
+
+    // The Alert that opened this window, if a click on one did. Asked for
+    // rather than waited on: a window built by that very click has no webview
+    // yet when the announcement goes out, which is exactly the case an Alert
+    // delivered while the app was closed lands in.
+    void desktop.openedTaskAlert().then((alertId) => {
+      if (alertId !== null) single(alertId)
+    }, (error: unknown) => {
+      console.error('could not read the Task Alert that opened this', error)
     })
+
+    // And the announcement, for a window that was already on screen.
+    const opened = desktop.onTaskAlertOpened(single)
 
     return () => {
       void opened.then((stop) => stop())
@@ -204,6 +207,8 @@ export default function TasksView({
     schedule: TaskSchedule | null,
   ) {
     setEditing(null)
+    // The Task has been dealt with: singling it out has served its purpose.
+    setFocused(null)
     void session.save(task.id, { description, schedule })
   }
 
@@ -254,6 +259,8 @@ export default function TasksView({
             // list at all — one of the two is always on screen.
             const chosen = next[0]
             if (chosen === 'open' || chosen === 'completed') {
+              // Whatever an Alert singled out, the user has moved on from it.
+              setFocused(null)
               void session.show(chosen)
             }
           }}
@@ -495,8 +502,7 @@ function TaskEditor({
   onCancel: () => void
 }) {
   const [description, setDescription] = useState(task.description)
-  const [date, setDate] = useState(task.scheduledDate)
-  const [time, setTime] = useState(task.scheduledTime)
+  const [schedule, setSchedule] = useState(scheduleOf(task))
   const headingId = useId()
   const said = description.trim()
   // Only the Task Description is editable while a Task is Completed: reopening
@@ -505,7 +511,7 @@ function TaskEditor({
   const completed = task.completedAt !== null
 
   function save() {
-    onSave(description, date === null ? null : { date, time })
+    onSave(description, schedule)
   }
 
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -543,17 +549,7 @@ function TaskEditor({
           meant to be done.
         </p>
       ) : (
-        <ScheduleFields
-          date={date}
-          time={time}
-          onPickDate={(next) => {
-            setDate(next)
-            // The date is the prerequisite: clearing it clears the time with
-            // it, because a time with no day is not a schedule.
-            if (next === null) setTime(null)
-          }}
-          onPickTime={setTime}
-        />
+        <ScheduleFields schedule={schedule} onChange={setSchedule} />
       )}
 
       <div className="flex justify-end gap-2">
@@ -566,103 +562,6 @@ function TaskEditor({
       </div>
     </div>
   )
-}
-
-/**
- * Scheduled For, as two explicit controls. The date opens a calendar; the time
- * is a minute of that day, and is unavailable until there is a day for it to be
- * a minute of. Neither is required — an Unscheduled Task is a complete Task,
- * not a draft waiting for a date.
- */
-function ScheduleFields({
-  date,
-  time,
-  onPickDate,
-  onPickTime,
-}: {
-  date: string | null
-  time: string | null
-  onPickDate: (date: string | null) => void
-  onPickTime: (time: string | null) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const timeId = useId()
-
-  return (
-    <div className="flex flex-wrap items-center gap-2 type-meta">
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger
-          render={
-            <Button variant="outline" size="sm" aria-label="Scheduled For">
-              <CalendarIcon />
-              {date === null ? 'Add a date' : formatPickedDate(date)}
-            </Button>
-          }
-        />
-        <PopoverContent align="start" className="w-auto p-2">
-          <Calendar
-            mode="single"
-            autoFocus
-            // Monday, as every week in the app is — see ADR-0006.
-            weekStartsOn={1}
-            defaultMonth={date === null ? undefined : dayAsDate(date)}
-            selected={date === null ? undefined : dayAsDate(date)}
-            onSelect={(_selected, day) => {
-              setOpen(false)
-              onPickDate(journalDayFor(day))
-            }}
-            className="p-0"
-          />
-        </PopoverContent>
-      </Popover>
-
-      <label htmlFor={timeId} className="sr-only">
-        Time
-      </label>
-      <div className="flex items-center gap-1.5 text-muted-foreground">
-        <ClockIcon aria-hidden className="size-3.5" />
-        <Input
-          id={timeId}
-          type="time"
-          // A time is a minute of a day, so there has to be a day first.
-          disabled={date === null}
-          value={time ?? ''}
-          onChange={(event) =>
-            onPickTime(event.target.value === '' ? null : event.target.value)
-          }
-          className="h-8 w-28 tabular-nums"
-        />
-      </div>
-
-      {date !== null && (
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-label="Clear the schedule"
-          onClick={() => onPickDate(null)}
-          className="text-muted-foreground"
-        >
-          <XIcon />
-          Clear
-        </Button>
-      )}
-    </div>
-  )
-}
-
-/** A `YYYY-MM-DD` as the calendar takes it: a local date, never parsed as UTC. */
-function dayAsDate(day: string): Date {
-  const [year, month, date] = day.split('-').map(Number)
-  return new Date(year, month - 1, date)
-}
-
-/** The chosen date on its own control, in the reader's own locale. */
-function formatPickedDate(day: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-  }).format(dayAsDate(day))
 }
 
 /**

@@ -149,6 +149,8 @@ export function createTauriDesktop(): Desktop {
       listen<{ taskId: string }>(TASK_ALERT_OPENED_EVENT, ({ payload }) =>
         handle(payload.taskId),
       ),
+    openedTaskAlert: async () =>
+      (await invoke<string | null>('opened_task_alert')) ?? null,
     openNotificationSettings: () => invoke('open_notification_settings'),
 
     onYesterdayDigestRequested: (handle) =>

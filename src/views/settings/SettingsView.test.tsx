@@ -364,6 +364,25 @@ describe('Task Alerts', () => {
     ).toBeTruthy()
   })
 
+  it('notices a permission restored in System Settings, and says so', async () => {
+    const desktop = fakeDesktop({
+      stored: { startAtLogin: false },
+      alertPermission: 'denied',
+    })
+    let announced = 0
+    void desktop.onTasksChanged(() => (announced += 1))
+    showSettings(desktop)
+    await screen.findByText('Task Alerts')
+
+    // The user goes to System Settings, turns it on, and comes back.
+    desktop.alertPermission = 'granted'
+    desktop.focus()
+
+    await expect.poll(() => screen.queryByText('Allowed')).not.toBeNull()
+    // The Tasks still ahead have Alerts nobody has registered yet.
+    expect(announced).toBe(1)
+  })
+
   it('points a denial at System Settings rather than asking again', async () => {
     const desktop = fakeDesktop({
       stored: { startAtLogin: false },

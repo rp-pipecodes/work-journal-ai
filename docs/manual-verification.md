@@ -186,6 +186,11 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 
 ## Scheduling a Task
 
+- [ ] The Task Creation window shows a date control and a time control under the field, and opens with both empty however the last Task Creation ended.
+- [ ] Typing a line, choosing a date and a time, and pressing `Enter` creates one Task with that schedule; **View Tasks** shows it under the right heading.
+- [ ] Typing a line and pressing `Enter` with no date chosen creates an Unscheduled Task.
+- [ ] With no date chosen in the Task Creation window, the time control cannot be used; **Clear** empties both.
+- [ ] The Task Creation window is tall enough for the field and the schedule row, with no clipped control and no transparent band under the panel.
 - [ ] The Editor shows a date control and a time control; with no date chosen, the time control cannot be used.
 - [ ] Choosing a date and saving moves the Task into **Today** or **Upcoming**, under a heading, with the date beside it.
 - [ ] Adding a time to that date and saving keeps it in the same group and shows the time beside it.
@@ -201,17 +206,20 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 
 Requires the release build: macOS will not hold a notification for a binary with no bundle. Run these on a machine whose notification settings for Work Journal you are willing to change.
 
+- [ ] Creating the first Task with a date **and** a time from the Task Creation window raises the macOS notification prompt after the window has gone, in front of whatever is on screen.
 - [ ] Saving the first Task with a date **and** a time raises the macOS notification prompt — and nothing raised it at first launch, before any Task had a time.
 - [ ] Allowing it leaves the Task exactly as saved; **Settings › Task Alerts** then reads **Allowed**.
 - [ ] The Alert arrives at the minute chosen, shows the whole Task Description, and plays a sound.
 - [ ] It arrives while Work Journal is the active application too, rather than being swallowed.
 - [ ] Clicking the Alert opens Tasks View with that Task singled out. There is no Complete and no Snooze on it.
+- [ ] Clicking an Alert with Tasks View closed — including one delivered while the app was quit — opens the window with that Task singled out, not on a plain list.
+- [ ] Switching to **Completed** and back stops singling it out, and opening Tasks View from the Tray Menu afterwards singles out nothing.
 - [ ] Quitting the app before the moment arrives still delivers the Alert.
 - [ ] A Task with a date and **no** time never alerts — not at 09:00, and not at any other hour.
 - [ ] Editing the time, completing, reopening or deleting a Task before its moment cancels or moves the Alert accordingly; nothing arrives for a Task that is gone.
 - [ ] A schedule already in the past produces no Alert at all, and none arrives when the app is relaunched.
 - [ ] Refusing the prompt still saves the Task and its schedule; Tasks View says the Task is unaffected, and **Settings › Task Alerts** reads **Not allowed** with the path `System Settings › Notifications › Work Journal` and an **Open System Settings** button that opens that pane.
-- [ ] Turning notifications back on there and reopening the app registers the Tasks that are still ahead, and replays none of the ones that are past.
+- [ ] Turning notifications back on there and returning to the Settings window changes **Task Alerts** to **Allowed** without a relaunch, and the Tasks still ahead are registered; none of the past ones are replayed.
 - [ ] With Work Journal denied, everything else about Tasks — creating, scheduling, completing, exporting — still works.
 
 ## Export

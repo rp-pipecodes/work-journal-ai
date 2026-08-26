@@ -16,6 +16,7 @@
  */
 
 import type { Desktop } from '@/platform/desktop'
+import { ALERT_REFUSED, askAboutTaskAlerts } from './task-alerts'
 import {
   groupOpenTasks,
   isOpen,
@@ -70,10 +71,6 @@ export const openingTasksSnapshot: TasksSnapshot = {
   problem: null,
   alertRefusal: null,
 }
-
-/** What a denied Task Alert says, where the user just asked for one. */
-export const ALERT_REFUSED =
-  'macOS is not allowing Work Journal to alert you. The Task is saved and its schedule is kept; turn notifications on in Settings to be alerted.'
 
 export interface TasksSession {
   /** What a view would render right now. */
@@ -217,36 +214,16 @@ export function createTasksSession({
   }
 
   /**
-   * Asks macOS to allow Task Alerts, in context, the first time a Task with a
-   * time is saved — and never again, because after an answer is on file the
-   * prompt does not appear and asking would only be the app nagging.
-   *
-   * Nothing here can fail the save. The Task and its schedule are already
-   * stored; what is at stake is only whether the OS will say so out loud.
+   * Asks the OS about Task Alerts, in context, and says so where the user just
+   * asked for one. The rule about when to ask is shared with the Task Creation
+   * window; all that belongs here is what the answer puts on screen.
    */
   async function askAboutAlerts(): Promise<void> {
-    try {
-      const permission = await desktop.taskAlertPermission()
-
-      if (permission === 'granted') {
-        show({ alertRefusal: null })
-        return
-      }
-      if (permission === 'denied') {
-        show({ alertRefusal: ALERT_REFUSED })
-        return
-      }
-
-      const answer = await desktop.requestTaskAlertPermission()
-      show({ alertRefusal: answer === 'granted' ? null : ALERT_REFUSED })
-
-      // A permission just given is a set of Alerts nobody has registered yet,
-      // and the window that registers them is a different one.
-      if (answer === 'granted') await announce()
-    } catch (error) {
-      // An OS that will not even say what it allows is not a reason to claim
-      // the Task failed, and not a reason to accuse it of refusing either.
-      console.error('could not ask about Task Alerts', error)
+    const answer = await askAboutTaskAlerts(desktop)
+    // An OS that would not say what it allows is not something to accuse of
+    // refusing: nothing is said, and Settings still reports the truth.
+    if (answer !== 'unknown') {
+      show({ alertRefusal: answer === 'refused' ? ALERT_REFUSED : null })
     }
   }
 
@@ -282,14 +259,11 @@ export function createTasksSession({
       const saved = await change(
         'That Task could not be saved.',
         async (core) => {
-          const task = await core.editTaskDescription(id, description)
-          // While Completed only the Task Description is editable, so a save
-          // there carries the schedule it was completed with and changes
-          // nothing about it. Reopening is the way back to moving one.
-          if (!isOpen(task)) return
-
-          await core.setTaskSchedule(id, schedule)
-          timed = schedule !== null && schedule.time !== null
+          const task = await core.editTask(id, { description, schedule })
+          // Only an Open Task can have gained a time: a Completed one keeps
+          // the schedule it was completed with, and asking macOS about an
+          // Alert for a commitment already kept would make no sense.
+          timed = isOpen(task) && schedule !== null && schedule.time !== null
         },
       )
 
