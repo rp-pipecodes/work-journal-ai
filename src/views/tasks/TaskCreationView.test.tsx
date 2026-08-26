@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
 import { createJournal, type Journal } from '@/journal/journal'
 import { fixedClock, openTestDatabase } from '@/journal/testing/database'
@@ -57,6 +57,20 @@ describe('committing a Task', () => {
     showTaskCreation(desktop, journal)
     type('renew the TLS certificate')
     pressEnter()
+
+    await expect.poll(() => desktop.taskCreationsDismissed).toBe(1)
+    expect((await journal.openTasks()).map((task) => task.description)).toEqual([
+      'renew the TLS certificate',
+    ])
+  })
+
+  it('creates one Task from the Create control too', async () => {
+    const journal = await openJournal()
+    const desktop = fakeDesktop()
+
+    showTaskCreation(desktop, journal)
+    type('renew the TLS certificate')
+    fireEvent.click(screen.getByRole('button', { name: 'Create Task' }))
 
     await expect.poll(() => desktop.taskCreationsDismissed).toBe(1)
     expect((await journal.openTasks()).map((task) => task.description)).toEqual([
@@ -198,13 +212,19 @@ describe('the two resident windows', () => {
     const capture = screen.getByLabelText(
       'What did you just do?',
     ) as HTMLInputElement
+
+    // Half a Note, then the Task Entry Point, then half a Task, then back:
+    // the sequence a user walks when a Task occurs to them mid-Capture. Each
+    // Entry Point puts the other window away and raises its own, so both
+    // views see their window shown again with text still waiting in them.
     fireEvent.change(capture, { target: { value: 'half a Note' } })
+    await act(async () => desktop.showTaskCreation())
     type('half a Task')
+    await act(async () => desktop.beginCapture())
 
-    // Either Entry Point, reached again, changes nothing in the other window.
-    desktop.beginCapture()
-    desktop.showTaskCreation()
-
+    // Asserted after a flush, not polled: what is being claimed is that these
+    // never change, and a poll would read them before a wipe had landed and
+    // pass on a value that was about to go.
     expect(capture.value).toBe('half a Note')
     expect(field().value).toBe('half a Task')
   })

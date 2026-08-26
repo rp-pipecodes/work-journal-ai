@@ -20,8 +20,10 @@ import {
 
 /**
  * One line, one keystroke. The window behind this view is created at startup
- * and only ever shown and hidden, so the view resets itself every time the
- * Capture begins rather than relying on a fresh React tree.
+ * and only ever shown and hidden, so the view clears itself rather than
+ * relying on a fresh React tree — on the Capture ending, never on the window
+ * being shown, since the window is also put away to make room for Task
+ * Creation with a Body still half-typed in it.
  *
  * While a Project Marker is open, Predictions drawn from Projects already on
  * Notes sit under the field. Choosing one fills the marker; typing a new name
@@ -53,19 +55,15 @@ export default function CaptureView({
   const prefix = markerPrefix(body)
   const predictions = prefix === null ? [] : offered
 
-  // A Capture never inherits the last one: a Draft is nothing, so both the
-  // beginning of one and the end of one leave exactly the same empty window.
+  // A Capture never inherits the last one: a Draft is nothing, so ending one
+  // leaves exactly the empty window the next one begins in. Ending it is the
+  // only thing that clears it — see the window being shown, below.
   const reset = useCallback(() => {
     setBody('')
     setRefusals(0)
     setOffered([])
     setHighlight(0)
   }, [])
-
-  const begin = useCallback(() => {
-    reset()
-    field.current?.focus()
-  }, [reset])
 
   const dismiss = useCallback(async () => {
     reset()
@@ -130,11 +128,13 @@ export default function CaptureView({
     // below; only this window's document is marked, since the bundle is shared.
     document.body.classList.add('capture-window')
 
-    // On mount the field is already empty; from here on, every Capture begins
-    // with the window being shown.
     field.current?.focus()
 
-    const shown = desktop.onCaptureShown(begin)
+    // Shown again after having been hidden: take focus, and change nothing
+    // else. A window is put away either by a dismiss, which has already
+    // cleared it, or by the other Entry Point being invoked, which must leave
+    // the half-typed Body exactly where the user left it.
+    const shown = desktop.onCaptureShown(() => field.current?.focus())
     // Clicking away is a discard, not a Capture left floating over the screen.
     // Unless the window is already gone: the other resident window was invoked,
     // the Rust side put this one away, and what is half-typed here is waiting
@@ -150,7 +150,7 @@ export default function CaptureView({
       void shown.then((stop) => stop())
       void blurred.then((stop) => stop())
     }
-  }, [desktop, begin, dismiss])
+  }, [desktop, dismiss])
 
   useEffect(() => {
     if (prefix === null) {

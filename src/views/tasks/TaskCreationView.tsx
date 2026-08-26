@@ -87,7 +87,9 @@ export default function TaskCreationView({
     field.current?.focus()
 
     // Shown again after having been hidden: take focus, and change nothing
-    // else. The window is only ever hidden with an empty field.
+    // else. A window is put away either by a dismiss, which has already
+    // cleared it, or by the other Entry Point being invoked, which must leave
+    // the half-typed description exactly where the user left it.
     const shown = desktop.onTaskCreationShown(() => field.current?.focus())
     // Clicking away is an abandon, not a Task Creation left floating over the
     // screen. Unless the window is already gone: the capture window was
@@ -160,7 +162,13 @@ export default function TaskCreationView({
             id={BARGAIN_ID}
             className="pointer-events-none absolute inset-y-0 right-5 flex select-none items-center gap-3 type-micro text-muted-foreground/70"
           >
-            <KeyHint glyph="↵" reading="Return creates the Task." what="creates" />
+            <KeyHint
+              glyph="↵"
+              reading="Return creates the Task."
+              what="creates"
+              action="Create Task"
+              onPress={() => void commit(description)}
+            />
             <KeyHint glyph="esc" reading="Escape abandons." what="abandons" />
           </div>
         </div>

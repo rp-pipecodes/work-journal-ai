@@ -54,6 +54,10 @@ function reading(node: Element | null): string {
   return (copy.textContent ?? '').replace(/\s+/g, ' ').trim()
 }
 
+function pressEscape() {
+  fireEvent.keyDown(field(), { key: 'Escape' })
+}
+
 function pressEnter() {
   fireEvent.keyDown(field(), { key: 'Enter' })
 }
@@ -88,7 +92,7 @@ describe('a refused Capture', () => {
     await expect.poll(() => screen.getByRole('alert') !== first).toBe(true)
   })
 
-  it('leaves the window at rest again when the next Capture begins', async () => {
+  it('leaves the window at rest again once the Capture is abandoned', async () => {
     const desktop = fakeDesktop()
     showCapture(desktop, refusingJournal(await openJournal()))
 
@@ -96,7 +100,10 @@ describe('a refused Capture', () => {
     pressEnter()
     await screen.findByRole('alert')
 
-    desktop.beginCapture()
+    // Ending the Capture is the only thing that clears it. The Entry Point
+    // that comes after only raises the window, and would find this refusal
+    // still on screen if the Body it is about were still here too.
+    pressEscape()
 
     await expect.poll(() => screen.queryByRole('alert')).toBeNull()
     expect(field().value).toBe('')
