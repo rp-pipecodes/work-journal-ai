@@ -10,7 +10,11 @@ The vocabulary the app and its code use is defined in [CONTEXT.md](CONTEXT.md) a
 
 ## Status
 
-v1 is in place: Capture from every Entry Point, history over a Filter of Journal Days with the Nudge, editing, refiling and deletion, the Digest, Import of today's meetings from the macOS calendar, and Settings — Hotkey remap, Theme, Start at Login, Meeting Import, and Export.
+Notes are complete: Capture from every Entry Point, Project filing with Predictions, history over a Filter of Journal Days — Presets, the Project constraint, Search and the Nudge — editing, refiling and deletion, the Digest, Yesterday's Digest and the Tray Count from the Tray Menu, and Import of today's meetings from the macOS calendar.
+
+Tasks are complete beside them: Task Creation in its own resident window on its own Hotkey, Scheduled For with an optional time, Recurring Tasks with one Open Task Occurrence and its completion history, Task Alerts delivered by macOS, and Tasks View over Open and Completed Tasks.
+
+Settings covers both: the Note and Task Hotkeys, Theme, Start at Login, Meeting Import, Task Alert Permission recovery, and Export of every Note and Task.
 
 ## Prerequisites
 
@@ -39,7 +43,7 @@ There is no Dock icon and no `Cmd+Tab` entry — the app is in the menu bar. Qui
 
 `pnpm tauri:dev` cannot hold a calendar grant: it builds a bare binary with no bundle around it, so macOS never prompts. Work on Import against `pnpm tauri:dev:app`, which builds a real debug `.app` under the same `.dev` identifier — see [docs/calendar-access.md](docs/calendar-access.md).
 
-Both builds can run at once, but only one of them can hold the Hotkey: whichever registers second finds it taken and reports it unavailable. Give the dev build its own combination in its Settings — that choice persists separately too.
+Both builds can run at once, but a combination can only be held once: for each of the Note Hotkey and the Task Hotkey, whichever build registers second finds it taken and reports it unavailable. Give the dev build its own combination for both in its Settings — those choices persist separately too.
 
 ## Tests
 
