@@ -429,6 +429,48 @@ describe('repeating a Task as it is created', () => {
     })
   })
 
+  it('lets the interval be emptied on the way to a longer one', async () => {
+    const journal = await openJournal()
+    showTaskCreation(fakeDesktop(), journal)
+
+    type('water the plants')
+    pick(dateField(), '2026-03-16')
+    fireEvent.change(cadenceField(), { target: { value: 'day' } })
+    const interval = screen.getByLabelText(
+      'How many days between occurrences',
+    ) as HTMLInputElement
+
+    // Clearing the field to retype it must not snap it back to 1 under the
+    // cursor, or the second digit never gets typed.
+    fireEvent.change(interval, { target: { value: '' } })
+    expect(interval.value).toBe('')
+
+    fireEvent.change(interval, { target: { value: '12' } })
+    pressEnter()
+
+    await expect.poll(async () => await journal.openTasks()).toHaveLength(1)
+    expect((await journal.openTasks())[0].recurrence?.interval).toBe(12)
+  })
+
+  it('will not let the last weekday of a weekly cadence be turned off', async () => {
+    showTaskCreation(fakeDesktop(), await openJournal())
+
+    type('gym')
+    // 16 March 2026 is a Monday, which is what a weekly cadence preselects.
+    pick(dateField(), '2026-03-16')
+    fireEvent.change(cadenceField(), { target: { value: 'week' } })
+
+    // Said in the control rather than by springing back under the cursor.
+    const monday = () =>
+      screen.getByRole('button', { name: 'Monday' }) as HTMLButtonElement
+    expect(monday().disabled).toBe(true)
+
+    // Choosing another weekday is how the first one is freed.
+    fireEvent.click(screen.getByRole('button', { name: 'Wednesday' }))
+
+    expect(monday().disabled).toBe(false)
+  })
+
   it('commits a weekly cadence on several weekdays', async () => {
     const journal = await openJournal()
     showTaskCreation(fakeDesktop(), journal)

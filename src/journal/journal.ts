@@ -193,6 +193,35 @@ export function scheduleOf(task: Task): TaskSchedule | null {
     : { date: task.scheduledDate, time: task.scheduledTime }
 }
 
+/** The slot an occurrence stands for, in the same shape a Task's own is. */
+export function slotOf(occurrence: TaskOccurrence): TaskSchedule {
+  return {
+    date: occurrence.scheduledDate,
+    time: occurrence.scheduledTime,
+  }
+}
+
+/**
+ * A slot written out plainly: the day, and the minute when there is one. The
+ * one way the app spells a civil-time slot where it is not being read aloud —
+ * an export bullet, an occurrence in a history — so a file and a screen never
+ * disagree about what the record says.
+ */
+export function formatSlot(slot: TaskSchedule): string {
+  return `${slot.date}${slot.time === null ? '' : ` ${slot.time}`}`
+}
+
+/**
+ * When a Task is meant to be done and how often that comes round again, as one
+ * value. The two travel together everywhere they are chosen or changed: the
+ * date is what a cadence is counted from, so clearing it clears the cadence,
+ * and a caller handed only one of them would have to work the other out.
+ */
+export interface TaskTiming {
+  schedule: TaskSchedule | null
+  recurrence: Recurrence | null
+}
+
 /** The one Open Task Occurrence, of however many a Task has had. */
 export function openOccurrence(
   occurrences: TaskOccurrence[],
@@ -523,6 +552,16 @@ export interface Journal {
    */
   occurrencesOf(taskId: string): Promise<TaskOccurrence[]>
   /**
+   * The same for a whole list at once, by Task — what a screen showing a list
+   * needs, in one read rather than one per row. A Task with none is absent
+   * rather than empty, which is most of them.
+   *
+   * Asked for every Task rather than only the repeating ones: Stop Recurrence
+   * keeps the history under a Task that no longer has a cadence, and that
+   * history is still the Task's to show.
+   */
+  occurrencesOfEach(taskIds: string[]): Promise<Record<string, TaskOccurrence[]>>
+  /**
    * Removes a Task permanently, and with it every Task Occurrence it ever had.
    * There is no trash, no archive and no undo — which is why this one is the
    * only Task action that is confirmed, and why the confirmation says the
@@ -725,15 +764,33 @@ const SELECT_TASK_OCCURRENCES = `
 `
 
 /**
- * One Recurring Task's whole history, newest slot first, the Open occurrence
- * among them. Ordered by the slot rather than by completion, because that is
- * the order the commitments were made in and the order the history reads in.
+ * Newest slot first, the Open occurrence among them. Ordered by the slot
+ * rather than by completion, because that is the order the commitments were
+ * made in and the order the history reads in.
  */
+const OCCURRENCE_ORDER =
+  'ORDER BY scheduled_date DESC, scheduled_time IS NULL, scheduled_time DESC, id DESC'
+
+/** One Recurring Task's whole history. */
 const SELECT_OCCURRENCES_OF_TASK = `
   ${SELECT_TASK_OCCURRENCES}
   WHERE task_id = ?
-  ORDER BY scheduled_date DESC, scheduled_time IS NULL, scheduled_time DESC, id DESC
+  ${OCCURRENCE_ORDER}
 `
+
+/**
+ * The same, for a whole list of Tasks at once — the placeholders are built to
+ * fit, because a list on screen is asked about in one read rather than one per
+ * row. Same order within each Task, so a caller can group by `task_id` and
+ * have each history already reading the way the screen shows it.
+ */
+function selectOccurrencesOfTasks(count: number): string {
+  return `
+    ${SELECT_TASK_OCCURRENCES}
+    WHERE task_id IN (${Array(count).fill('?').join(', ')})
+    ${OCCURRENCE_ORDER}
+  `
+}
 
 /** Every completed occurrence in the journal, oldest first: export order. */
 const SELECT_COMPLETED_OCCURRENCES_FOR_EXPORT = `
@@ -1169,9 +1226,9 @@ export function createJournal({
       // opens Overdue on its latest elapsed slot rather than on all of them.
       const anchor = cadence === null ? null : scheduled!.date
       const opening =
-        cadence === null || anchor === null
+        cadence === null
           ? scheduled?.date ?? null
-          : openingSlot(anchor, cadence, scheduled!.time, now)
+          : openingSlot(anchor!, cadence, scheduled!.time, now)
 
       const task: Task = {
         id: crypto.randomUUID(),
@@ -1270,15 +1327,17 @@ export function createJournal({
         })
       }
 
-      // Only these reanchor. Rewording alone leaves the series exactly where
-      // it stands, because what a Task says is not part of when it repeats.
-      const reanchors =
-        task.recurrence === null ||
-        !sameRecurrence(task.recurrence, cadence) ||
-        date !== task.scheduledDate ||
-        time !== task.scheduledTime
+      // What this edit actually changed about when the Task comes round. The
+      // three are asked once and answered twice below, because whether the
+      // series moves and what it is counted from afterwards are the same
+      // question read two ways.
+      const ruleChanged = !sameRecurrence(task.recurrence, cadence)
+      const dateChanged = date !== task.scheduledDate
+      const timeChanged = time !== task.scheduledTime
 
-      if (!reanchors) {
+      // Rewording alone leaves the series exactly where it stands, because
+      // what a Task says is not part of when it repeats.
+      if (!ruleChanged && !dateChanged && !timeChanged) {
         await driver.execute(UPDATE_TASK, [said, date, time, id])
         return { ...task, description: said }
       }
@@ -1292,9 +1351,7 @@ export function createJournal({
       // counted from the date on screen, which is what the user is looking at
       // while they make it.
       const anchor =
-        task.recurrenceAnchor !== null &&
-        sameRecurrence(task.recurrence, cadence) &&
-        date === task.scheduledDate
+        !ruleChanged && !dateChanged && task.recurrenceAnchor !== null
           ? task.recurrenceAnchor
           : scheduled!.date
       const opening = openingSlot(anchor, cadence, time, now)
@@ -1452,6 +1509,18 @@ export function createJournal({
       return readOccurrences(driver, taskId)
     },
 
+    async occurrencesOfEach(taskIds) {
+      // No Tasks is no read at all: an `IN ()` is not a query.
+      if (taskIds.length === 0) return {}
+
+      const rows = await driver.select<TaskOccurrenceRow>(
+        selectOccurrencesOfTasks(taskIds.length),
+        taskIds,
+      )
+
+      return Object.fromEntries(byTask(rows.map(toOccurrence)))
+    },
+
     async deleteTask(id) {
       await readTask(driver, id)
       // The history goes with the Task, in one transaction: an occurrence left
@@ -1539,7 +1608,7 @@ function renderExport(
 ): JournalExport {
   const open = tasks.filter(isOpen)
   const completed = tasks.filter((task) => !isOpen(task))
-  const history = historyByTask(occurrences)
+  const history = byTask(occurrences)
   const bullet = (task: Task) => taskBullet(task, history.get(task.id) ?? [])
 
   const sections: string[] = []
@@ -1582,9 +1651,7 @@ function taskBullet(task: Task, history: TaskOccurrence[]): string {
   const schedule = scheduleOf(task)
 
   if (schedule !== null) {
-    metadata.push(
-      `scheduled ${schedule.date}${schedule.time === null ? '' : ` ${schedule.time}`}`,
-    )
+    metadata.push(`scheduled ${formatSlot(schedule)}`)
   }
   if (task.recurrence !== null) {
     metadata.push(`repeats ${formatRecurrence(task.recurrence)}`)
@@ -1606,15 +1673,14 @@ function taskBullet(task: Task, history: TaskOccurrence[]): string {
 
 /** One kept occurrence: the slot it stood for, and when it was kept. */
 function occurrenceBullet(occurrence: TaskOccurrence): string {
-  const slot = `${occurrence.scheduledDate}${
-    occurrence.scheduledTime === null ? '' : ` ${occurrence.scheduledTime}`
-  }`
-
-  return `  - occurrence ${slot} (completed ${formatExportInstant(occurrence.completedAt!)})`
+  return `  - occurrence ${formatSlot(slotOf(occurrence))} (completed ${formatExportInstant(occurrence.completedAt!)})`
 }
 
-/** The kept occurrences of each Task, in the order the export writes them. */
-function historyByTask(
+/**
+ * Occurrences gathered under the Task each belongs to, keeping whatever order
+ * they arrived in. A Task with none is absent rather than empty.
+ */
+function byTask(
   occurrences: TaskOccurrence[],
 ): Map<string, TaskOccurrence[]> {
   const history = new Map<string, TaskOccurrence[]>()
@@ -2810,15 +2876,15 @@ function opensOccurrence(
 async function stopRecurring(
   driver: SqlDriver,
   task: Task,
-  said: { description: string; date: string | null; time: string | null },
+  left: { description: string; date: string | null; time: string | null },
 ): Promise<Task> {
   await driver.transaction([
     {
       sql: UPDATE_TASK_WITH_RECURRENCE,
       params: [
-        said.description,
-        said.date,
-        said.time,
+        left.description,
+        left.date,
+        left.time,
         ...recurrenceParams(null, null),
         task.id,
       ],
@@ -2828,9 +2894,9 @@ async function stopRecurring(
 
   return {
     ...task,
-    description: said.description,
-    scheduledDate: said.date,
-    scheduledTime: said.time,
+    description: left.description,
+    scheduledDate: left.date,
+    scheduledTime: left.time,
     recurrence: null,
     recurrenceAnchor: null,
   }

@@ -945,6 +945,33 @@ describe('the one-Open-occurrence invariant', () => {
   })
 })
 
+describe('the occurrences of a whole list', () => {
+  it('gathers them under their Tasks in one read, and omits the Tasks with none', async () => {
+    const { journal, clock } = await journalAt('2026-03-16T08:00:00')
+    const repeating = await journal.createTask(
+      'gym',
+      { date: '2026-03-16', time: null },
+      every(1, 'day'),
+    )
+    const ordinary = await journal.createTask('post the letter', null)
+    clock.set(new Date('2026-03-16T20:00:00'))
+    await journal.completeTask(repeating.id)
+
+    const each = await journal.occurrencesOfEach([repeating.id, ordinary.id])
+
+    // The same answer the one-Task read gives, in the same order.
+    expect(each[repeating.id]).toEqual(await journal.occurrencesOf(repeating.id))
+    expect(each[repeating.id]).toHaveLength(2)
+    expect(ordinary.id in each).toBe(false)
+  })
+
+  it('asks nothing at all for an empty list', async () => {
+    const { journal } = await journalAt('2026-03-16T08:00:00')
+
+    expect(await journal.occurrencesOfEach([])).toEqual({})
+  })
+})
+
 describe('deleting a Recurring Task', () => {
   it('takes its whole occurrence history with it', async () => {
     const { journal, clock, driver } = await journalAt('2026-03-16T08:00:00')

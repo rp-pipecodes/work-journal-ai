@@ -35,9 +35,11 @@ import {
   completedOccurrences,
   formatRecurrence,
   formatScheduledFor,
+  formatSlot,
   formatTaskCompletedAt,
   msUntilNextJournalDay,
   scheduleOf,
+  slotOf,
   taskIdOfAlert,
   type Clock,
   type Journal,
@@ -46,6 +48,7 @@ import {
   type TaskGroupName,
   type TaskOccurrence,
   type TaskSchedule,
+  type TaskTiming,
 } from '@/journal/journal'
 import type { Desktop } from '@/platform/desktop'
 import { keysOfHotkey, type HotkeyStatuses } from '@/settings/hotkey'
@@ -470,9 +473,6 @@ function TaskLine({
   const done = task.completedAt !== null
   const scheduled = formatScheduledFor(task)
   const row = useRef<HTMLLIElement>(null)
-  // The history is collapsed until it is asked for: a Task is one line, and a
-  // fortnight of kept occurrences under every one would bury the list.
-  const [showingHistory, setShowingHistory] = useState(false)
   const history = completedOccurrences(occurrences)
   // The record's own answer, not this view's: undoing is safe exactly while
   // the Open occurrence still points back at the completion being undone.
@@ -579,50 +579,66 @@ function TaskLine({
         </div>
       </div>
 
-      {/* Attached to the Task rather than mixed into the ordinary Completed
-          Tasks: what a Recurring Task kept belongs under the Task that is
-          still going. */}
-      {history.length > 0 && (
-        <div className="pl-8">
-          <button
-            type="button"
-            aria-expanded={showingHistory}
-            aria-label={`Completed occurrences of \u201C${task.description}\u201D`}
-            onClick={() => setShowingHistory((open) => !open)}
-            className="flex items-center gap-1 rounded-sm py-0.5 type-meta text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
-          >
-            <ChevronRightIcon
-              aria-hidden
-              className={`size-3 transition-transform ${showingHistory ? 'rotate-90' : ''}`}
-            />
-            {history.length === 1
-              ? '1 completed occurrence'
-              : `${history.length} completed occurrences`}
-          </button>
-
-          {showingHistory && (
-            <ol className="flex flex-col gap-0.5 pb-1 pl-4">
-              {history.map((occurrence) => (
-                <li
-                  key={occurrence.id}
-                  className="flex items-baseline gap-2 tabular-nums type-meta text-muted-foreground"
-                >
-                  <span>
-                    {occurrence.scheduledDate}
-                    {occurrence.scheduledTime === null
-                      ? ''
-                      : ` ${occurrence.scheduledTime}`}
-                  </span>
-                  <time dateTime={occurrence.completedAt!}>
-                    {`kept ${formatTaskCompletedAt(occurrence.completedAt!)}`}
-                  </time>
-                </li>
-              ))}
-            </ol>
-          )}
-        </div>
-      )}
+      <OccurrenceHistory task={task} history={history} />
     </li>
+  )
+}
+
+/**
+ * What a Recurring Task has already kept, attached to the Task rather than
+ * mixed into the ordinary Completed Tasks: a Recurring Task is still Open, and
+ * what it kept belongs under it.
+ *
+ * Collapsed until it is asked for — a Task is one line, and a fortnight of kept
+ * occurrences under every one would bury the list — and absent entirely for the
+ * Tasks with nothing kept, which is most of them.
+ */
+function OccurrenceHistory({
+  task,
+  history,
+}: {
+  task: Task
+  /** The kept occurrences, most recently completed first. */
+  history: TaskOccurrence[]
+}) {
+  const [showing, setShowing] = useState(false)
+
+  if (history.length === 0) return null
+
+  return (
+    <div className="pl-8">
+      <button
+        type="button"
+        aria-expanded={showing}
+        aria-label={`Completed occurrences of \u201C${task.description}\u201D`}
+        onClick={() => setShowing((open) => !open)}
+        className="flex items-center gap-1 rounded-sm py-0.5 type-meta text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
+      >
+        <ChevronRightIcon
+          aria-hidden
+          className={`size-3 transition-transform ${showing ? 'rotate-90' : ''}`}
+        />
+        {history.length === 1
+          ? '1 completed occurrence'
+          : `${history.length} completed occurrences`}
+      </button>
+
+      {showing && (
+        <ol className="flex flex-col gap-0.5 pb-1 pl-4">
+          {history.map((occurrence) => (
+            <li
+              key={occurrence.id}
+              className="flex items-baseline gap-2 tabular-nums type-meta text-muted-foreground"
+            >
+              <span>{formatSlot(slotOf(occurrence))}</span>
+              <time dateTime={occurrence.completedAt!}>
+                {`kept ${formatTaskCompletedAt(occurrence.completedAt!)}`}
+              </time>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   )
 }
 
@@ -664,10 +680,7 @@ function TaskEditor({
   const [recurrence, setRecurrence] = useState(task.recurrence)
   // A change to the schedule that would stop an existing recurrence, waiting
   // to be confirmed. Null until one is asked for.
-  const [stopping, setStopping] = useState<{
-    schedule: TaskSchedule | null
-    recurrence: Recurrence | null
-  } | null>(null)
+  const [stopping, setStopping] = useState<TaskTiming | null>(null)
   const said = description.trim()
   // Only the Task Description is editable while a Task is Completed: reopening
   // is what makes a schedule changeable again, and it is a decision the user
@@ -686,10 +699,7 @@ function TaskEditor({
    * Only the date. Choosing "Does not repeat" is the user saying it outright,
    * and a dialog confirming what they just picked would be in the way.
    */
-  function changeSchedule(next: {
-    schedule: TaskSchedule | null
-    recurrence: Recurrence | null
-  }) {
+  function changeSchedule(next: TaskTiming) {
     if (next.schedule === null && schedule !== null && recurrence !== null) {
       setStopping(next)
       return

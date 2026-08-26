@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, useState } from 'react'
 import { XIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,6 +9,7 @@ import {
   type Recurrence,
   type RecurrenceUnit,
   type TaskSchedule,
+  type TaskTiming,
 } from '@/journal/journal'
 
 /**
@@ -48,16 +49,18 @@ export default function ScheduleFields({
    * Both halves at once, because they move together: the caller never has to
    * work out that clearing a date also cleared a cadence.
    */
-  onChange: (next: {
-    schedule: TaskSchedule | null
-    recurrence: Recurrence | null
-  }) => void
+  onChange: (next: TaskTiming) => void
   disabled?: boolean
 }) {
   const dateId = useId()
   const timeId = useId()
   const cadenceId = useId()
   const intervalId = useId()
+  // What is in the interval field while it is being retyped, which is not
+  // always a cadence: clearing it to type "12" empties it first, and a field
+  // that snapped to 1 on the way past would fight the user for the second
+  // digit. Null while the field is showing the committed cadence.
+  const [draftInterval, setDraftInterval] = useState<string | null>(null)
 
   /** The cadence cannot outlive the date it would be counted from. */
   function setSchedule(next: TaskSchedule | null) {
@@ -176,19 +179,23 @@ export default function ScheduleFields({
               step={1}
               disabled={disabled}
               aria-label={`How many ${recurrence.unit}s between occurrences`}
-              value={recurrence.interval}
-              onChange={(event) =>
+              value={draftInterval ?? recurrence.interval}
+              onChange={(event) => {
+                setDraftInterval(event.target.value)
+
+                // A field mid-retype says nothing about the cadence, so the
+                // committed one is left exactly as it was until it does.
+                const asked = Math.round(Number(event.target.value))
+                if (event.target.value === '' || !Number.isFinite(asked)) return
+
                 onChange({
                   schedule,
-                  recurrence: {
-                    ...recurrence,
-                    // An empty or half-typed field is still one unit: a
-                    // cadence of nothing is not one, and neither is a
-                    // fractional one.
-                    interval: Math.max(1, Math.round(Number(event.target.value)) || 1),
-                  },
+                  recurrence: { ...recurrence, interval: Math.max(1, asked) },
                 })
-              }
+              }}
+              // Whatever was being typed is over: the field goes back to
+              // showing the cadence that was actually committed.
+              onBlur={() => setDraftInterval(null)}
               className="h-8 w-16 tabular-nums"
             />
             <span className="text-muted-foreground">
@@ -213,7 +220,9 @@ export default function ScheduleFields({
                 .map(Number)
                 .sort((one, other) => one - other)
               // A weekly cadence with nothing selected repeats on no day at
-              // all, so the last weekday cannot be turned off.
+              // all. The sole remaining weekday is disabled below so this
+              // reads as unavailable rather than as a press that did nothing,
+              // and this is the guard behind that.
               if (weekdays.length === 0) return
               onChange({ schedule, recurrence: { ...recurrence, weekdays } })
             }}
@@ -223,6 +232,15 @@ export default function ScheduleFields({
                 key={weekday}
                 value={String(weekday)}
                 aria-label={formatWeekday(weekday)}
+                // The last one standing cannot be turned off, so it says so
+                // rather than springing back under the cursor. Every other
+                // weekday stays pressable, which is how it is turned off: by
+                // choosing another one first.
+                disabled={
+                  disabled ||
+                  (recurrence.weekdays.length === 1 &&
+                    recurrence.weekdays[0] === weekday)
+                }
                 className="size-6 rounded-sm! p-0 type-micro data-pressed:bg-primary data-pressed:text-primary-foreground"
               >
                 {formatWeekday(weekday).slice(0, 1)}

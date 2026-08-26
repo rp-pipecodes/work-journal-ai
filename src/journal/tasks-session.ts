@@ -207,15 +207,11 @@ export function createTasksSession({
       const core = await journal
       const tasks =
         tab === 'open' ? await core.openTasks() : await core.completedTasks()
-      // Asked of every Task rather than only the repeating ones: Stop
-      // Recurrence keeps the history under a Task that no longer has a
-      // cadence, and that history is still the Task's to show. Most answers
-      // are empty, and a personal journal's list is small enough that one
-      // read each is simpler than a second kind of query.
-      const histories = await Promise.all(
-        tasks.map(async (task) =>
-          [task.id, await core.occurrencesOf(task.id)] as const,
-        ),
+      // One read for the whole list rather than one per row: the histories
+      // are wanted together, and a list that grew a query per Task would get
+      // slower for the reason it got longer.
+      const occurrences = await core.occurrencesOfEach(
+        tasks.map((task) => task.id),
       )
       if (latestRead !== ticket) return
       show({
@@ -223,7 +219,7 @@ export function createTasksSession({
           state: 'tasks',
           tasks,
           groups: tab === 'open' ? groupOpenTasks(tasks, clock.now()) : [],
-          occurrences: Object.fromEntries(histories),
+          occurrences,
         },
       })
     } catch (error) {
