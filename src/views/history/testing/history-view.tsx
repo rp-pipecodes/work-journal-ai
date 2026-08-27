@@ -7,10 +7,11 @@ import type { HotkeyStatuses } from '@/settings/hotkey'
 import HistoryView from '../HistoryView'
 
 /**
- * History over a real journal, for the two files that drive it: the Filter's
- * header and the Note rows under it. Shared because both read the same screen
- * — a second copy of the harness is a second answer to what "open History"
- * means, and only one of them would get fixed.
+ * History over a real journal, for the files that drive it: the Filter's
+ * header, the Note rows under it, and the Main Window it is a section of.
+ * Shared because they all read the same screen — a second copy of the harness
+ * is a second answer to what "open History" means, and only one of them would
+ * get fixed.
  */
 
 /** Every database a test opened, so the file can close them all afterwards. */
@@ -36,6 +37,26 @@ export async function showHistory(
   captured: Array<{ at: string; body: string }>,
   { hotkey, refuseHotkeyStatus = false }: HotkeyAnswer = {},
 ) {
+  const { driver, core, notes } = await journalHolding(captured)
+
+  const desktop = fakeDesktop({ driver, hotkey })
+  if (refuseHotkeyStatus) {
+    desktop.hotkeyStatus = () => Promise.reject(new Error('no answer'))
+  }
+  render(<HistoryView desktop={desktop} journal={Promise.resolve(core)} />)
+  await firstListShown(captured.length)
+
+  return { desktop, core, notes }
+}
+
+/**
+ * A journal holding exactly these Captures, on a database the file will close
+ * afterwards. Apart from `showHistory` because the Main Window opens the same
+ * History over the same journal and only renders it differently.
+ */
+export async function journalHolding(
+  captured: Array<{ at: string; body: string }>,
+) {
   const { driver, close } = await openTestDatabase()
   openDatabases.push(close)
 
@@ -50,18 +71,16 @@ export async function showHistory(
     notes.push(note)
   }
 
-  const desktop = fakeDesktop({ driver, hotkey })
-  if (refuseHotkeyStatus) {
-    desktop.hotkeyStatus = () => Promise.reject(new Error('no answer'))
-  }
-  render(<HistoryView desktop={desktop} journal={Promise.resolve(core)} />)
+  return { driver, core, clock, notes }
+}
 
-  // The first read has to have landed: until it does there is no Filter, and
-  // the header is not on screen at all. A journal holding nothing never grows
-  // one, so there is nothing to wait for.
-  if (captured.length > 0) await screen.findByRole('banner')
-
-  return { desktop, core, notes }
+/**
+ * Waits for History's first read to land: until it does there is no Filter,
+ * and the header is not on screen at all. A journal holding nothing never
+ * grows one, so there is nothing to wait for.
+ */
+export async function firstListShown(captured: number): Promise<void> {
+  if (captured > 0) await screen.findByRole('banner')
 }
 
 /** One Note as the journal holds it now, whatever day it is filed under. */

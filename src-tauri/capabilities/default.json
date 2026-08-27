@@ -5,7 +5,7 @@
   "windows": [
     "capture",
     "task-creation",
-    "history",
+    "main",
     "tasks",
     "settings"
   ],

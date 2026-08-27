@@ -19,12 +19,16 @@ export type Unlisten = () => void
 /**
  * The window labels. One Vite build serves every window and the label is the
  * only thing that says which — must match `CAPTURE_WINDOW`,
- * `TASK_CREATION_WINDOW`, `HISTORY_WINDOW`, `TASKS_WINDOW` and
- * `SETTINGS_WINDOW` in `src-tauri/src/lib.rs`.
+ * `TASK_CREATION_WINDOW`, `MAIN_WINDOW`, `TASKS_WINDOW` and `SETTINGS_WINDOW`
+ * in `src-tauri/src/lib.rs`.
+ *
+ * `MAIN_WINDOW` is the window the journal is read in, a section at a time —
+ * see docs/adr/0022-one-main-window-for-reading-and-settings.md. Tasks View and
+ * Settings still have labels of their own until they move into it.
  */
 export const CAPTURE_WINDOW = 'capture'
 export const TASK_CREATION_WINDOW = 'task-creation'
-export const HISTORY_WINDOW = 'history'
+export const MAIN_WINDOW = 'main'
 export const TASKS_WINDOW = 'tasks'
 export const SETTINGS_WINDOW = 'settings'
 

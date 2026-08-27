@@ -15,8 +15,8 @@ import { createTauriDesktop } from './platform/tauri-desktop.ts'
 import { createAppSettings } from './settings/app-settings.ts'
 
 // The composition root: the one place that says what everything is made of.
-// Every window loads this same bundle, so all three are built here and the
-// label decides which one renders.
+// Every window loads this same bundle, so the collaborators are built here
+// once and the label decides which window renders.
 const desktop = createTauriDesktop()
 const settings = createAppSettings(desktop)
 
@@ -31,8 +31,9 @@ journal.catch(() => {})
 // Today's Captured Note count, beside the menu bar glyph. Kept by the capture
 // window because that one is built at startup and only ever hidden, so it is
 // the single window that lives exactly as long as the tray it writes to — the
-// other two come and go, and neither is open on the day this is meant to be
-// noticed. It is never stopped: it ends when the app does.
+// windows built on demand come and go, and none of them is open on the day
+// this is meant to be noticed. It is never stopped: it ends when the app
+// does.
 if (desktop.windowLabel() === CAPTURE_WINDOW) {
   void createTrayCount({ journal, desktop, clock: systemClock })
     .start()

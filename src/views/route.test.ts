@@ -6,8 +6,8 @@ describe('viewForLabel', () => {
     expect(viewForLabel('capture')).toBe('capture')
   })
 
-  it('routes the history window to the history view', () => {
-    expect(viewForLabel('history')).toBe('history')
+  it('routes the Main Window to the view that holds the sections', () => {
+    expect(viewForLabel('main')).toBe('main')
   })
 
   it('routes the Task Creation window to its own view', () => {
@@ -23,7 +23,7 @@ describe('viewForLabel', () => {
   })
 
   it('has no view for an unrecognised window label', () => {
-    expect(viewForLabel('main')).toBeNull()
+    expect(viewForLabel('history')).toBeNull()
     expect(viewForLabel('')).toBeNull()
   })
 })

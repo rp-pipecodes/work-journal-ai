@@ -6,23 +6,18 @@
 
 import {
   CAPTURE_WINDOW,
-  HISTORY_WINDOW,
+  MAIN_WINDOW,
   SETTINGS_WINDOW,
   TASK_CREATION_WINDOW,
   TASKS_WINDOW,
 } from '@/platform/desktop'
 
-export type View =
-  | 'capture'
-  | 'task-creation'
-  | 'history'
-  | 'tasks'
-  | 'settings'
+export type View = 'capture' | 'task-creation' | 'main' | 'tasks' | 'settings'
 
 const VIEWS: Record<string, View> = {
   [CAPTURE_WINDOW]: 'capture',
   [TASK_CREATION_WINDOW]: 'task-creation',
-  [HISTORY_WINDOW]: 'history',
+  [MAIN_WINDOW]: 'main',
   [TASKS_WINDOW]: 'tasks',
   [SETTINGS_WINDOW]: 'settings',
 }

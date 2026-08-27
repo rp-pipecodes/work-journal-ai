@@ -85,7 +85,7 @@ export default function CaptureView({
         return
       }
 
-      // Neither a history window on screen nor the tray count has any other
+      // Neither a Main Window on screen nor the tray count has any other
       // way to learn of the Note, and the announcements have to leave before
       // the window goes. Two of them because they say different things: one
       // names the day a reader's Filter may want, the other only that a count

@@ -112,7 +112,7 @@ export function createImportSession({
         if (note !== null) imported += 1
       }
 
-      // Only that the Notes are no longer what they were: a history window on
+      // Only that the Notes are no longer what they were: a Main Window on
       // screen re-reads, and the tray count re-counts and finds itself
       // unchanged. Never `announceCapturedNote` — that one names a day for the
       // reader's Filter, and a sweep has nothing to say about the user.

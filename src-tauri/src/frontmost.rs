@@ -20,7 +20,7 @@ impl PreviousApplication {
     /// Takes note of what is in front, just before this app comes forward.
     ///
     /// Work Journal itself is never what gets remembered. Raising a Capture
-    /// from a focused History window would otherwise record this app and hand
+    /// from a focused Main Window would otherwise record this app and hand
     /// focus straight back to the window the Capture is floating over; what the
     /// user left to open History is still the right place to return to.
     pub fn note(&self, frontmost: Option<ProcessId>, own: ProcessId) {

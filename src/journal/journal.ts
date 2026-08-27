@@ -357,7 +357,7 @@ export interface JournalExport {
 export type KeystrokeDecision = 'commit' | 'discard' | 'ignore'
 
 /**
- * What an open history window does about a Note captured while it is open.
+ * What History does about a Note captured while it is on screen.
  * Either the Note belongs in what is on screen, or the day it was filed under
  * is worth mentioning — never a Filter that moved on its own.
  */

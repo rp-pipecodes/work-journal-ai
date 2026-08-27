@@ -44,7 +44,7 @@ Everything else is checked against the release build.
 - [ ] Clicking the tray icon opens a menu holding **New Note**, **New Task**, **View Notes**, **View Tasks**, **Copy Yesterday's Digest**, **Settings** and **Quit**, and nothing else.
 - [ ] **New Note** opens a capture window, with the Note Hotkey spelled out beside the item.
 - [ ] **New Task** opens the Task Creation window, with the Task Hotkey spelled out beside the item.
-- [ ] **View Notes** opens the history window.
+- [ ] **View Notes** opens the Main Window, showing History.
 - [ ] **View Tasks** opens the tasks window, and both can be open at once.
 - [ ] **Settings** opens the settings window.
 - [ ] **Quit** ends the process — the tray icon disappears and nothing is left running.
@@ -54,11 +54,21 @@ Everything else is checked against the release build.
 
 The palette is the point of this section, and the moment to watch is the one the window arrives in — not the window afterwards. A window is painted the Theme it is going to keep before its webview has anything to show, so it should never be seen in the wrong one.
 
-- [ ] With the Theme set to **Dark**, **View Notes** puts a window on screen that is dark from the moment it appears — no white rectangle, no flash, no snap from light to dark.
+- [ ] With the Theme set to **Dark**, **View Notes** puts the Main Window on screen dark from the moment it appears — sidebar included — with no white rectangle, no flash, no snap from light to dark.
 - [ ] The same for **Settings**, and for both windows with the Theme set to **Light**.
 - [ ] With the Theme on **Match the system** and macOS in dark mode, both windows arrive dark; with macOS in light mode, light.
 - [ ] Toggling the Theme with `Cmd+Shift+D`, then closing the window and opening it again, shows it in the palette that was toggled *to* — the Rust side reads the same preference the window does.
 - [ ] Changing the macOS appearance while the Theme is **Match the system** and a window is open repaints that window, and the next window opens in the new palette.
+
+## The Main Window
+
+- [ ] **View Notes** opens one window with a sidebar down the left, History beside it, and the traffic lights over the sidebar's top row rather than over History.
+- [ ] The sidebar names **History** and marks it as the section on screen.
+- [ ] Tabbing into the window reaches **History** in the sidebar, which shows a focus ring; `Space` and `Enter` on it leave History showing, and tabbing on reaches the Filter's own controls.
+- [ ] **View Notes** again, with the window already open, raises that window rather than opening a second one.
+- [ ] Closing the window and opening it again shows History on the most recent day holding Notes, with **Project = Any** — whatever the Filter was left on.
+- [ ] The window opens wide enough for the sidebar and everything History's header holds; dragging it narrow stops at a width that still shows both.
+- [ ] `Cmd+Shift+D` toggles the Theme from the Main Window, and the sidebar repaints with it.
 
 ## Capture from the Tray Menu
 
@@ -103,7 +113,7 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 - [ ] **Show** on that line moves the range to that day; **Dismiss** leaves the range alone and the line goes away.
 - [ ] Capturing a Note for a day inside the range makes it appear in the list without the range changing.
 - [ ] With no Notes at all, capturing the first one replaces the empty state with that Note.
-- [ ] `Escape` still closes the history window while a Nudge is on screen.
+- [ ] `Escape` still closes the Main Window while a Nudge is on screen.
 
 ## Correcting the record
 
@@ -182,7 +192,7 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 - [ ] **New Task** inside Tasks View opens the same resident Task Creation window the Hotkey does, with whatever was already typed in it.
 - [ ] **Delete** opens a confirmation naming the Task; **Cancel** leaves it there, confirming removes it for good.
 - [ ] Tasks created before quitting are still there after relaunching the app, and after a restart of the machine.
-- [ ] Tasks View and the history window can be open at the same time, and neither changes the other.
+- [ ] Tasks View and the Main Window can be open at the same time, and neither changes the other.
 
 ## Scheduling a Task
 

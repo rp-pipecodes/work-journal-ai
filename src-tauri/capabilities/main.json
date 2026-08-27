@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The Main Window closes itself on dismiss and is dragged by its own title bar; the two resident windows must never be able to do either",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:window:allow-close",
+    "core:window:allow-start-dragging"
+  ]
+}
