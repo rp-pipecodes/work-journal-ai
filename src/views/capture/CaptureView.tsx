@@ -87,7 +87,7 @@ export default function CaptureView({
 
       // Neither a history window on screen nor the tray count has any other
       // way to learn of the Note, and the announcements have to leave before
-      // the window goes — dismissing hides the whole app. Two of them because
+      // the window goes. Two of them because
       // they say different things: one names the day a reader's Filter may
       // want, the other only that a count taken before it is now stale. Made
       // independently, so one that fails does not take the other down with it,

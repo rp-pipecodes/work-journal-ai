@@ -1,11 +1,13 @@
 mod alerts;
 mod calendar;
 mod export;
+mod frontmost;
 mod hotkey;
 
 use alerts::{Permission, TaskAlert};
 use calendar::{Access, CalendarEvent, CalendarInfo};
 use export::ExportedFile;
+use frontmost::PreviousApplication;
 use hotkey::{HotkeyAction, Hotkeys};
 use std::sync::Mutex;
 use tauri::{
@@ -198,6 +200,10 @@ pub fn run() {
             // window exists — so somewhere to keep it has to.
             app.manage(OpenedTaskAlert::default());
 
+            // Whoever is in front when a Capture begins, kept so that putting
+            // the Capture away can hand focus back to them.
+            app.manage(PreviousApplication::default());
+
             // Told to whichever window is sweeping the calendar. Set up after
             // the capture window, because that is the window that hears it.
             #[cfg(target_os = "macos")]
@@ -350,10 +356,9 @@ fn raise_resident_window(
         other.hide()?;
     }
 
-    // Dismissing either of these hides the whole app to hand focus back, so the
-    // app itself has to be brought out of hiding before its window can be seen.
-    #[cfg(target_os = "macos")]
-    app.show()?;
+    // Whoever the panel is about to float over, remembered before it does:
+    // dismissing it hands focus straight back to them.
+    remember_frontmost_application(app);
 
     window.show()?;
     window.set_focus()?;
@@ -395,12 +400,6 @@ fn show_on_demand_window(
     size: (f64, f64),
     min_size: (f64, f64),
 ) -> tauri::Result<()> {
-    // Dismissing a Capture hides the whole app, so the app itself has to be
-    // brought out of hiding first — on either path, since `show()` on a window
-    // of a hidden application puts nothing on screen.
-    #[cfg(target_os = "macos")]
-    app.show()?;
-
     // Reaching the Tray Menu again with the window already open raises it
     // rather than building a second one.
     if let Some(window) = app.get_webview_window(label) {
@@ -1022,28 +1021,58 @@ fn hide_resident_window(app: &tauri::AppHandle, label: &str) -> tauri::Result<()
     }
 
     // Hiding the window leaves this app active, so the user would be left
-    // typing into nothing. Hiding the app hands focus back to whatever was in
-    // front when the Capture or Task Creation began.
-    #[cfg(target_os = "macos")]
-    app.hide()?;
+    // typing into nothing. Focus goes back to whatever was in front when the
+    // Capture or Task Creation began — the panel interrupted them, and putting
+    // it away is what gives that back. Every other Work Journal window is left
+    // exactly as it was, on screen and unfocused.
+    hand_focus_back(app);
 
     Ok(())
+}
+
+/// Takes note of the application a resident panel is about to cover, so that
+/// dismissing the panel can hand focus back to it.
+fn remember_frontmost_application(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    app.state::<PreviousApplication>().note(
+        frontmost::frontmost_application(),
+        frontmost::own_application(),
+    );
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+}
+
+/// Hands focus back to the application a resident panel covered. Nothing to
+/// hand it to — nothing was ever in front — leaves focus where it is.
+fn hand_focus_back(app: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    if let Some(previous) = app.state::<PreviousApplication>().remembered_id() {
+        frontmost::activate(previous);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
 }
 
 /// Become active without unhiding windows. Needed before the Tray Menu opens:
 /// an Accessory app that has never been active loses the menu to the activation
 /// that the click itself triggers.
 #[cfg(target_os = "macos")]
-fn activate_for_tray_menu() {
+fn activate_for_tray_menu(app: &tauri::AppHandle) {
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
     use objc2::{class, msg_send};
 
+    // The click is about to make this app frontmost, so whoever is in front now
+    // is the one a Capture started from the menu will be covering.
+    remember_frontmost_application(app);
+
     unsafe {
-        let app: Retained<AnyObject> = msg_send![class!(NSApplication), sharedApplication];
-        let active: bool = msg_send![&*app, isActive];
+        let shared: Retained<AnyObject> = msg_send![class!(NSApplication), sharedApplication];
+        let active: bool = msg_send![&*shared, isActive];
         if !active {
-            let _: bool = msg_send![&*app, activateIgnoringOtherApps: true];
+            let _: bool = msg_send![&*shared, activateIgnoringOtherApps: true];
         }
     }
 }
@@ -1140,7 +1169,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 return;
             };
             #[cfg(target_os = "macos")]
-            activate_for_tray_menu();
+            activate_for_tray_menu(tray.app_handle());
             let _ = tray.with_inner_tray_icon(|inner| inner.show_menu());
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
