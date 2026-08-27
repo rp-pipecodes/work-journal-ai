@@ -3,6 +3,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import ThemeProvider from '@/components/ThemeProvider'
 import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
 import type { MainSection } from '@/platform/desktop'
@@ -28,6 +29,9 @@ beforeAll(installMeasurementStubs)
 
 afterEach(() => {
   cleanup()
+  // Sonner keeps its messages outside React, so unmounting a window leaves
+  // them standing for the next one to draw.
+  toast.dismiss()
   closeTestDatabases()
   vi.restoreAllMocks()
 })
@@ -322,6 +326,122 @@ describe('a section that is not showing', () => {
     )
   })
 
+  it('takes a toast with it when an Entry Point switches', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      tasks: ['renew the cert'],
+    })
+
+    await user.click(screen.getByRole('button', { name: /copy digest/i }))
+    await vi.waitFor(() => {
+      if (document.querySelector('[data-sonner-toast]') === null) {
+        throw new Error('no toast')
+      }
+    })
+
+    // Settings, rather than Tasks: Settings mounts a Toaster of its own, and
+    // Sonner draws every message in all of them — the one History raised is
+    // drawn over Settings unless History takes it away as it goes.
+    desktop.requestSection('settings')
+    await showsSettings()
+
+    await expect.poll(toastsOnScreen).toEqual([])
+  })
+
+  it('takes Settings\u2019 own toast with it when an Entry Point switches', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      tasks: ['renew the cert'],
+      section: 'settings',
+    })
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Export all to Markdown' }),
+    )
+    await expect.poll(() => desktop.exported.length).toBe(1)
+    await vi.waitFor(() => {
+      if (toastsOnScreen().length === 0) throw new Error('the export has not been confirmed yet')
+    })
+    expect(toastsOnScreen().join(' ')).toContain('Exported')
+
+    // History, rather than Tasks: History mounts a Toaster of its own, and
+    // Sonner draws every message in all of them \u2014 the one Settings raised is
+    // drawn over History unless Settings takes it away as it goes.
+    desktop.requestSection('history')
+    await showsHistory()
+
+    // Every section owns what it said, not only History: the line under the
+    // button keeps the answer for the reader who comes back.
+    await expect.poll(toastsOnScreen).toEqual([])
+  })
+
+  it('does not raise a toast after an Entry Point has taken it off screen', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      tasks: ['renew the cert'],
+    })
+    let releaseCopy!: () => void
+    const held = new Promise<void>((resolve) => {
+      releaseCopy = resolve
+    })
+    const write = desktop.copyToClipboard.bind(desktop)
+    desktop.copyToClipboard = async (text) => {
+      await held
+      await write(text)
+    }
+
+    await user.click(screen.getByRole('button', { name: /copy digest/i }))
+    desktop.requestSection('settings')
+    await showsSettings()
+    releaseCopy()
+    await expect.poll(() => desktop.clipboard).toContain('Monday')
+    await vi.waitFor(() => {
+      if (!document.body.textContent?.includes('Copied 1 Note')) {
+        throw new Error('copy not confirmed')
+      }
+    })
+
+    expect(toastsOnScreen()).toEqual([])
+  })
+
+  it('does not raise Settings\u2019 export confirmation after leaving', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      tasks: ['renew the cert'],
+      section: 'settings',
+    })
+    let releaseExport!: () => void
+    const held = new Promise<void>((resolve) => {
+      releaseExport = resolve
+    })
+    const write = desktop.exportJournal.bind(desktop)
+    desktop.exportJournal = async (markdown, fileName) => {
+      await held
+      return write(markdown, fileName)
+    }
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Export all to Markdown' }),
+    )
+    desktop.requestSection('history')
+    await showsHistory()
+    releaseExport()
+    await expect.poll(() => desktop.exported.length).toBe(1)
+    await vi.waitFor(() => {
+      if (!document.body.textContent?.includes('Exported')) {
+        throw new Error('the export has not been confirmed yet')
+      }
+    })
+
+    // The export finished for a section nobody can see: the line under the
+    // button keeps the answer, and nothing is said over History.
+    expect(toastsOnScreen()).toEqual([])
+  })
+
   it('takes History\u2019s own confirmation with it', async () => {
     const user = userEvent.setup()
     const { desktop } = await showMainWindow({
@@ -608,4 +728,24 @@ async function singlesOut(task: Task): Promise<void> {
         ?.getAttribute('aria-current'),
     )
     .toBe('true')
+}
+
+/**
+ * What the toasts on screen say. A toast is rendered where its Toaster is
+ * mounted, so one raised inside a hidden section is in the document without
+ * being on screen — and one raised while the section that mounts the showing
+ * Toaster is not the section that raised it is on screen all the same.
+ */
+function toastsOnScreen(): string[] {
+  return [...document.querySelectorAll('[data-sonner-toast]')]
+    .filter((toast) => onScreen(toast))
+    .map((toast) => toast.textContent ?? '')
+}
+
+/** Whether an element is drawn: nothing between it and the document is hidden. */
+function onScreen(node: Element): boolean {
+  for (let at: Element | null = node; at !== null; at = at.parentElement) {
+    if (at instanceof HTMLElement && at.hidden) return false
+  }
+  return true
 }
