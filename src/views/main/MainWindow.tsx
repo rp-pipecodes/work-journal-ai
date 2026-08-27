@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Clock, Journal } from '@/journal/journal'
 import type { Desktop, MainSection } from '@/platform/desktop'
+import OnScreenContext from '@/components/on-screen-context'
 import type { AppSettings } from '@/settings/app-settings'
 import HistoryView from '@/views/history/HistoryView'
 import SettingsView from '@/views/settings/SettingsView'
@@ -24,9 +25,11 @@ import { SECTIONS } from './sections'
  * other section — and a Nudge raised while the other one is showing waits
  * quietly on History rather than being announced from the sidebar.
  *
- * A section knows nothing about the sidebar. `HistoryView` and `TasksView` are
- * rendered exactly as they were when each had a window to itself, which is
- * also how they are still tested.
+ * A section knows nothing about the sidebar. Every section is rendered exactly
+ * as it was when each had a window to itself, which is also how they are still
+ * tested. The one thing they are told is whether they are on screen — see
+ * `on-screen-context` — because hiding a section hides only what it holds, and
+ * a dialog it portalled out of the document stays on screen without it.
  */
 export default function MainWindow({
   desktop,
@@ -100,44 +103,51 @@ export default function MainWindow({
         current={section}
         onChoose={setSection}
       />
-      {/*
-        `min-w-0` so the section is what gives way when the window is narrowed:
-        the sidebar's width is fixed, and a section whose content refused to
-        shrink would push its own right-hand edge off the window.
-
-        Hidden rather than unmounted: the section the user comes back to is the
-        one they left, down to the Filter and the scroll position. `hidden`
-        rather than a class, so the section that is not showing is out of the
-        accessibility tree as well as off the screen — nothing in it is
-        reachable by Tab, by a screen reader, or by a label the section showing
-        uses too.
-      */}
-      <div
-        hidden={section !== 'history'}
-        ref={section === 'history' ? showing : null}
-        className="min-w-0 flex-1"
-      >
+      <Section on={section === 'history'} onScreen={showing}>
         <HistoryView desktop={desktop} journal={journal} />
-      </div>
-      <div
-        hidden={section !== 'tasks'}
-        ref={section === 'tasks' ? showing : null}
-        className="min-w-0 flex-1"
-      >
+      </Section>
+      <Section on={section === 'tasks'} onScreen={showing}>
         <TasksView desktop={desktop} journal={journal} clock={clock} />
-      </div>
-      <div
-        hidden={section !== 'settings'}
-        ref={section === 'settings' ? showing : null}
-        className="min-w-0 flex-1"
-      >
-        <SettingsView
-          desktop={desktop}
-          settings={settings}
-          journal={journal}
-          active={section === 'settings'}
-        />
-      </div>
+      </Section>
+      <Section on={section === 'settings'} onScreen={showing}>
+        <SettingsView desktop={desktop} settings={settings} journal={journal} />
+      </Section>
     </div>
+  )
+}
+
+/**
+ * One section, showing or hidden — and told which, because hiding it reaches
+ * only what it holds: a dialog or a popup it portalled out of the document
+ * would otherwise stand over the section that is showing. See
+ * docs/adr/0024-a-view-is-told-whether-it-is-on-screen.md.
+ *
+ * Hidden rather than unmounted: the section the user comes back to is the one
+ * they left, down to the Filter and the scroll position. `hidden` rather than
+ * a class, so the section that is not showing is out of the accessibility tree
+ * as well as off the screen — nothing in it is reachable by Tab, by a screen
+ * reader, or by a label the section showing uses too.
+ *
+ * `min-w-0` so the section is what gives way when the window is narrowed: the
+ * sidebar's width is fixed, and a section whose content refused to shrink
+ * would push its own right-hand edge off the window.
+ */
+function Section({
+  on,
+  onScreen,
+  children,
+}: {
+  /** Whether this is the section showing. */
+  on: boolean
+  /** Where the window keeps the section showing, to hand it the focus. */
+  onScreen: React.RefObject<HTMLDivElement | null>
+  children: React.ReactNode
+}) {
+  return (
+    <OnScreenContext.Provider value={on}>
+      <div hidden={!on} ref={on ? onScreen : null} className="min-w-0 flex-1">
+        {children}
+      </div>
+    </OnScreenContext.Provider>
   )
 }

@@ -14,6 +14,7 @@ import { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox'
 import { toast } from 'sonner'
 import ProjectChip from '@/components/ProjectChip'
 import WindowTitleBar from '@/components/WindowTitleBar'
+import { useOffScreen } from '@/components/on-screen-context'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Input } from '@/components/ui/input'
@@ -135,6 +136,15 @@ export default function HistoryView({
   // and both times the reader asked to be told.
   const copying = useRef(false)
   const page = useRef<HTMLDivElement>(null)
+
+  // A confirmation is portalled to the end of the document, so hiding this
+  // view leaves it standing over whatever is showing instead — see
+  // docs/adr/0024-a-view-is-told-whether-it-is-on-screen.md. It goes when this
+  // view does, and going is dismissing: a question the reader was taken away
+  // from is not one they still have open, and the Note is untouched. A reword
+  // in progress is not this — it is drawn in the list itself, and what has
+  // been typed into it survives the trip.
+  useOffScreen(() => setDeleting(null))
 
   useEffect(() => {
     // A Dock-less app does not reliably hand focus to a new window, and Escape
@@ -690,6 +700,11 @@ function DayRangeField({
     if (!next) setStarted(null)
   }
 
+  // The popup is portalled out of the header, so it has to be closed rather
+  // than hidden when this view leaves the screen. The Filter it would have
+  // moved is untouched; only a half-picked range goes with it.
+  useOffScreen(() => show(false))
+
   function pickDay(day: Date) {
     if (started === null) {
       setStarted(day)
@@ -782,6 +797,11 @@ function ProjectConstraintField({
 }) {
   const labelId = useId()
   const valueId = useId()
+  // Open is held here only so the list can be closed when this view leaves the
+  // screen: it is portalled to the end of the document, where hiding the
+  // header does not reach it.
+  const [open, setOpen] = useState(false)
+  useOffScreen(() => setOpen(false))
   const chosen = projectChoice(constraint)
   const named =
     constraint.kind === 'named' && !projects.includes(constraint.name)
@@ -796,6 +816,8 @@ function ProjectConstraintField({
   return (
     <Select
       items={options}
+      open={open}
+      onOpenChange={setOpen}
       value={chosen}
       onValueChange={(value) => onNarrow(projectConstraintFor(String(value)))}
     >
@@ -902,6 +924,10 @@ function DayField({
 }) {
   const [open, setOpen] = useState(false)
 
+  // Portalled away from the row, so it leaves the screen with this view rather
+  // than being hidden with it. Nothing is refiled by closing it.
+  useOffScreen(() => setOpen(false))
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Tooltip>
@@ -966,6 +992,12 @@ function ProjectField({
   const [open, setOpen] = useState(false)
   const [typed, setTyped] = useState('')
   const [predictions, setPredictions] = useState<string[]>([])
+  // Portalled away from the row, like the day picker beside it. Nothing is
+  // filed on the way out, here or anywhere else this list closes.
+  useOffScreen(() => {
+    setOpen(false)
+    setTyped('')
+  })
   // Which line the keyboard is on, if any. Only Return on none of them is a
   // decision this field makes for itself.
   const highlighted = useRef<ProjectOption | null>(null)

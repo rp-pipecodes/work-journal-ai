@@ -123,19 +123,12 @@ describe('Start at login', () => {
   it('asks the first-run question once, and counts a closed window as no', async () => {
     // Never asked before: the store holds no answer at all.
     const desktop = fakeDesktop({ stored: {} })
-    // The one place the window's dismissal reaches this view.
-    let close: (() => void) | null = null
-    desktop.onCloseRequested = async (closing) => {
-      close = closing
-      return () => {}
-    }
 
     showSettings(desktop)
 
     await screen.findByText('Start Work Journal at login?')
-    await expect.poll(() => close).not.toBe(null)
-
-    close!()
+    // The window is dismissed with the question still on screen.
+    desktop.requestClose()
 
     await expect.poll(() => desktop.stored.startAtLogin).toBe(false)
   })

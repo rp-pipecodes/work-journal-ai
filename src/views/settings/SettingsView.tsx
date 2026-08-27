@@ -19,6 +19,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useTheme } from '@/components/theme-context'
+import { useOnScreen } from '@/components/on-screen-context'
 import WindowTitleBar from '@/components/WindowTitleBar'
 import {
   describeExport,
@@ -76,13 +77,10 @@ export default function SettingsView({
   desktop,
   settings,
   journal,
-  active = true,
 }: {
   desktop: Desktop
   settings: AppSettings
   journal: Promise<Journal>
-  /** Whether Settings is the visible Main Window section. */
-  active?: boolean
 }) {
   const [startAtLogin, setStartAtLogin] = useState(DEFAULT_SETTINGS.startAtLogin)
   const [hotkeys, setHotkeys] = useState<HotkeyStatuses | null>(null)
@@ -118,6 +116,10 @@ export default function SettingsView({
   // Read from the provider rather than loaded here: the Hotkey and every other
   // window can change the Theme too, and a second copy would drift from it.
   const { theme, resolved, setTheme } = useTheme()
+  // Whether this view is the one on screen. The question the first-run dialog
+  // has to ask, because it is portalled out of whatever is hiding this view —
+  // see docs/adr/0024-a-view-is-told-whether-it-is-on-screen.md.
+  const onScreen = useOnScreen()
   const page = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -205,11 +207,14 @@ export default function SettingsView({
   }, [desktop])
 
   useEffect(() => {
-    if (!asking || !active) return
+    if (!asking) return
 
     // Closing the window rather than choosing is an answer too, and the same
     // one: the app is not added to the login items. It has to be recorded, or
-    // the question would return on every launch until it heard a yes.
+    // the question would return on every launch until it heard a yes. Listened
+    // for whether or not this view is the one on screen: the question is
+    // unanswered wherever the user left the window, and closing it from
+    // another section is the same silence.
     const closeRequested = desktop.onCloseRequested(() =>
       settings.saveStartAtLogin(false).catch((error: unknown) => {
         console.error('could not record the answer', error)
@@ -219,7 +224,7 @@ export default function SettingsView({
     return () => {
       void closeRequested.then((stop) => stop())
     }
-  }, [active, asking, desktop, settings])
+  }, [asking, desktop, settings])
 
   // Import as the window shows it: the user's wish, less whatever macOS is
   // withholding. The stored wish outlives a lost permission — that is what
@@ -593,8 +598,11 @@ export default function SettingsView({
           </>
         )}
 
+        {/* Off the screen with this view: a dialog is portalled to the end of
+            the document, where being hidden here does not reach it. Still
+            unanswered though, so it is asked again on coming back. */}
         <FirstRunQuestion
-          open={active && asking}
+          open={onScreen && asking}
           onAnswer={answerStartAtLogin}
         />
         <Toaster />

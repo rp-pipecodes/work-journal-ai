@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ThemeProvider from '@/components/ThemeProvider'
 import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
@@ -231,6 +231,192 @@ describe('switching sections', () => {
 
     await user.click(within(sidebar()).getByRole('button', { name: 'History' }))
     await expect.poll(() => nudge()?.textContent).toContain('A new Note on')
+  })
+})
+
+describe('a section that is not showing', () => {
+  it('takes an open confirmation off the screen when an Entry Point switches', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      tasks: ['renew the cert'],
+      section: 'tasks',
+    })
+    await showsTasks()
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Delete \u201Crenew the cert\u201D' }),
+    )
+    expect(await screen.findByRole('alertdialog')).toBeTruthy()
+
+    // A clicked Task Alert, or the Tray Menu, while the confirmation is up.
+    desktop.requestSection('history')
+    await showsHistory()
+
+    // The confirmation belonged to a section nobody can see: it is portalled
+    // out of the wrapper that hides it, so it has to go rather than hide.
+    await expect.poll(() => screen.queryByRole('alertdialog')).toBeNull()
+    // And History answers: nothing modal is standing over it.
+    await user.click(days())
+    expect(await dayCell('2026-03-09')).toBeTruthy()
+  })
+
+  it('does not resurrect the confirmation on the way back', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      tasks: ['renew the cert'],
+      section: 'tasks',
+    })
+    await showsTasks()
+    await user.click(
+      await screen.findByRole('button', { name: 'Delete \u201Crenew the cert\u201D' }),
+    )
+    await screen.findByRole('alertdialog')
+
+    desktop.requestSection('history')
+    await showsHistory()
+    await user.click(within(sidebar()).getByRole('button', { name: 'Tasks' }))
+    await showsTasks()
+
+    // Switching away dismissed it. Coming back is not asking again.
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(screen.getByText('renew the cert')).toBeTruthy()
+  })
+
+  it('takes the Editor\u2019s own question with it, and leaves the Editor', async () => {
+    const { core, created, desktop } = await showMainWindow({
+      captured: [MONDAY],
+      tasks: ['water the plants'],
+      section: 'tasks',
+    })
+    await showsTasks()
+    await core.editTask(created[0].id, {
+      description: 'water the plants',
+      schedule: { date: '2026-03-16', time: null },
+      recurrence: { unit: 'day', interval: 1, weekdays: [] },
+    })
+    await desktop.announceTasksChanged()
+
+    // The cadence on screen, so the row clicked below is the re-read one.
+    await screen.findByText('every day')
+
+    fireEvent.click(screen.getByText('water the plants'))
+    await screen.findByRole('dialog', { name: 'Edit Task' })
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the schedule' }))
+    expect(await screen.findByRole('alertdialog')).toBeTruthy()
+
+    desktop.requestSection('history')
+    await showsHistory()
+    await expect.poll(() => screen.queryByRole('alertdialog')).toBeNull()
+
+    desktop.requestSection('tasks')
+    await showsTasks()
+
+    // The question is gone and nothing was answered on the user's behalf: the
+    // Task still repeats, and the Editor is where they left it.
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(screen.getByRole('dialog', { name: 'Edit Task' })).toBeTruthy()
+    expect((screen.getByLabelText('Repeats') as HTMLSelectElement).value).toBe(
+      'day',
+    )
+  })
+
+  it('takes History\u2019s own confirmation with it', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      tasks: ['renew the cert'],
+    })
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Delete \u201CMonday\u201D' }),
+    )
+    expect(await screen.findByRole('alertdialog')).toBeTruthy()
+
+    desktop.requestSection('tasks')
+    await showsTasks()
+
+    // Every section owns what it put on screen, not only Tasks View.
+    await expect.poll(() => screen.queryByRole('alertdialog')).toBeNull()
+    desktop.requestSection('history')
+    await showsHistory()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    // Dismissed, never confirmed: the Note is still there.
+    expect(screen.getByText('Monday')).toBeTruthy()
+  })
+
+  it('takes an open picker with it, and leaves the Filter alone', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      tasks: ['renew the cert'],
+    })
+    const before = days().textContent
+
+    await user.click(days())
+    expect(await dayCell('2026-03-09')).toBeTruthy()
+
+    // The Tray Menu, rather than a click on the sidebar: an outside click
+    // would have closed the popup on its own, and the Entry Point is the path
+    // that reaches the window with nothing dismissed.
+    desktop.requestSection('tasks')
+    await showsTasks()
+
+    // The calendar is portalled to the end of the document, so hiding History
+    // does not reach it.
+    await expect.poll(() => document.querySelector('[data-day]')).toBeNull()
+
+    desktop.requestSection('history')
+    await showsHistory()
+    // Closing a picker picks nothing: the days are the days the reader left.
+    expect(days().textContent).toBe(before)
+  })
+})
+
+describe('the first-run question', () => {
+  it('is off the screen while another section is showing, and back on returning', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      section: 'settings',
+      stored: {},
+    })
+    expect(await screen.findByRole('alertdialog')).toBeTruthy()
+
+    // The Tray Menu's "View Notes", which reaches the window whatever is on
+    // screen — the question is modal, and the sidebar is behind it.
+    desktop.requestSection('history')
+    await showsHistory()
+    await expect.poll(() => screen.queryByRole('alertdialog')).toBeNull()
+
+    // And Tasks View, which is no more the place to answer it than History is.
+    await user.click(within(sidebar()).getByRole('button', { name: 'Tasks' }))
+    await showsTasks()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+
+    await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
+    await showsSettings()
+
+    // Unanswered is unanswered: the question is still the one thing the app is
+    // waiting on, and Settings is where it is asked.
+    expect(await screen.findByRole('alertdialog')).toBeTruthy()
+  })
+
+  it('records Not now when the window closes after a visit to another section', async () => {
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      section: 'settings',
+      stored: {},
+    })
+    await screen.findByRole('alertdialog')
+
+    desktop.requestSection('history')
+    await showsHistory()
+    desktop.requestClose()
+
+    // Closing without answering is an answer, wherever the window was left.
+    await expect.poll(() => desktop.stored.startAtLogin).toBe(false)
   })
 })
 

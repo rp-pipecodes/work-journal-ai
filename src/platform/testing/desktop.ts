@@ -56,6 +56,8 @@ export interface FakeDesktop extends Desktop {
   blur(): void
   /** The window gets focus back, as it does when the user returns to it. */
   focus(): void
+  /** The user dismisses the window, as the traffic light does. */
+  requestClose(): void
   /** What macOS allows of Task Alerts; writable, as a revocation is. */
   alertPermission: TaskAlertPermission
   /** Whether the app has ever asked for Task Alert permission. */
@@ -147,6 +149,7 @@ export function fakeDesktop({
   const journalChanged = subscribers<void>()
   const themeChanged = subscribers<Theme>()
   const windowFocused = subscribers<void>()
+  const closeRequested = subscribers<void>()
   const sectionRequested = subscribers<MainSection>()
   const taskAlertOpened = subscribers<string>()
   const taskAlertsReconciled = subscribers<boolean>()
@@ -189,10 +192,11 @@ export function fakeDesktop({
     windowVisible: true,
     blur: () => windowBlurred.announce(undefined),
     focus: () => windowFocused.announce(undefined),
+    requestClose: () => closeRequested.announce(undefined),
     onWindowBlurred: async (handle) => windowBlurred.add(handle),
     onWindowFocused: async (handle) => windowFocused.add(handle),
     isWindowVisible: async () => desktop.windowVisible,
-    onCloseRequested: async () => () => {},
+    onCloseRequested: async (closing) => closeRequested.add(closing),
 
     openJournalDatabase: async () => {
       if (driver === undefined) {

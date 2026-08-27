@@ -167,7 +167,7 @@ _Avoid_: Updated at, modified, revision
 ## Reading back
 
 **Main Window**:
-The one window the journal is read and configured in: History, Tasks View and Settings as sections of a sidebar, exactly one of them showing. An Entry Point that names a section decides which; anything that names none lands on History. A section holds whatever the user did to it while another is showing, but the window itself is gone when closed, so the next one opens fresh. While it is open the app has a Dock icon and its app menu; when it closes the app is the menu bar glyph again.
+The one window the journal is read and configured in: History, Tasks View and Settings as sections of a sidebar, exactly one of them showing. An Entry Point that names a section decides which; anything that names none lands on History. A section holds whatever the user did to it while another is showing — its Filter, its half-typed edits, its unanswered questions — but takes everything it put on the screen off with it, so nothing a hidden section drew stands over the section that is showing. The window itself is gone when closed, so the next one opens fresh. While it is open the app has a Dock icon and its app menu; when it closes the app is the menu bar glyph again.
 _Avoid_: Main view, dashboard, home, shell
 
 **History**:
@@ -226,5 +226,5 @@ The palette actually on screen once the OS has been asked: only `light` or `dark
 Cmd+Shift+D, from any window. Never a bare `d`, and it stands aside entirely wherever text is being entered: this app is a text field with a window around it, and a shortcut that could fire mid-word would eat the Capture it was meant to serve. Using it settles the Theme on a palette — after a toggle the app no longer follows the OS.
 
 **Start at Login**:
-Whether the app launches when the user logs in. Off until the user says otherwise, and asked once on first run so the app never adds itself to the login items uninvited. Declining is an answer: the question is not asked again.
+Whether the app launches when the user logs in. Off until the user says otherwise, and asked once on first run so the app never adds itself to the login items uninvited. Declining is an answer, and so is closing the window without answering — from whichever section it was left on: the question is not asked again.
 _Avoid_: Autostart, launch at startup, open at boot
