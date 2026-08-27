@@ -26,6 +26,8 @@ export interface FakeDesktop extends Desktop {
   showTaskCreation(): void
   /** How many times a Task Entry Point asked for the resident window. */
   taskCreationsBegun: number
+  /** How many times the window the caller is in was closed. */
+  windowsClosed: number
   /** How many times a Task Creation was dismissed. */
   taskCreationsDismissed: number
   /** Every size the Task Creation window was asked to take, most recent last. */
@@ -151,6 +153,7 @@ export function fakeDesktop({
     access,
     prompted: false,
     events,
+    windowsClosed: 0,
     taskCreationsBegun: 0,
     taskCreationsDismissed: 0,
     taskCreationFits: [],
@@ -170,7 +173,9 @@ export function fakeDesktop({
 
     windowLabel: () => 'main',
     appIdentity: async () => appIdentity,
-    closeWindow: async () => {},
+    closeWindow: async () => {
+      desktop.windowsClosed += 1
+    },
     windowVisible: true,
     blur: () => windowBlurred.announce(undefined),
     focus: () => windowFocused.announce(undefined),

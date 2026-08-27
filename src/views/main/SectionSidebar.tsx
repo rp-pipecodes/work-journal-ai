@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils'
 import WindowTitleBar from '@/components/WindowTitleBar'
-import type { MainSection, SectionEntry } from './sections'
+import type { MainSection } from '@/platform/desktop'
+import type { SectionEntry } from './sections'
 
 /**
  * The Main Window's sidebar: every section, with the one showing marked.

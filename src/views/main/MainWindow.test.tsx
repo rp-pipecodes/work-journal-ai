@@ -158,6 +158,39 @@ describe('switching sections', () => {
   })
 })
 
+describe('Escape', () => {
+  it('reaches the section the Entry Point opened the window on', async () => {
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      tasks: ['renew the cert'],
+      section: 'tasks',
+    })
+    await showsTasks()
+
+    await userEvent.setup().keyboard('{Escape}')
+
+    // Escape is the section's, bound to its own root: a window opened on Tasks
+    // View closes from Tasks View.
+    await expect.poll(() => desktop.windowsClosed).toBe(1)
+  })
+
+  it('reaches the section the sidebar switched to', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      tasks: ['renew the cert'],
+    })
+
+    await user.click(within(sidebar()).getByRole('button', { name: 'Tasks' }))
+    await showsTasks()
+    await user.keyboard('{Escape}')
+
+    // The click left the focus on the sidebar button, which is in neither
+    // section — so the section switched to is handed it.
+    await expect.poll(() => desktop.windowsClosed).toBe(1)
+  })
+})
+
 describe('a clicked Task Alert', () => {
   it('opens the window on Tasks View, focused on that Task', async () => {
     const { created } = await showMainWindow({

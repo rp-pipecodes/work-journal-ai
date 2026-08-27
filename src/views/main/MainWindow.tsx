@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Clock, Journal } from '@/journal/journal'
 import type { Desktop, MainSection } from '@/platform/desktop'
 import HistoryView from '@/views/history/HistoryView'
@@ -37,6 +37,8 @@ export default function MainWindow({
   clock: Clock
 }) {
   const [section, setSection] = useState<MainSection>('history')
+  // The section on screen, as the element the sidebar is not part of.
+  const showing = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     // What the Entry Point that opened this window asked for, claimed as the
@@ -61,6 +63,16 @@ export default function MainWindow({
     }
   }, [desktop])
 
+  useEffect(() => {
+    // A section takes focus as it mounts, but the section switched to has been
+    // mounted all along — and whatever did the switching has the focus: the
+    // sidebar button, or nothing at all when an Entry Point named the section.
+    // Escape belongs to the section, bound to its own root, so the root is
+    // handed focus here exactly as it takes it when a window opens on it.
+    const root = showing.current?.firstElementChild
+    if (root instanceof HTMLElement) root.focus()
+  }, [section])
+
   return (
     <div className="flex h-screen bg-background">
       <SectionSidebar
@@ -80,10 +92,18 @@ export default function MainWindow({
         reachable by Tab, by a screen reader, or by a label the section showing
         uses too.
       */}
-      <div hidden={section !== 'history'} className="min-w-0 flex-1">
+      <div
+        hidden={section !== 'history'}
+        ref={section === 'history' ? showing : null}
+        className="min-w-0 flex-1"
+      >
         <HistoryView desktop={desktop} journal={journal} />
       </div>
-      <div hidden={section !== 'tasks'} className="min-w-0 flex-1">
+      <div
+        hidden={section !== 'tasks'}
+        ref={section === 'tasks' ? showing : null}
+        className="min-w-0 flex-1"
+      >
         <TasksView desktop={desktop} journal={journal} clock={clock} />
       </div>
     </div>

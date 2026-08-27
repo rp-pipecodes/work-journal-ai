@@ -71,10 +71,12 @@ const GROUP_HEADINGS: Record<TaskGroupName, string> = {
  * change re-reads, which group a Task falls in, what a refusal says — belongs
  * to the Tasks session; this view renders its snapshot and calls its verbs.
  *
- * The window behind the view is created on demand and genuinely closed on
- * dismiss, so the session is built once per window and needs no reset. It may
- * sit beside History: Tasks are organized prospectively and Notes
- * retrospectively, so neither window answers the other's question.
+ * A section of the Main Window, beside History and never on screen with it —
+ * see docs/adr/0022-one-main-window-for-reading-and-settings.md. Tasks are
+ * organized prospectively and Notes retrospectively, which is why the two are
+ * separate sections rather than one list. That window is created on demand and
+ * genuinely closed on dismiss, so the session is built once with the section
+ * and needs no reset.
  */
 export default function TasksView({
   desktop,
@@ -119,7 +121,8 @@ export default function TasksView({
 
   useEffect(() => {
     // A Dock-less app does not reliably hand focus to a new window, and Escape
-    // has to reach this view for the window to close.
+    // has to reach this view for the window to close. Switching back to this
+    // section is the Main Window's to hand over, for the same reason.
     page.current?.focus()
 
     void session.open()
@@ -218,8 +221,8 @@ export default function TasksView({
   }, [desktop, session])
 
   // Escape belongs to whatever has taken the screen over: the Editor first,
-  // then the deletion, and the window when neither has. Dismissing the window
-  // closes it — Tasks View is not kept resident.
+  // then the deletion, and the Main Window when neither has. Dismissing that
+  // window closes it — it is not kept resident.
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
     if (event.key !== 'Escape') return
 

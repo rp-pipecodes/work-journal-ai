@@ -7,12 +7,12 @@ import type { MainSection } from '@/platform/desktop'
  * its own; see docs/adr/0022-one-main-window-for-reading-and-settings.md.
  *
  * The names themselves live in `Desktop`, because an Entry Point on the Rust
- * side says which section it means.
+ * side says which section it means — so this is only the sidebar's list of
+ * them.
  *
  * Apart from the components so that a component file exports only components,
  * which is what fast refresh needs to swap one without losing state.
  */
-export type { MainSection }
 
 export interface SectionEntry {
   id: MainSection
