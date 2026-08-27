@@ -76,10 +76,13 @@ export default function SettingsView({
   desktop,
   settings,
   journal,
+  active = true,
 }: {
   desktop: Desktop
   settings: AppSettings
   journal: Promise<Journal>
+  /** Whether Settings is the visible Main Window section. */
+  active?: boolean
 }) {
   const [startAtLogin, setStartAtLogin] = useState(DEFAULT_SETTINGS.startAtLogin)
   const [hotkeys, setHotkeys] = useState<HotkeyStatuses | null>(null)
@@ -202,7 +205,7 @@ export default function SettingsView({
   }, [desktop])
 
   useEffect(() => {
-    if (!asking) return
+    if (!asking || !active) return
 
     // Closing the window rather than choosing is an answer too, and the same
     // one: the app is not added to the login items. It has to be recorded, or
@@ -216,7 +219,7 @@ export default function SettingsView({
     return () => {
       void closeRequested.then((stop) => stop())
     }
-  }, [asking, desktop, settings])
+  }, [active, asking, desktop, settings])
 
   // Import as the window shows it: the user's wish, less whatever macOS is
   // withholding. The stored wish outlives a lost permission — that is what
@@ -590,7 +593,10 @@ export default function SettingsView({
           </>
         )}
 
-        <FirstRunQuestion open={asking} onAnswer={answerStartAtLogin} />
+        <FirstRunQuestion
+          open={active && asking}
+          onAnswer={answerStartAtLogin}
+        />
         <Toaster />
       </div>
     </div>

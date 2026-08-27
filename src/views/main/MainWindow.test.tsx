@@ -99,6 +99,16 @@ describe('the section the Main Window opens on', () => {
 
     await showsHistory()
   })
+
+  it('does not show Settings’ first-run question while History is selected', async () => {
+    await showMainWindow({ captured: [MONDAY], stored: {} })
+
+    // Wait for Settings' asynchronous initial read to finish. Its footer is
+    // hidden while History is selected, but it is still the real SettingsView
+    // mounted by this integration seam.
+    await screen.findByText('test')
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
 })
 
 describe('switching sections', () => {
@@ -255,6 +265,7 @@ async function showMainWindow({
   tasks = [],
   section,
   alertFor,
+  stored = { startAtLogin: false },
 }: {
   captured: Array<{ at: string; body: string }>
   /** The Tasks the journal already holds, in the order they were created. */
@@ -263,6 +274,8 @@ async function showMainWindow({
   section?: MainSection
   /** The Task a clicked Alert was about, as its position in `tasks`. */
   alertFor?: number
+  /** Values in the settings store; empty means the first-run question is due. */
+  stored?: Record<string, unknown>
 }) {
   const { driver, core, clock } = await journalHolding(captured)
 
@@ -271,7 +284,7 @@ async function showMainWindow({
     created.push(await core.createTask(description))
   }
 
-  const desktop = fakeDesktop({ driver, stored: { startAtLogin: false } })
+  const desktop = fakeDesktop({ driver, stored })
   const settings = createAppSettings(desktop)
   if (section !== undefined) desktop.requestSection(section)
   if (alertFor !== undefined) {

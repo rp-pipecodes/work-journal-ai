@@ -115,7 +115,12 @@ export default function MainWindow({
         ref={section === 'settings' ? showing : null}
         className="min-w-0 flex-1"
       >
-        <SettingsView desktop={desktop} settings={settings} journal={journal} />
+        <SettingsView
+          desktop={desktop}
+          settings={settings}
+          journal={journal}
+          active={section === 'settings'}
+        />
       </div>
     </div>
   )
