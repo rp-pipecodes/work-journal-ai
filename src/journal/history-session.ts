@@ -3,14 +3,14 @@
  * list it resolves to, the Nudge a Note outside it leaves, and the Digest kept
  * ready for the clipboard. Every sequencing rule of reading back lives here —
  * what an arrival does, what a correction re-reads, which of two overlapping
- * reads may reach the view — so the history window is JSX over a snapshot.
+ * reads may reach the view — so History is JSX over a snapshot.
  *
  * Headless on purpose: it is built from a Journal, a clipboard and one
  * announcement, and nothing else, so the rules can be driven end to end from a
  * test with real SQL and no DOM. It holds no domain rule of its own — those stay in the core, which this
  * module asks.
  *
- * A session is built per history window and is never reset: the window is
+ * A session is built per Main Window and is never reset: the window is
  * created on demand and genuinely closed on dismiss — see
  * docs/adr/0002-capture-window-is-hidden-never-closed.md.
  */
@@ -55,7 +55,7 @@ export const SEARCH_DEBOUNCE_MS = 150
  */
 export const SEARCH_MIN_TERM_LENGTH = 2
 
-/** Everything a history window renders, and the only thing it renders. */
+/** Everything History renders, and the only thing it renders. */
 export interface HistorySnapshot {
   /**
    * Both axes of what is being viewed. Null until the first read lands, and

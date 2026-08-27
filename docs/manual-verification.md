@@ -64,7 +64,7 @@ The palette is the point of this section, and the moment to watch is the one the
 
 - [ ] **View Notes** opens one window with a sidebar down the left, History beside it, and the traffic lights over the sidebar's top row rather than over History.
 - [ ] The sidebar names **History** and marks it as the section on screen.
-- [ ] Tabbing into the window reaches the sidebar's current section, which shows a focus ring; `Space` and `Enter` on it leave History showing, and the arrow keys stay within the sidebar.
+- [ ] Tabbing into the window reaches **History** in the sidebar, which shows a focus ring; `Space` and `Enter` on it leave History showing, and tabbing on reaches the Filter's own controls.
 - [ ] **View Notes** again, with the window already open, raises that window rather than opening a second one.
 - [ ] Closing the window and opening it again shows History on the most recent day holding Notes, with **Project = Any** — whatever the Filter was left on.
 - [ ] The window opens wide enough for the sidebar and everything History's header holds; dragging it narrow stops at a width that still shows both.

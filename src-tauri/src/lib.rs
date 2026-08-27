@@ -1002,10 +1002,7 @@ async fn journal_transaction(
             .map_err(|error| error.to_string())?;
     }
 
-    transaction
-        .commit()
-        .await
-        .map_err(|error| error.to_string())
+    transaction.commit().await.map_err(|error| error.to_string())
 }
 
 /// Ends a Capture, whether it committed a Note or discarded one. The window is
@@ -1028,6 +1025,7 @@ fn start_task_creation(app: tauri::AppHandle) {
 fn dismiss_task_creation(app: tauri::AppHandle) -> Result<(), String> {
     hide_resident_window(&app, TASK_CREATION_WINDOW).map_err(|error| error.to_string())
 }
+
 
 /// Puts a resident window away, whether it committed anything or not. Only
 /// ever hidden — see docs/adr/0002-capture-window-is-hidden-never-closed.md.

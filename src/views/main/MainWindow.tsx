@@ -17,6 +17,11 @@ import { SECTIONS, type MainSection } from './sections'
  * A section knows nothing about the sidebar. `HistoryView` is rendered exactly
  * as it was when it had a window to itself, which is also how it is still
  * tested.
+ *
+ * With History the only section here, it is simply what the window renders.
+ * Keeping a section's state while another one is showing — what ADR 0022 asks
+ * for — is a question that only arises once there is a second section to
+ * switch to, and it is answered when Tasks View moves in.
  */
 export default function MainWindow({
   desktop,

@@ -2,24 +2,26 @@
 
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { createJournal } from '@/journal/journal'
-import { fixedClock, openTestDatabase } from '@/journal/testing/database'
 import { fakeDesktop } from '@/platform/testing/desktop'
-import { installMeasurementStubs } from '@/views/history/testing/history-view'
+import {
+  closeTestDatabases,
+  firstListShown,
+  installMeasurementStubs,
+  journalHolding,
+} from '@/views/history/testing/history-view'
 import MainWindow from './MainWindow'
 
 // The Main Window as the user meets it: a sidebar naming the section on
-// screen, and History inside it, reading the same journal it read when it had
-// a window of its own.
+// screen, and History inside it, reading the journal exactly as it read it
+// when it had a window of its own.
 
+// Base UI positions its popups against measured elements, and jsdom measures
+// nothing and ships neither observer.
 beforeAll(installMeasurementStubs)
-
-const openDatabases: Array<() => void> = []
 
 afterEach(() => {
   cleanup()
-  for (const close of openDatabases.splice(0)) close()
+  closeTestDatabases()
   vi.restoreAllMocks()
 })
 
@@ -28,8 +30,10 @@ describe('the Main Window', () => {
     await showMainWindow([{ at: '2026-03-09T10:00:00', body: 'Monday' }])
 
     expect(await screen.findByText('Monday')).toBeTruthy()
-    // History's own header, unchanged by the sidebar around it.
-    expect(within(screen.getByRole('banner')).getByLabelText('Search')).toBeTruthy()
+    // History's own header, untouched by the sidebar beside it.
+    const header = screen.getByRole('banner')
+    expect(within(header).getByLabelText('Search')).toBeTruthy()
+    expect(within(header).getByRole('button', { name: /^Days/ })).toBeTruthy()
   })
 
   it('names the section on screen and marks it as the current one', async () => {
@@ -39,21 +43,14 @@ describe('the Main Window', () => {
     expect(history.getAttribute('aria-current')).toBe('page')
   })
 
-  it('puts the sidebar a keystroke away, with the current section reachable', async () => {
-    const user = await showMainWindow([
-      { at: '2026-03-09T10:00:00', body: 'Monday' },
-    ])
+  it('puts every section a Tab away, as an ordinary button', async () => {
+    await showMainWindow([{ at: '2026-03-09T10:00:00', body: 'Monday' }])
 
     const history = within(sidebar()).getByRole('button', { name: 'History' })
-    // One tab stop for the list, on the section showing: the arrow keys move
-    // along it, so Tab out of the sidebar reaches the section itself.
+    // Nothing takes the section out of the tab order or rebinds a key to
+    // reach it: the sidebar is a short list of named places.
     expect(history.tabIndex).toBe(0)
-
-    history.focus()
-    await user.keyboard('{ArrowDown}')
-    // With History the only section there is, the list stays where it is
-    // rather than losing focus off its end.
-    expect(document.activeElement).toBe(history)
+    expect(history.getAttribute('disabled')).toBeNull()
   })
 
   it('leaves the traffic lights the sidebar’s top row', async () => {
@@ -69,29 +66,17 @@ describe('the Main Window', () => {
 
 /** The Main Window over a real journal, already showing its first list. */
 async function showMainWindow(captured: Array<{ at: string; body: string }>) {
-  const { driver, close } = await openTestDatabase()
-  openDatabases.push(close)
+  const { driver, core } = await journalHolding(captured)
 
-  const clock = fixedClock(new Date('2026-03-09T10:00:00'))
-  const core = createJournal({ clock, driver })
-
-  for (const { at, body } of captured) {
-    clock.set(new Date(at))
-    if ((await core.capture(body)) === null) {
-      throw new Error('nothing was captured')
-    }
-  }
-
-  const user = userEvent.setup()
   render(
-    <MainWindow desktop={fakeDesktop({ driver })} journal={Promise.resolve(core)} />,
+    <MainWindow
+      desktop={fakeDesktop({ driver })}
+      journal={Promise.resolve(core)}
+    />,
   )
+  await firstListShown(captured.length)
 
-  // The first read has to have landed: until it does History has no Filter,
-  // and its header is not on screen at all.
-  if (captured.length > 0) await screen.findByRole('banner')
-
-  return user
+  return { core }
 }
 
 /** The sidebar, as the only thing on screen that lists the sections. */
