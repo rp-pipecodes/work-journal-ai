@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Clock, Journal } from '@/journal/journal'
 import type { Desktop, MainSection } from '@/platform/desktop'
+import type { AppSettings } from '@/settings/app-settings'
 import HistoryView from '@/views/history/HistoryView'
+import SettingsView from '@/views/settings/SettingsView'
 import TasksView from '@/views/tasks/TasksView'
 import SectionSidebar from './SectionSidebar'
 import { SECTIONS } from './sections'
@@ -28,10 +30,12 @@ import { SECTIONS } from './sections'
  */
 export default function MainWindow({
   desktop,
+  settings,
   journal,
   clock,
 }: {
   desktop: Desktop
+  settings: AppSettings
   journal: Promise<Journal>
   /** What the day is, for the section that groups by it. */
   clock: Clock
@@ -105,6 +109,18 @@ export default function MainWindow({
         className="min-w-0 flex-1"
       >
         <TasksView desktop={desktop} journal={journal} clock={clock} />
+      </div>
+      <div
+        hidden={section !== 'settings'}
+        ref={section === 'settings' ? showing : null}
+        className="min-w-0 flex-1"
+      >
+        <SettingsView
+          desktop={desktop}
+          settings={settings}
+          journal={journal}
+          active={section === 'settings'}
+        />
       </div>
     </div>
   )

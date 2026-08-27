@@ -14,14 +14,12 @@ describe('viewForLabel', () => {
     expect(viewForLabel('task-creation')).toBe('task-creation')
   })
 
-  it('routes the settings window to the settings view', () => {
-    expect(viewForLabel('settings')).toBe('settings')
-  })
-
   it('has no view for an unrecognised window label', () => {
     expect(viewForLabel('history')).toBeNull()
     // Tasks View is a section of the Main Window, not a window of its own.
     expect(viewForLabel('tasks')).toBeNull()
+    // Settings is a section of the Main Window, not a window of its own.
+    expect(viewForLabel('settings')).toBeNull()
     expect(viewForLabel('')).toBeNull()
   })
 })

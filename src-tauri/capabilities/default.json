@@ -5,9 +5,7 @@
   "windows": [
     "capture",
     "task-creation",
-    "main",
-    "tasks",
-    "settings"
+    "main"
   ],
   "permissions": [
     "core:default",

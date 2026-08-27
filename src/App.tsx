@@ -4,7 +4,6 @@ import type { AppSettings } from './settings/app-settings'
 import CaptureView from './views/capture/CaptureView'
 import MainWindow from './views/main/MainWindow'
 import TaskCreationView from './views/tasks/TaskCreationView'
-import SettingsView from './views/settings/SettingsView'
 import { viewForLabel } from './views/route'
 
 /**
@@ -43,12 +42,13 @@ export default function App({
   }
 
   if (view === 'main') {
-    return <MainWindow desktop={desktop} journal={journal} clock={clock} />
-  }
-
-  if (view === 'settings') {
     return (
-      <SettingsView desktop={desktop} settings={settings} journal={journal} />
+      <MainWindow
+        desktop={desktop}
+        settings={settings}
+        journal={journal}
+        clock={clock}
+      />
     )
   }
 

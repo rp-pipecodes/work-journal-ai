@@ -3,10 +3,12 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import ThemeProvider from '@/components/ThemeProvider'
 import { fakeDesktop } from '@/platform/testing/desktop'
 import type { MainSection } from '@/platform/desktop'
 import type { Task } from '@/journal/journal'
 import { formatDayRange } from '@/views/history/range-label'
+import { createAppSettings } from '@/settings/app-settings'
 import {
   closeTestDatabases,
   dayCell,
@@ -46,12 +48,17 @@ describe('the Main Window', () => {
 
     const history = within(sidebar()).getByRole('button', { name: 'History' })
     expect(history.getAttribute('aria-current')).toBe('page')
+    expect(
+      within(sidebar())
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['History', 'Tasks', 'Settings'])
   })
 
   it('puts every section a Tab away, as an ordinary button', async () => {
     await showMainWindow({ captured: [MONDAY] })
 
-    for (const name of ['History', 'Tasks']) {
+    for (const name of ['History', 'Tasks', 'Settings']) {
       const section = within(sidebar()).getByRole('button', { name })
       // Nothing takes the section out of the tab order or rebinds a key to
       // reach it: the sidebar is a short list of named places.
@@ -78,10 +85,29 @@ describe('the section the Main Window opens on', () => {
     await showsTasks()
   })
 
+  it('lands on Settings when the Entry Point names it', async () => {
+    await showMainWindow({ captured: [MONDAY], section: 'settings' })
+
+    await showsSettings()
+    expect(
+      within(sidebar()).getByRole('button', { name: 'Settings' }).getAttribute('aria-current'),
+    ).toBe('page')
+  })
+
   it('is History when the Entry Point named none', async () => {
     await showMainWindow({ captured: [MONDAY], tasks: ['renew the cert'] })
 
     await showsHistory()
+  })
+
+  it('does not show Settings’ first-run question while History is selected', async () => {
+    await showMainWindow({ captured: [MONDAY], stored: {} })
+
+    // Wait for Settings' asynchronous initial read to finish. Its footer is
+    // hidden while History is selected, but it is still the real SettingsView
+    // mounted by this integration seam.
+    await screen.findByText('test')
+    expect(screen.queryByRole('alertdialog')).toBeNull()
   })
 })
 
@@ -96,6 +122,15 @@ describe('switching sections', () => {
     expect(
       within(sidebar()).getByRole('button', { name: 'Tasks' }).getAttribute('aria-current'),
     ).toBe('page')
+  })
+
+  it('shows Settings when the sidebar names it', async () => {
+    const user = userEvent.setup()
+    await showMainWindow({ captured: [MONDAY] })
+
+    await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
+
+    await showsSettings()
   })
 
   it('follows an Entry Point that names a section while the window is open', async () => {
@@ -151,7 +186,7 @@ describe('switching sections', () => {
     // Nothing on screen says so while Tasks View is showing: the sidebar is a
     // list of places, not a set of counters.
     expect(nudge()).toBeUndefined()
-    expect(sidebar().textContent).toBe('HistoryTasks')
+    expect(sidebar().textContent).toBe('HistoryTasksSettings')
 
     await user.click(within(sidebar()).getByRole('button', { name: 'History' }))
     await expect.poll(() => nudge()?.textContent).toContain('A new Note on')
@@ -230,6 +265,7 @@ async function showMainWindow({
   tasks = [],
   section,
   alertFor,
+  stored = { startAtLogin: false },
 }: {
   captured: Array<{ at: string; body: string }>
   /** The Tasks the journal already holds, in the order they were created. */
@@ -238,6 +274,8 @@ async function showMainWindow({
   section?: MainSection
   /** The Task a clicked Alert was about, as its position in `tasks`. */
   alertFor?: number
+  /** Values in the settings store; empty means the first-run question is due. */
+  stored?: Record<string, unknown>
 }) {
   const { driver, core, clock } = await journalHolding(captured)
 
@@ -246,20 +284,28 @@ async function showMainWindow({
     created.push(await core.createTask(description))
   }
 
-  const desktop = fakeDesktop({ driver })
+  const desktop = fakeDesktop({ driver, stored })
+  const settings = createAppSettings(desktop)
   if (section !== undefined) desktop.requestSection(section)
   if (alertFor !== undefined) {
     desktop.pendingTaskAlert = `task:${created[alertFor].id}`
   }
 
   render(
-    <MainWindow
-      desktop={desktop}
-      journal={Promise.resolve(core)}
-      clock={clock}
-    />,
+    <ThemeProvider settings={settings}>
+      <MainWindow
+        desktop={desktop}
+        settings={settings}
+        journal={Promise.resolve(core)}
+        clock={clock}
+      />
+    </ThemeProvider>,
   )
-  await firstListShown(captured.length)
+  if (section === 'settings') {
+    await screen.findByText('Note Hotkey')
+  } else {
+    await firstListShown(captured.length)
+  }
 
   return { desktop, core, created }
 }
@@ -293,14 +339,22 @@ async function showsHistory(): Promise<void> {
   await expect.poll(sectionOnScreen).toBe('history')
 }
 
+/** Settings is the section on screen, once whatever asked for it lands. */
+async function showsSettings(): Promise<void> {
+  await screen.findByText('Note Hotkey')
+  await expect.poll(sectionOnScreen).toBe('settings')
+}
+
 /**
  * Which section is on screen, read the way a screen reader would: the section
  * that is not showing is hidden rather than unmounted, so exactly one of the
  * two headers is in the accessibility tree — and asking for the banner at all
  * fails if that is ever untrue.
  */
-function sectionOnScreen(): 'history' | 'tasks' {
-  const header = screen.getByRole('banner')
+function sectionOnScreen(): MainSection {
+  const header = screen.queryByRole('banner')
+  if (header === null) return 'settings'
+
   return within(header).queryByLabelText('Search') === null
     ? 'tasks'
     : 'history'

@@ -7,17 +7,15 @@
 import {
   CAPTURE_WINDOW,
   MAIN_WINDOW,
-  SETTINGS_WINDOW,
   TASK_CREATION_WINDOW,
 } from '@/platform/desktop'
 
-export type View = 'capture' | 'task-creation' | 'main' | 'settings'
+export type View = 'capture' | 'task-creation' | 'main'
 
 const VIEWS: Record<string, View> = {
   [CAPTURE_WINDOW]: 'capture',
   [TASK_CREATION_WINDOW]: 'task-creation',
   [MAIN_WINDOW]: 'main',
-  [SETTINGS_WINDOW]: 'settings',
 }
 
 export function viewForLabel(label: string): View | null {

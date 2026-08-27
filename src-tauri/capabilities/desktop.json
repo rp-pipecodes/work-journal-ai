@@ -8,9 +8,7 @@
   "windows": [
     "capture",
     "task-creation",
-    "main",
-    "tasks",
-    "settings"
+    "main"
   ],
   "permissions": [
     "global-shortcut:default",
