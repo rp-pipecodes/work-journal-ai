@@ -9,6 +9,7 @@ import type {
   CaptureFit,
   Desktop,
   ExportedFile,
+  MainSection,
   TaskAlertPermission,
   Unlisten,
 } from '../desktop'
@@ -61,6 +62,18 @@ export interface FakeDesktop extends Desktop {
   reconciliations: TaskAlert[][]
   /** Whether reconciling fails, as it does when the OS refuses. */
   alertsFail: boolean
+  /**
+   * An Entry Point names a section of the Main Window — the Tray Menu, or a
+   * clicked Task Alert. Called before the window is rendered it leaves the
+   * section pending, as a request that built the window does; called after, it
+   * is delivered to the window on screen.
+   */
+  requestSection(section: MainSection): void
+  /**
+   * The section waiting to be claimed by the Main Window it named. Null when
+   * nothing has asked for one, which resolves to History.
+   */
+  pendingSection: MainSection | null
   /** The user clicks a Task Alert. */
   openTaskAlert(taskId: string): void
   /**
@@ -124,6 +137,7 @@ export function fakeDesktop({
   const journalChanged = subscribers<void>()
   const themeChanged = subscribers<Theme>()
   const windowFocused = subscribers<void>()
+  const sectionRequested = subscribers<MainSection>()
   const taskAlertOpened = subscribers<string>()
   const taskAlertsReconciled = subscribers<boolean>()
 
@@ -146,6 +160,7 @@ export function fakeDesktop({
     reconciliations: [],
     alertsFail: false,
     notificationSettingsOpened: 0,
+    pendingSection: null,
     pendingTaskAlert: null,
 
     beginCapture: () => captureShown.announce(undefined),
@@ -226,6 +241,21 @@ export function fakeDesktop({
       desktop.pendingAlerts =
         desktop.alertPermission === 'granted' ? alerts : []
     },
+    requestSection: (section) => {
+      // Both, exactly as the Rust side does it: written down for a Main Window
+      // this request is about to build, and announced for one already open.
+      desktop.pendingSection = section
+      sectionRequested.announce(section)
+    },
+    requestedSection: async () => {
+      // Handed over exactly once, like the Alert: the section an Entry Point
+      // named is for the window it opened, not for every window after it.
+      const waiting = desktop.pendingSection
+      desktop.pendingSection = null
+      return waiting
+    },
+    onSectionRequested: async (handle) => sectionRequested.add(handle),
+
     onTaskAlertOpened: async (handle) => taskAlertOpened.add(handle),
     announceTaskAlertsReconciled: async (held) =>
       taskAlertsReconciled.announce(held),
