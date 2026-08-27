@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -20,6 +19,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useTheme } from '@/components/theme-context'
 import { useOnScreen } from '@/components/on-screen-context'
+import { useOnScreenToast } from '@/components/on-screen-toast'
 import WindowTitleBar from '@/components/WindowTitleBar'
 import {
   describeExport,
@@ -121,6 +121,11 @@ export default function SettingsView({
   // see docs/adr/0024-a-view-is-told-whether-it-is-on-screen.md.
   const onScreen = useOnScreen()
   const page = useRef<HTMLDivElement>(null)
+
+  // Every message this view says, and only while it is the section showing:
+  // an export finishes long after it was asked for, and the line under the
+  // button keeps the answer for a reader who has gone elsewhere.
+  const says = useOnScreenToast()
 
   useEffect(() => {
     void desktop.appIdentity().then(setAppIdentity, (error: unknown) => {
@@ -358,12 +363,12 @@ export default function SettingsView({
         )
         const said = describeExport(exportedJournal, file.path)
         setExported(said)
-        toast.success(said)
+        says.success(said)
       } catch (error) {
         console.error('could not export the journal', error)
         const said = 'Could not export the journal.'
         setExported(said)
-        toast.error(said)
+        says.failure(said)
       } finally {
         setExporting(false)
       }

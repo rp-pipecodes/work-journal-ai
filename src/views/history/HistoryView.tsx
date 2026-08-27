@@ -11,10 +11,10 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox'
-import { toast } from 'sonner'
 import ProjectChip from '@/components/ProjectChip'
 import WindowTitleBar from '@/components/WindowTitleBar'
 import { useOffScreen } from '@/components/on-screen-context'
+import { useOnScreenToast } from '@/components/on-screen-toast'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Input } from '@/components/ui/input'
@@ -135,6 +135,7 @@ export default function HistoryView({
   // differently: copying the same Filter twice says the same words both times,
   // and both times the reader asked to be told.
   const copying = useRef(false)
+  const says = useOnScreenToast()
   const page = useRef<HTMLDivElement>(null)
 
   // A confirmation is portalled to the end of the document, so hiding this
@@ -143,8 +144,13 @@ export default function HistoryView({
   // view does, and going is dismissing: a question the reader was taken away
   // from is not one they still have open, and the Note is untouched. A reword
   // in progress is not this — it is drawn in the list itself, and what has
-  // been typed into it survives the trip.
-  useOffScreen(() => setDeleting(null))
+  // been typed into it survives the trip. A copy the reader walked away from
+  // is the same: they are no longer waiting to be told, and the confirmation
+  // they have already been given goes with the view — see `on-screen-toast`.
+  useOffScreen(() => {
+    setDeleting(null)
+    copying.current = false
+  })
 
   useEffect(() => {
     // A Dock-less app does not reliably hand focus to a new window, and Escape
@@ -160,8 +166,8 @@ export default function HistoryView({
     if (!copying.current || snapshot.confirmation === null) return
 
     copying.current = false
-    toast(snapshot.confirmation)
-  }, [snapshot])
+    says.say(snapshot.confirmation)
+  }, [snapshot, says])
 
   useEffect(() => {
     desktop.hotkeyStatus().then(setHotkeys, (error: unknown) => {
