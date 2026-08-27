@@ -28,6 +28,7 @@ import {
   JOURNAL_CHANGED_EVENT,
   NOTE_CAPTURED_EVENT,
   SETTINGS_FILE,
+  SECTION_REQUESTED_EVENT,
   SYSTEM_WOKE_EVENT,
   TASK_ALERT_OPENED_EVENT,
   TASK_ALERTS_RECONCILED_EVENT,
@@ -39,6 +40,7 @@ import {
   type CalendarInfo,
   type Desktop,
   type ExportedFile,
+  type MainSection,
   type TaskAlertPermission,
 } from './desktop'
 
@@ -162,6 +164,13 @@ export function createTauriDesktop(): Desktop {
       listen<{ held: boolean }>(TASK_ALERTS_RECONCILED_EVENT, ({ payload }) =>
         handle(payload.held),
       ),
+    requestedSection: async () =>
+      (await invoke<MainSection | null>('requested_section')) ?? null,
+    onSectionRequested: (handle) =>
+      listen<{ section: MainSection }>(SECTION_REQUESTED_EVENT, ({ payload }) =>
+        handle(payload.section),
+      ),
+
     openedTaskAlert: async () =>
       (await invoke<string | null>('opened_task_alert')) ?? null,
     openNotificationSettings: () => invoke('open_notification_settings'),
