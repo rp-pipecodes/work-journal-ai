@@ -310,9 +310,10 @@ export interface Desktop {
   /**
    * Whether the caller's own window is on screen. Asked by the two resident
    * windows when they lose focus: losing it to another application is the user
-   * walking away from what they were typing, but losing it because the other
-   * resident window was invoked is a handoff, and the Rust side has already put
-   * this one away without discarding a word of it.
+   * walking away from what they were typing, but losing it to a window the
+   * Rust side put this one away for is a handoff, and not a word of it has
+   * been discarded. The other resident panel does that to either of them; the
+   * Main Window opening does it to the Capture.
    */
   isWindowVisible(): Promise<boolean>
   /**

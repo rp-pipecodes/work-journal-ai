@@ -614,6 +614,10 @@ fn requested_section(pending: tauri::State<'_, RequestedSection>) -> Option<Stri
 /// after, until it is dismissed and genuinely closed. The Main Window is the
 /// only on-demand window; the Capture and Task Creation panels are resident.
 fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    // Whatever is half-typed in a Capture survives the window that is about to
+    // take focus from it.
+    put_the_capture_away(app);
+
     // Reaching the Tray Menu again with the window already open raises it
     // rather than building a second one.
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
@@ -675,6 +679,29 @@ fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     window.set_focus()?;
 
     Ok(())
+}
+
+/// Puts an on-screen Capture panel away before another Work Journal window
+/// takes focus from it. Losing focus to another application is the user walking
+/// away from what they were typing, and the Capture discards on it; losing it
+/// to this app's own window is a handoff, and the panel going away first is how
+/// the Capture is told which one this is — the very exemption the other
+/// resident panel already gets in `raise_resident_window`.
+///
+/// Hidden by this side rather than by asking the window to dismiss itself,
+/// which would throw the half-typed Body away. Nothing is cleared, so the next
+/// Capture opens on the words that were already there — which is also why a
+/// Main Window that then fails to open needs nothing put back: the panel is
+/// away rather than gone, and the next Entry Point brings it back with every
+/// word in it.
+fn put_the_capture_away(app: &tauri::AppHandle) {
+    let Some(capture) = app.get_webview_window(CAPTURE_WINDOW) else {
+        return;
+    };
+
+    if let Err(error) = capture.hide() {
+        log::error!("could not put the Capture away: {error}");
+    }
 }
 
 /// Tells macOS how the app shows itself now, when that has changed at all.

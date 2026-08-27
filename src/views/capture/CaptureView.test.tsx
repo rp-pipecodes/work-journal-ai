@@ -172,3 +172,37 @@ describe('the keyboard bargain', () => {
     expect(hints).toMatch(/Escape abandons\./)
   })
 })
+
+describe('a Capture that loses focus', () => {
+  it('is discarded when the panel is still on screen — the user walked away', async () => {
+    const desktop = fakeDesktop()
+    showCapture(desktop, await openJournal())
+
+    type('half a Note')
+    desktop.blur()
+
+    await expect.poll(() => desktop.capturesDismissed).toBe(1)
+    await expect.poll(() => field().value).toBe('')
+  })
+
+  it('keeps the Body when the blur came with the window being put away', async () => {
+    const desktop = fakeDesktop()
+    showCapture(desktop, await openJournal())
+
+    type('half a Note')
+
+    // What the Rust side does when another Work Journal window is invoked —
+    // the other resident panel, or the Main Window: this one is hidden first,
+    // so the blur is a handoff rather than a walk-away.
+    desktop.windowVisible = false
+    desktop.blur()
+
+    await expect.poll(() => field().value).toBe('half a Note')
+    expect(desktop.capturesDismissed).toBe(0)
+
+    // And the next Capture opens on the words that were already typed.
+    desktop.windowVisible = true
+    desktop.beginCapture()
+    expect(field().value).toBe('half a Note')
+  })
+})

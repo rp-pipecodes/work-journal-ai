@@ -30,6 +30,8 @@ export interface FakeDesktop extends Desktop {
   windowsClosed: number
   /** How many times a Task Creation was dismissed. */
   taskCreationsDismissed: number
+  /** How many times a Capture was dismissed. */
+  capturesDismissed: number
   /** Every size the Task Creation window was asked to take, most recent last. */
   taskCreationFits: boolean[]
   /** What the settings store holds, readable without going through a facade. */
@@ -156,6 +158,7 @@ export function fakeDesktop({
     windowsClosed: 0,
     taskCreationsBegun: 0,
     taskCreationsDismissed: 0,
+    capturesDismissed: 0,
     taskCreationFits: [],
     alertPermission,
     alertPrompted: false,
@@ -205,7 +208,9 @@ export function fakeDesktop({
         },
       })),
 
-    dismissCapture: async () => {},
+    dismissCapture: async () => {
+      desktop.capturesDismissed += 1
+    },
     fitCapture: async (fit) => {
       desktop.fits.push(fit)
     },
