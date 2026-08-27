@@ -108,6 +108,16 @@ Start each of these with **New Note**, half a Note typed and the field never lef
 - [ ] With the Main Window on screen, **New Note** puts the capture panel over it rather than behind it, and the panel stays on top while the Main Window is clicked.
 - [ ] `Escape` on that Capture clears the field, hands focus back to the application that was in front, and leaves the Main Window on screen.
 
+Start each of these with **New Task**, half a description typed and the field never left.
+
+- [ ] **View Notes** in the Tray Menu opens the Main Window on History; the Task Creation panel goes away, and **New Task** again shows the same half-typed words rather than an empty field.
+- [ ] The same for **View Tasks**, and for **Settings**.
+- [ ] The same for a click on the Dock icon, with the Main Window already open and then closed.
+- [ ] The same for a clicked Task Alert — schedule a Task a minute out, start a Task Creation, and click the alert.
+- [ ] Clicking on another application instead still discards the Task Creation and clears the field.
+- [ ] With the Main Window on screen, **New Task** puts the Task Creation panel over it rather than behind it, and the panel stays on top while the Main Window is clicked.
+- [ ] `Escape` on that Task Creation clears the field, hands focus back to the application that was in front, and leaves the Main Window on screen.
+
 ## The two Hotkeys and relaunch
 
 Run these on a first run — with no `settings.json` — so the defaults are the ones a new user gets.

@@ -212,13 +212,19 @@ describe('the two resident windows', () => {
     showTaskCreation(desktop, journal)
     type('half a Task')
 
-    // What the Rust side does when the other Entry Point is invoked: this
-    // window is hidden first, so the blur is a handoff rather than a walk-away.
+    // What the Rust side does when another Work Journal window is invoked —
+    // the other resident panel, or the Main Window: this one is hidden first,
+    // so the blur is a handoff rather than a walk-away.
     desktop.windowVisible = false
     desktop.blur()
 
     await expect.poll(() => field().value).toBe('half a Task')
     expect(desktop.taskCreationsDismissed).toBe(0)
+
+    // And the next Task Creation opens on the words that were already typed.
+    desktop.windowVisible = true
+    desktop.showTaskCreation()
+    expect(field().value).toBe('half a Task')
   })
 
   it('leaves an unfinished Capture untouched, and the other way round', async () => {

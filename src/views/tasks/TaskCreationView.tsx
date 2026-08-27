@@ -139,10 +139,10 @@ export default function TaskCreationView({
     // the half-typed description exactly where the user left it.
     const shown = desktop.onTaskCreationShown(() => field.current?.focus())
     // Clicking away is an abandon, not a Task Creation left floating over the
-    // screen. Unless the window is already gone: the capture window was
-    // invoked, the Rust side put this one away, and the description waiting
-    // here has to survive that rather than being thrown away behind the user's
-    // back.
+    // screen. Unless the window is already gone: another Work Journal window
+    // was invoked — the other resident panel, or the Main Window — the Rust
+    // side put this one away, and the description waiting here has to survive
+    // that rather than being thrown away behind the user's back.
     const blurred = desktop.onWindowBlurred(() => {
       void desktop.isWindowVisible().then((visible) => {
         if (visible) void dismiss()

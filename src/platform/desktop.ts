@@ -313,7 +313,7 @@ export interface Desktop {
    * walking away from what they were typing, but losing it to a window the
    * Rust side put this one away for is a handoff, and not a word of it has
    * been discarded. The other resident panel does that to either of them; the
-   * Main Window opening does it to the Capture.
+   * Main Window opening does it to both.
    */
   isWindowVisible(): Promise<boolean>
   /**
