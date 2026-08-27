@@ -224,7 +224,9 @@ export default function SettingsView({
   // underneath it saying why.
   const importing = importMeetings && calendarProblem === null
 
-  // Escape dismisses, and dismissing closes: Settings is not kept resident.
+  // Escape dismisses the Main Window that owns this section. Settings is kept
+  // mounted while another section is showing, but the Main Window is still
+  // genuinely closed on dismiss.
   // While the recorder is listening, Escape belongs to it — abandoning a
   // half-pressed combination must not take the window with it.
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {

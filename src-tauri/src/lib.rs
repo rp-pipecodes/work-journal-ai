@@ -41,12 +41,12 @@ const QUIT_MENU_ITEM: &str = "quit";
 const CAPTURE_WINDOW: &str = "capture";
 const TASK_CREATION_WINDOW: &str = "task-creation";
 const MAIN_WINDOW: &str = "main";
-const SETTINGS_WINDOW: &str = "settings";
 
 /// The sections of the Main Window an Entry Point here can name. Must match
 /// `MainSection` in `src/platform/desktop.ts`.
 const HISTORY_SECTION: &str = "history";
 const TASKS_SECTION: &str = "tasks";
+const SETTINGS_SECTION: &str = "settings";
 
 /// Where the settings live. Written from both sides — see
 /// `src/settings/tauri-settings.ts` — which is acceptable only because v1 has
@@ -494,36 +494,20 @@ fn requested_section(pending: tauri::State<'_, RequestedSection>) -> Option<Stri
     pending.0.lock().ok()?.take()
 }
 
-/// One size for the whole window, whichever section is showing: the sidebar's
-/// width on top of the room History had when it was a window of its own — see
-/// `SectionSidebar` in `src/views/main/SectionSidebar.tsx`. A window that
-/// resized itself when the user clicked a sidebar item would be disorienting,
-/// and would have nothing to say about a window already resized by hand.
+/// Opens the Main Window at one size, whichever section is showing: the
+/// sidebar's width on top of the room History had when it was a window of its
+/// own — see `SectionSidebar` in `src/views/main/SectionSidebar.tsx`. A window
+/// that resized itself when the user clicked a sidebar item would be
+/// disorienting, and would have nothing to say about a window already resized
+/// by hand.
+///
+/// The window is built the first time it is asked for and raised every time
+/// after, until it is dismissed and genuinely closed. The Main Window is the
+/// only on-demand window; the Capture and Task Creation panels are resident.
 fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
-    show_on_demand_window(
-        app,
-        MAIN_WINDOW,
-        "Work Journal",
-        (696.0, 620.0),
-        (556.0, 320.0),
-    )
-}
-
-/// A window built the first time it is asked for and raised every time after,
-/// until it is dismissed and genuinely closed. The windows that work this way
-/// — the Main Window and Settings — differ only in their label, their title and
-/// their size; the awkward parts are the same for both, so they are only
-/// written once.
-fn show_on_demand_window(
-    app: &tauri::AppHandle,
-    label: &str,
-    title: &str,
-    size: (f64, f64),
-    min_size: (f64, f64),
-) -> tauri::Result<()> {
     // Reaching the Tray Menu again with the window already open raises it
     // rather than building a second one.
-    if let Some(window) = app.get_webview_window(label) {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         window.show()?;
         return window.set_focus();
     }
@@ -531,7 +515,7 @@ fn show_on_demand_window(
     // Before the window exists, so it is born into an application that already
     // owns a Dock icon and a Cmd+Tab entry rather than acquiring them under the
     // user. Only the Main Window moves this; the Dock ignores the rest.
-    show_presence(app, app.state::<Dock>().window_opened(label));
+    show_presence(app, app.state::<Dock>().window_opened(MAIN_WINDOW));
 
     // A window opens on whatever it was built with and keeps it until its
     // webview has something of its own to show — a fifth of a second later. Both
@@ -540,10 +524,10 @@ fn show_on_demand_window(
     // parses a line of the document, so its first frame is already right.
     let theme = resolved_theme(app);
 
-    let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::default())
-        .title(title)
-        .inner_size(size.0, size.1)
-        .min_inner_size(min_size.0, min_size.1)
+    let builder = WebviewWindowBuilder::new(app, MAIN_WINDOW, WebviewUrl::default())
+        .title("Work Journal")
+        .inner_size(696.0, 620.0)
+        .min_inner_size(556.0, 320.0)
         .center()
         .background_color(theme.background())
         .initialization_script(theme.announcement());
@@ -563,7 +547,7 @@ fn show_on_demand_window(
         Ok(window) => window,
         Err(error) => {
             // Nothing was built, so nothing should be left in the Dock either.
-            show_presence(app, app.state::<Dock>().window_closed(label));
+            show_presence(app, app.state::<Dock>().window_closed(MAIN_WINDOW));
             return Err(error);
         }
     };
@@ -598,22 +582,9 @@ fn show_presence(app: &tauri::AppHandle, presence: Option<Presence>) {
     let _ = (app, presence);
 }
 
-/// Opens Settings, building the window if it is not already open. Created on
-/// demand and genuinely closed on dismiss, like the Main Window.
+/// Opens the Main Window on Settings, building it if it is not already open.
 fn open_settings(app: &tauri::AppHandle) {
-    if let Err(error) = show_settings_window(app) {
-        log::error!("could not open Settings: {error}");
-    }
-}
-
-fn show_settings_window(app: &tauri::AppHandle) -> tauri::Result<()> {
-    show_on_demand_window(
-        app,
-        SETTINGS_WINDOW,
-        "Settings",
-        (480.0, 560.0),
-        (400.0, 420.0),
-    )
+    open_main_window(app, Some(SETTINGS_SECTION));
 }
 
 /// The Resolved Theme — the palette actually painted, never `system`; see

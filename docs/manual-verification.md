@@ -45,8 +45,8 @@ Everything else is checked against the release build.
 - [ ] **New Note** opens a capture window, with the Note Hotkey spelled out beside the item.
 - [ ] **New Task** opens the Task Creation window, with the Task Hotkey spelled out beside the item.
 - [ ] **View Notes** opens the Main Window, showing History.
-- [ ] **View Tasks** opens the tasks window, and both can be open at once.
-- [ ] **Settings** opens the settings window.
+- [ ] **View Tasks** opens the Main Window, showing Tasks View; it does not open a second reading window.
+- [ ] **Settings** opens the Main Window, showing Settings.
 - [ ] **Quit** ends the process — the tray icon disappears and nothing is left running.
 - [ ] Launching the app a second time while it is running — from Spotlight, and again from the Finder — leaves exactly one tray icon and one process each time, and opens a capture window rather than a second app.
 
@@ -55,15 +55,15 @@ Everything else is checked against the release build.
 The palette is the point of this section, and the moment to watch is the one the window arrives in — not the window afterwards. A window is painted the Theme it is going to keep before its webview has anything to show, so it should never be seen in the wrong one.
 
 - [ ] With the Theme set to **Dark**, **View Notes** puts the Main Window on screen dark from the moment it appears — sidebar included — with no white rectangle, no flash, no snap from light to dark.
-- [ ] The same for **Settings**, and for both windows with the Theme set to **Light**.
-- [ ] With the Theme on **Match the system** and macOS in dark mode, both windows arrive dark; with macOS in light mode, light.
+- [ ] The same for **Settings** in the Main Window, and for the Main Window with the Theme set to **Light**.
+- [ ] With the Theme on **Match the system** and macOS in dark mode, the Main Window arrives dark; with macOS in light mode, light.
 - [ ] Toggling the Theme with `Cmd+Shift+D`, then closing the window and opening it again, shows it in the palette that was toggled *to* — the Rust side reads the same preference the window does.
 - [ ] Changing the macOS appearance while the Theme is **Match the system** and a window is open repaints that window, and the next window opens in the new palette.
 
 ## The Main Window
 
 - [ ] **View Notes** opens one window with a sidebar down the left, History beside it, and the traffic lights over the sidebar's top row rather than over History.
-- [ ] The sidebar names **History** and marks it as the section on screen.
+- [ ] The sidebar names **History**, **Tasks** and **Settings**, and marks History as the section on screen.
 - [ ] Tabbing into the window reaches **History** in the sidebar, which shows a focus ring; `Space` and `Enter` on it leave History showing, and tabbing on reaches the Filter's own controls.
 - [ ] **View Notes** again, with the window already open, raises that window rather than opening a second one.
 - [ ] Closing the window and opening it again shows History on the most recent day holding Notes, with **Project = Any** — whatever the Filter was left on.
@@ -150,12 +150,12 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 
 ## Settings
 
-- [ ] **Settings** in the Tray Menu opens the settings window; `Escape` closes it, and re-opening it builds a fresh one.
-- [ ] On a first run — with no `settings.json` in the app data directory — the settings window opens on its own and asks about starting at login.
+- [ ] **Settings** in the Tray Menu opens the Main Window on the Settings section; `Escape` closes the Main Window, and re-opening it builds a fresh one.
+- [ ] On a first run — with no `settings.json` in the app data directory — the Main Window opens on its Settings section and asks about starting at login.
 - [ ] Answering **Not now** leaves the app out of System Settings → General → Login Items, and the question is not asked again on the next launch.
 - [ ] Closing the window without answering counts as **Not now** — the app is not added to the login items, and the question is not asked again either.
 - [ ] Answering **Start at login** adds it, and the app launches after a log out and back in.
-- [ ] The checkbox afterwards adds and removes the login item, and matches what System Settings shows when Settings is re-opened.
+- [ ] The checkbox afterwards adds and removes the login item, and matches what System Settings shows when the Settings section is re-opened.
 - [ ] Settings shows the exact configured Tauri application version centered at the bottom.
 - [ ] A development build shows a **Dev** label beside that version; a release build shows the version without it.
 
@@ -255,7 +255,7 @@ Requires the release build: macOS will not hold a notification for a binary with
 - [ ] Editing a Recurring Task's cadence or time replaces its pending Alert rather than adding one, and nothing arrives for the slot it was reanchored away from.
 - [ ] A schedule already in the past produces no Alert at all, and none arrives when the app is relaunched.
 - [ ] Refusing the prompt still saves the Task and its schedule; Tasks View says the Task is unaffected, and **Settings › Task Alerts** reads **Not allowed** with the path `System Settings › Notifications › Work Journal` and an **Open System Settings** button that opens that pane.
-- [ ] Turning notifications back on there and returning to the Settings window changes **Task Alerts** to **Allowed** without a relaunch, and the Tasks still ahead are registered; none of the past ones are replayed.
+- [ ] Turning notifications back on there and returning to the **Settings** section changes **Task Alerts** to **Allowed** without a relaunch, and the Tasks still ahead are registered; none of the past ones are replayed.
 - [ ] With Work Journal denied, everything else about Tasks — creating, scheduling, completing, exporting — still works.
 
 Daylight saving is macOS's to resolve, not the app's: the app registers the civil date and minute, and the OS matches its own clock against them. These are what verify it — run them by setting the Mac's clock and date forward to the transition, or on the day itself.

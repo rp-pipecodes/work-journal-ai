@@ -19,26 +19,24 @@ export type Unlisten = () => void
 /**
  * The window labels. One Vite build serves every window and the label is the
  * only thing that says which — must match `CAPTURE_WINDOW`,
- * `TASK_CREATION_WINDOW`, `MAIN_WINDOW` and `SETTINGS_WINDOW` in
- * `src-tauri/src/lib.rs`.
+ * `TASK_CREATION_WINDOW` and `MAIN_WINDOW` in `src-tauri/src/lib.rs`.
  *
  * `MAIN_WINDOW` is the window the journal is read in, a section at a time —
- * see docs/adr/0022-one-main-window-for-reading-and-settings.md. Settings still
- * has a label of its own until it moves into it.
+ * see docs/adr/0022-one-main-window-for-reading-and-settings.md.
  */
 export const CAPTURE_WINDOW = 'capture'
 export const TASK_CREATION_WINDOW = 'task-creation'
 export const MAIN_WINDOW = 'main'
-export const SETTINGS_WINDOW = 'settings'
 
 /**
  * A section of the Main Window, named by whatever asked for it: the Tray Menu
  * and a clicked Task Alert both say which one they mean. The names live here
- * because they cross to the Rust side — must match `HISTORY_SECTION` and
- * `TASKS_SECTION` in `src-tauri/src/lib.rs`, and the sidebar's own list in
+ * because they cross to the Rust side — must match `HISTORY_SECTION`,
+ * `TASKS_SECTION` and `SETTINGS_SECTION` in `src-tauri/src/lib.rs`, and the
+ * sidebar's own list in
  * `src/views/main/sections.ts`.
  */
-export type MainSection = 'history' | 'tasks'
+export type MainSection = 'history' | 'tasks' | 'settings'
 
 /**
  * An Entry Point named a section of the Main Window. Addressed to a window

@@ -132,7 +132,7 @@ The independently stored combination and registration status of either Note Hotk
 _Avoid_: Shortcut setting, key binding
 
 **Tray Menu**:
-The menu bar icon's menu. The Entry Point that always works, offering both New Note and New Task so it is the fallback when either configured combination is unavailable. The way into the Main Window as well, and the one Entry Point that names which section to land on — View Notes, View Tasks and Settings each open their own. Also the one place the journal is read back without opening a window: Yesterday's Digest is copied from here.
+The menu bar icon's menu. The Entry Point that always works, offering both New Note and New Task so it is the fallback when either configured combination is unavailable. The way into the Main Window as well, and the one Entry Point that names which section to land on — View Notes, View Tasks and Settings each open the Main Window on their section. Also the one place the journal is read back without opening a window: Yesterday's Digest is copied from here.
 _Avoid_: Menu bar, status item
 
 **Tray Count**:

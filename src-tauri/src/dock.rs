@@ -69,7 +69,7 @@ impl Dock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CAPTURE_WINDOW, SETTINGS_WINDOW, TASK_CREATION_WINDOW};
+    use crate::{CAPTURE_WINDOW, TASK_CREATION_WINDOW};
 
     #[test]
     fn opening_the_main_window_puts_the_app_in_the_dock() {
@@ -123,11 +123,11 @@ mod tests {
     }
 
     #[test]
-    fn another_window_of_its_own_is_not_the_main_window() {
+    fn an_unknown_window_is_not_the_main_window() {
         let dock = Dock::default();
 
-        assert_eq!(dock.window_opened(SETTINGS_WINDOW), None);
-        assert_eq!(dock.window_closed(SETTINGS_WINDOW), None);
+        assert_eq!(dock.window_opened("unknown"), None);
+        assert_eq!(dock.window_closed("unknown"), None);
     }
 
     #[test]

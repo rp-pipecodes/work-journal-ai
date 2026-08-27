@@ -4,15 +4,15 @@
  * falls in, and what a change to any of them re-reads. Every sequencing rule of
  * Tasks View lives here — which of two overlapping reads may reach the view,
  * what a refused change says, when the OS is asked to allow Task Alerts — so
- * the tasks window is JSX over a snapshot.
+ * Tasks View is JSX over a snapshot.
  *
  * Headless on purpose: it is built from a Journal, a Desktop and a clock, and
  * nothing else, so the rules can be driven end to end from a test with real SQL
  * and no DOM. It holds no domain rule of its own — grouping, ordering and which
  * Tasks have an Alert all stay in the core, which this module asks.
  *
- * A session is built per tasks window and is never reset: the window is created
- * on demand and genuinely closed on dismiss.
+ * A session is built per Tasks View and is never reset: its Main Window section
+ * is created with the window and genuinely closed on dismiss.
  */
 
 import type { Desktop } from '@/platform/desktop'
@@ -64,7 +64,7 @@ export type TasksState =
     }
   | { state: 'unreadable' }
 
-/** Everything a tasks window renders, and the only thing it renders. */
+/** Everything Tasks View renders, and the only thing it renders. */
 export interface TasksSnapshot {
   showing: TasksTab
   tasks: TasksState
