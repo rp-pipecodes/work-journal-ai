@@ -70,7 +70,7 @@ The palette is the point of this section, and the moment to watch is the one the
 - [ ] The window opens wide enough for the sidebar and everything History's header holds; dragging it narrow stops at a width that still shows both.
 - [ ] `Cmd+Shift+D` toggles the Theme from the Main Window, and the sidebar repaints with it.
 
-## The Main Window menu bar
+## The menu bar
 
 - [ ] With the Main Window active, the menu bar shows exactly **Work Journal** and **Edit** — no View, Window, Help or other framework menu.
 - [ ] The **Work Journal** menu contains **About**, **Settings**, **Close Window** and **Quit**, and **About** opens the native About panel.
@@ -80,7 +80,9 @@ The palette is the point of this section, and the moment to watch is the one the
 - [ ] `Cmd+W` closes the Main Window without quitting; the tray icon, Hotkeys, Tray Count, Meeting Import and pending Task Alerts keep running.
 - [ ] `Cmd+Q` quits the app, matching **Quit** in the Tray Menu.
 - [ ] There is no View menu and no section-switching shortcut; sections are changed only from the sidebar.
-- [ ] Closing the Main Window removes both the Dock icon and the app-owned menu bar; reopening it restores the two menus.
+- [ ] Closing the Main Window removes the Dock icon and the **Work Journal** menu; reopening it restores both.
+- [ ] With no Main Window open, `Cmd+C`, `Cmd+X`, `Cmd+V` and `Cmd+Z` all work in the Capture field.
+- [ ] With no Main Window open, the same four work in the Task Creation field.
 
 ## Capture from the Tray Menu
 

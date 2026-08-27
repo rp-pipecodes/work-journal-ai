@@ -140,7 +140,7 @@ How many Captured Notes today's Journal Day holds, shown beside the menu bar gly
 _Avoid_: Badge, counter, notification
 
 **Dock Icon**:
-The app's icon in the Dock, present only while the Main Window is open and gone the moment it closes — with the Cmd+Tab entry and the menu bar that come with it. Nothing else puts it there: a Capture or a Task Creation raised over anything leaves it exactly as it was. Clicking it is the one way into the Main Window that names no section, so it lands on History.
+The app's icon in the Dock, present only while the Main Window is open and gone the moment it closes — with the Cmd+Tab entry and the app menu that come with it; the Edit menu is the application's own and stays whether or not the icon is there. Nothing else puts it there: a Capture or a Task Creation raised over anything leaves it exactly as it was. Clicking it is the one way into the Main Window that names no section, so it lands on History.
 _Avoid_: App icon, taskbar, activation policy
 
 ## Time
@@ -159,7 +159,7 @@ _Avoid_: Updated at, modified, revision
 ## Reading back
 
 **Main Window**:
-The one window the journal is read and configured in: History, Tasks View and Settings as sections of a sidebar, exactly one of them showing. An Entry Point that names a section decides which; anything that names none lands on History. A section holds whatever the user did to it while another is showing, but the window itself is gone when closed, so the next one opens fresh. While it is open the app has a Dock icon and a menu bar; when it closes the app is the menu bar glyph again.
+The one window the journal is read and configured in: History, Tasks View and Settings as sections of a sidebar, exactly one of them showing. An Entry Point that names a section decides which; anything that names none lands on History. A section holds whatever the user did to it while another is showing, but the window itself is gone when closed, so the next one opens fresh. While it is open the app has a Dock icon and its app menu; when it closes the app is the menu bar glyph again.
 _Avoid_: Main view, dashboard, home, shell
 
 **History**:
