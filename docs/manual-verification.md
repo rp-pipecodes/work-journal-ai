@@ -96,6 +96,18 @@ The palette is the point of this section, and the moment to watch is the one the
 - [ ] Re-opening **New Note** straight after committing a Note shows an empty field too — the committed text is not still sitting there.
 - [ ] Notes committed before quitting are still there after relaunching the app, and after a restart of the machine.
 
+## A Capture survives the Main Window opening
+
+Start each of these with **New Note**, half a Note typed and the field never left.
+
+- [ ] **View Notes** in the Tray Menu opens the Main Window on History; the capture panel goes away, and **New Note** again shows the same half-typed words rather than an empty field.
+- [ ] The same for **View Tasks**, and for **Settings**.
+- [ ] The same for a click on the Dock icon, with the Main Window already open and then closed.
+- [ ] The same for a clicked Task Alert — schedule a Task a minute out, start a Capture, and click the alert.
+- [ ] Clicking on another application instead still discards the Capture and clears the field.
+- [ ] With the Main Window on screen, **New Note** puts the capture panel over it rather than behind it, and the panel stays on top while the Main Window is clicked.
+- [ ] `Escape` on that Capture clears the field, hands focus back to the application that was in front, and leaves the Main Window on screen.
+
 ## The two Hotkeys and relaunch
 
 Run these on a first run — with no `settings.json` — so the defaults are the ones a new user gets.

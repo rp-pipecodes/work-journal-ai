@@ -136,9 +136,10 @@ export default function CaptureView({
     // the half-typed Body exactly where the user left it.
     const shown = desktop.onCaptureShown(() => field.current?.focus())
     // Clicking away is a discard, not a Capture left floating over the screen.
-    // Unless the window is already gone: the other resident window was invoked,
-    // the Rust side put this one away, and what is half-typed here is waiting
-    // for the next time rather than being thrown away behind the user's back.
+    // Unless the window is already gone: another Work Journal window was
+    // invoked — the other resident panel, or the Main Window — the Rust side
+    // put this one away, and what is half-typed here is waiting for the next
+    // time rather than being thrown away behind the user's back.
     const blurred = desktop.onWindowBlurred(() => {
       void desktop.isWindowVisible().then((visible) => {
         if (visible) void dismiss()
