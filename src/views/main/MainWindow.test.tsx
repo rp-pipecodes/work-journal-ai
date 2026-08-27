@@ -4,7 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ThemeProvider from '@/components/ThemeProvider'
-import { fakeDesktop } from '@/platform/testing/desktop'
+import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
 import type { MainSection } from '@/platform/desktop'
 import type { Task } from '@/journal/journal'
 import { formatDayRange } from '@/views/history/range-label'
@@ -97,6 +97,47 @@ describe('the section the Main Window opens on', () => {
   it('is History when the Entry Point named none', async () => {
     await showMainWindow({ captured: [MONDAY], tasks: ['renew the cert'] })
 
+    await showsHistory()
+  })
+
+  it('is the one named while the window was still starting up', async () => {
+    await showMainWindow({
+      captured: [MONDAY],
+      tasks: ['renew the cert'],
+      // The Tray Menu reached before the webview has come up: nothing is
+      // listening yet, so the window has to find the section as it asks.
+      whileStartingUp: (desktop) => desktop.requestSection('tasks'),
+    })
+
+    await showsTasks()
+  })
+
+  it('is the one named last when two requests arrive back to back', async () => {
+    await showMainWindow({
+      captured: [MONDAY],
+      tasks: ['renew the cert'],
+      // A clicked Task Alert builds the window, and the Tray Menu is reached
+      // before it is on screen. The window lands where the user last asked.
+      section: 'tasks',
+      whileStartingUp: (desktop) => desktop.requestSection('settings'),
+    })
+
+    await showsSettings()
+  })
+
+  it('is History for a Dock click, whatever an earlier request named', async () => {
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      tasks: ['renew the cert'],
+      section: 'tasks',
+      // A click on the Dock icon names no section, and the window it opens
+      // does not inherit the section left over from the Tray Menu.
+      whileStartingUp: (desktop) => desktop.requestSection(null),
+    })
+
+    // History is where the window starts, so the claim has to have come back
+    // before this says anything: it came back with nothing.
+    await expect.poll(() => desktop.sectionsClaimed).toBe(1)
     await showsHistory()
   })
 
@@ -450,6 +491,7 @@ async function showMainWindow({
   captured,
   tasks = [],
   section,
+  whileStartingUp,
   alertFor,
   stored = { startAtLogin: false },
 }: {
@@ -458,6 +500,11 @@ async function showMainWindow({
   tasks?: string[]
   /** The section the Entry Point that opened the window named, if it named one. */
   section?: MainSection
+  /**
+   * An Entry Point reached in the moment between the window being built and
+   * its webview coming up — the window exists, and nothing in it is listening.
+   */
+  whileStartingUp?: (desktop: FakeDesktop) => void
   /** The Task a clicked Alert was about, as its position in `tasks`. */
   alertFor?: number
   /** Values in the settings store; empty means the first-run question is due. */
@@ -487,7 +534,12 @@ async function showMainWindow({
       />
     </ThemeProvider>,
   )
-  if (section === 'settings') {
+  whileStartingUp?.(desktop)
+  // Where a window still starting up lands is what those tests are about, so
+  // they wait for the section themselves rather than for one of them here.
+  if (whileStartingUp !== undefined) {
+    await screen.findByRole('navigation', { name: 'Sections' })
+  } else if (section === 'settings') {
     await screen.findByText('Note Hotkey')
   } else {
     await firstListShown(captured.length)

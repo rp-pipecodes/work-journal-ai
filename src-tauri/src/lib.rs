@@ -158,8 +158,8 @@ struct OpenedTaskAlert(Mutex<Option<String>>);
 pub fn run() {
     tauri::Builder::default()
         // Tauri's macOS defaults include Services, Hide, View, Window and
-        // other framework-owned items. The Main Window gets the deliberate
-        // menu below only while it exists.
+        // other framework-owned items. The app installs its own Edit menu at
+        // startup and adds its app menu while the Main Window exists.
         .enable_macos_default_menu(false)
         // Registered first, deliberately: a second launch must exit here,
         // before it can build a second tray icon or fail to register the
@@ -185,10 +185,12 @@ pub fn run() {
             if matches!(event, WindowEvent::Destroyed) {
                 let app = window.app_handle();
                 let presence = app.state::<Dock>().window_closed(window.label());
-                if presence == Some(Presence::MenuBarOnly) {
-                    remove_main_window_menu(app);
-                }
+                // The app stops drawing a menu bar first, so the moment
+                // between the two menus is never a menu bar of one.
                 show_presence(app, presence);
+                if presence == Some(Presence::MenuBarOnly) {
+                    remove_app_menu(app);
+                }
             }
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -237,6 +239,11 @@ pub fn run() {
             // Before the resident windows, so that neither webview can ask for
             // a Hotkey's status before there is one to hand it.
             register_hotkeys(app.handle());
+
+            // Before the resident windows too: their fields route Cmd+C, Cmd+X,
+            // Cmd+V and Cmd+Z through the Edit menu, which is the
+            // application's for as long as any window can hold a text field.
+            install_edit_menu(app.handle())?;
 
             // Built once, here, and thereafter only shown and hidden. Booting a
             // webview costs a few hundred milliseconds a Capture cannot afford,
@@ -443,45 +450,12 @@ fn other_resident_window(label: &str) -> &'static str {
     }
 }
 
-/// The native menu bar that belongs to the Main Window. It is deliberately
-/// built from two submenus rather than `Menu::default`: Tauri's defaults add
-/// framework-owned View, Window, Help and macOS application commands that are
-/// not part of Work Journal's navigation model.
-///
-/// Close Window lives in the app menu because AppKit only matches visible menu
-/// key equivalents. It is a normal item rather than the predefined
-/// responder-chain command: Cmd+W must close this app's Main Window even when
-/// a resident Capture or Task Creation panel is temporarily in front of it.
-fn build_main_window_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let about = PredefinedMenuItem::about(app, Some("About"), None)?;
-    let settings = MenuItem::with_id(app, MAIN_SETTINGS_MENU_ITEM, "Settings", true, None::<&str>)?;
-    let close_window = MenuItem::with_id(
-        app,
-        CLOSE_WINDOW_MENU_ITEM,
-        "Close Window",
-        true,
-        Some("CmdOrCtrl+W"),
-    )?;
-    let quit = PredefinedMenuItem::quit(app, Some("Quit"))?;
-    let about_separator = PredefinedMenuItem::separator(app)?;
-    let settings_separator = PredefinedMenuItem::separator(app)?;
-    let close_separator = PredefinedMenuItem::separator(app)?;
-    let app_menu = Submenu::with_id_and_items(
-        app,
-        APP_MENU_ID,
-        APP_NAME,
-        true,
-        &[
-            &about,
-            &about_separator,
-            &settings,
-            &settings_separator,
-            &close_window,
-            &close_separator,
-            &quit,
-        ],
-    )?;
-
+/// The Edit menu, which belongs to the application rather than to any one
+/// window. macOS routes Cmd+Z, Cmd+X, Cmd+C and Cmd+V through menu items, so
+/// the resident Capture and Task Creation panels need this menu installed
+/// whether or not the Main Window exists — see
+/// docs/adr/0023-the-app-enters-the-dock-only-while-the-main-window-is-open.md.
+fn build_edit_menu(app: &tauri::AppHandle) -> tauri::Result<Submenu<tauri::Wry>> {
     let undo = PredefinedMenuItem::undo(app, Some("Undo"))?;
     let redo = PredefinedMenuItem::redo(app, Some("Redo"))?;
     let edit_separator = PredefinedMenuItem::separator(app)?;
@@ -489,7 +463,8 @@ fn build_main_window_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::W
     let copy = PredefinedMenuItem::copy(app, Some("Copy"))?;
     let paste = PredefinedMenuItem::paste(app, Some("Paste"))?;
     let select_all = PredefinedMenuItem::select_all(app, Some("Select All"))?;
-    let edit_menu = Submenu::with_id_and_items(
+
+    Submenu::with_id_and_items(
         app,
         EDIT_MENU_ID,
         "Edit",
@@ -503,35 +478,90 @@ fn build_main_window_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::W
             &paste,
             &select_all,
         ],
-    )?;
-
-    Menu::with_items(app, &[&app_menu, &edit_menu])
+    )
 }
 
-/// Installs the menu only after the Main Window is about to exist. The Tray
-/// Menu is attached to its icon and is unaffected by this app-wide menu.
-fn install_main_window_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
-    let menu = build_main_window_menu(app)?;
-    app.set_menu(menu)?;
+/// The app menu, which arrives with the Main Window and leaves with it: About,
+/// Settings, Close Window and Quit are what a Regular application owns and an
+/// Accessory one does not.
+///
+/// Close Window lives here because AppKit only matches visible menu key
+/// equivalents. It is a normal item rather than the predefined responder-chain
+/// command: Cmd+W must close this app's Main Window even when a resident
+/// Capture or Task Creation panel is temporarily in front of it.
+fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<Submenu<tauri::Wry>> {
+    let about = PredefinedMenuItem::about(app, Some("About"), None)?;
+    let settings = MenuItem::with_id(app, MAIN_SETTINGS_MENU_ITEM, "Settings", true, None::<&str>)?;
+    let close_window = MenuItem::with_id(
+        app,
+        CLOSE_WINDOW_MENU_ITEM,
+        "Close Window",
+        true,
+        Some("CmdOrCtrl+W"),
+    )?;
+    let quit = PredefinedMenuItem::quit(app, Some("Quit"))?;
+    let about_separator = PredefinedMenuItem::separator(app)?;
+    let settings_separator = PredefinedMenuItem::separator(app)?;
+    let close_separator = PredefinedMenuItem::separator(app)?;
+
+    Submenu::with_id_and_items(
+        app,
+        APP_MENU_ID,
+        APP_NAME,
+        true,
+        &[
+            &about,
+            &about_separator,
+            &settings,
+            &settings_separator,
+            &close_window,
+            &close_separator,
+            &quit,
+        ],
+    )
+}
+
+/// Installs the application's standing menu: Edit alone, which is every menu a
+/// menu-bar-only app needs and every menu it may show. Called once at startup,
+/// before the resident panels exist, and again whenever the Main Window takes
+/// its own menu away with it.
+///
+/// The menu is deliberately built by hand rather than from `Menu::default`:
+/// Tauri's defaults add framework-owned View, Window, Help and macOS
+/// application commands that are not part of Work Journal's navigation model.
+/// The Tray Menu is attached to its icon and is unaffected by this app-wide
+/// menu.
+fn install_edit_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let edit = build_edit_menu(app)?;
+    app.set_menu(Menu::with_items(app, &[&edit])?)?;
     Ok(())
 }
 
-/// Removes the app-wide menu as the Main Window is destroyed. With no menu,
-/// the Accessory application is again represented only by its tray glyph.
-fn remove_main_window_menu(app: &tauri::AppHandle) {
-    if let Err(error) = app.remove_menu() {
-        log::error!("could not remove the Main Window menu: {error}");
+/// Adds the app menu beside Edit as the Main Window is about to exist, so the
+/// menu bar a Regular application shows is complete from the first frame.
+fn install_main_window_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let app_menu = build_app_menu(app)?;
+    let edit = build_edit_menu(app)?;
+    app.set_menu(Menu::with_items(app, &[&app_menu, &edit])?)?;
+    Ok(())
+}
+
+/// Takes the app menu away as the Main Window is destroyed, leaving the Edit
+/// menu the resident panels keep their clipboard and undo shortcuts through.
+fn remove_app_menu(app: &tauri::AppHandle) {
+    if let Err(error) = install_edit_menu(app) {
+        log::error!("could not restore the Edit menu on its own: {error}");
     }
 }
 
 /// Restores the menu-bar-only state if creating the Main Window did not
-/// complete. Both the native menu and Dock state are transactions around the
+/// complete. Both the app menu and the Dock state are transactions around the
 /// window build, so neither may be left claiming an absent window.
 fn rollback_main_window_open(app: &tauri::AppHandle, menu_was_attempted: bool) {
-    if menu_was_attempted {
-        remove_main_window_menu(app);
-    }
     show_presence(app, app.state::<Dock>().window_closed(MAIN_WINDOW));
+    if menu_was_attempted {
+        remove_app_menu(app);
+    }
 }
 
 /// Opens the Main Window, building it if it is not already open. Unlike the
@@ -544,22 +574,30 @@ fn rollback_main_window_open(app: &tauri::AppHandle, menu_was_attempted: bool) {
 /// already showing and opens a new one on History.
 ///
 /// Which section is said twice, exactly as a Task Alert is: written down for a
-/// window this call is about to build, which has no webview to hear anything
-/// yet, and announced for one that is already open and has long since asked.
+/// window that has yet to ask — one this call is about to build, or one built
+/// a moment ago whose webview is still coming up — and announced for one that
+/// is already open and has long since asked.
+///
+/// Said both ways every time, rather than one or the other depending on
+/// whether a window exists yet. A window that exists is not necessarily
+/// listening, and deciding between them left a request arriving while the
+/// window was still starting up written down nowhere and announced to nothing.
+/// The window takes whichever of the two arrives last.
 fn open_main_window(app: &tauri::AppHandle, section: Option<&str>) {
-    // A window already open claims nothing, so writing the section down for it
-    // would only leave it waiting for whatever opens the window next.
-    let waiting = match app.get_webview_window(MAIN_WINDOW) {
-        Some(_) => None,
-        None => section,
-    };
-    remember_requested_section(app, waiting);
+    // An Entry Point that names no section — a click on the Dock icon — takes
+    // away what an earlier request left waiting, so the window it opens starts
+    // on History rather than inheriting that request.
+    remember_requested_section(app, section);
 
     if let Err(error) = show_main_window(app) {
         log::error!("could not open the Main Window: {error}");
-        // Nothing was built, so nothing is going to come and ask.
-        remember_requested_section(app, None);
-        return;
+        if app.get_webview_window(MAIN_WINDOW).is_none() {
+            // Nothing was built, so nothing is going to come and ask.
+            remember_requested_section(app, None);
+            return;
+        }
+        // The window is there and will come and ask — building it succeeded
+        // and only taking focus failed — so what was written down stands.
     }
 
     let Some(section) = section else {
@@ -614,6 +652,10 @@ fn requested_section(pending: tauri::State<'_, RequestedSection>) -> Option<Stri
 /// after, until it is dismissed and genuinely closed. The Main Window is the
 /// only on-demand window; the Capture and Task Creation panels are resident.
 fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    // Whatever is half-typed in a Capture survives the window that is about to
+    // take focus from it.
+    put_the_capture_away(app);
+
     // Reaching the Tray Menu again with the window already open raises it
     // rather than building a second one.
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
@@ -621,12 +663,14 @@ fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
         return window.set_focus();
     }
 
-    // Before the window exists, so it is born into an application that already
-    // owns a Dock icon and a Cmd+Tab entry rather than acquiring them under the
-    // user. Only the Main Window moves this; the Dock ignores the rest.
+    // Both before the window exists, so it is born into an application that
+    // already owns a Dock icon and a Cmd+Tab entry rather than acquiring them
+    // under the user. Only the Main Window moves this; the Dock ignores the
+    // rest.
     let presence = app.state::<Dock>().window_opened(MAIN_WINDOW);
-    show_presence(app, presence);
 
+    // The app menu goes up before the app starts drawing a menu bar, so the
+    // first bar the user sees is already the two menus and never Edit alone.
     let menu_was_attempted = presence == Some(Presence::InTheDock);
     if menu_was_attempted {
         if let Err(error) = install_main_window_menu(app) {
@@ -634,6 +678,8 @@ fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
             return Err(error);
         }
     }
+
+    show_presence(app, presence);
 
     // A window opens on whatever it was built with and keeps it until its
     // webview has something of its own to show — a fifth of a second later. Both
@@ -664,8 +710,8 @@ fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     let window = match builder.build() {
         Ok(window) => window,
         Err(error) => {
-            // Nothing was built, so nothing should be left in the Dock or the
-            // app-wide menu either.
+            // Nothing was built, so nothing should be left in the Dock or
+            // claiming a window in the menu bar either.
             rollback_main_window_open(app, menu_was_attempted);
             return Err(error);
         }
@@ -675,6 +721,29 @@ fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     window.set_focus()?;
 
     Ok(())
+}
+
+/// Puts an on-screen Capture panel away before another Work Journal window
+/// takes focus from it. Losing focus to another application is the user walking
+/// away from what they were typing, and the Capture discards on it; losing it
+/// to this app's own window is a handoff, and the panel going away first is how
+/// the Capture is told which one this is — the very exemption the other
+/// resident panel already gets in `raise_resident_window`.
+///
+/// Hidden by this side rather than by asking the window to dismiss itself,
+/// which would throw the half-typed Body away. Nothing is cleared, so the next
+/// Capture opens on the words that were already there — which is also why a
+/// Main Window that then fails to open needs nothing put back: the panel is
+/// away rather than gone, and the next Entry Point brings it back with every
+/// word in it.
+fn put_the_capture_away(app: &tauri::AppHandle) {
+    let Some(capture) = app.get_webview_window(CAPTURE_WINDOW) else {
+        return;
+    };
+
+    if let Err(error) = capture.hide() {
+        log::error!("could not put the Capture away: {error}");
+    }
 }
 
 /// Tells macOS how the app shows itself now, when that has changed at all.

@@ -48,25 +48,41 @@ export default function MainWindow({
   const showing = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    // What the Entry Point that opened this window asked for, claimed as the
-    // window opens: a window built by that very request has no webview yet
-    // when the announcement goes out, so it is written down for it as well.
-    void desktop.requestedSection().then(
+    // An Entry Point says the section twice — written down for a window that
+    // has yet to ask, announced for one already listening — because a window
+    // built by that very request has no webview when the announcement goes
+    // out. Both are read here, and whichever section was named last wins.
+
+    // The announcement first, and the section written down only once this is
+    // listening: a request arriving in the gap between the two would otherwise
+    // be announced to nothing and already taken from where it was written.
+    let announced = false
+    const listening = desktop.onSectionRequested((requested) => {
+      announced = true
+      // The section heard is claimed as well, exactly as Tasks View claims a
+      // Task Alert it hears: what was written down for this window has been
+      // delivered, and leaving it there would hand it to the next window to
+      // open — which nobody asked to land anywhere but History.
+      void desktop.requestedSection().catch((error: unknown) => {
+        console.error('could not claim the section that was announced', error)
+      })
+      setSection(requested)
+    })
+
+    void listening.then(() => desktop.requestedSection()).then(
       (requested) => {
-        if (requested !== null) setSection(requested)
+        // An announcement that has already landed is the later word: the
+        // window was told a section while this claim was still crossing, and
+        // what it came back with cannot undo that.
+        if (requested !== null && !announced) setSection(requested)
       },
       (error: unknown) => {
         console.error('could not read the section this window opened on', error)
       },
     )
 
-    // And the announcement, for a window that was already on screen: reaching
-    // the Tray Menu again, or clicking a Task Alert, switches this window
-    // rather than opening another one.
-    const requested = desktop.onSectionRequested(setSection)
-
     return () => {
-      void requested.then((stop) => stop())
+      void listening.then((stop) => stop())
     }
   }, [desktop])
 

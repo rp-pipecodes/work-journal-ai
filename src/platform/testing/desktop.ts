@@ -30,6 +30,8 @@ export interface FakeDesktop extends Desktop {
   windowsClosed: number
   /** How many times a Task Creation was dismissed. */
   taskCreationsDismissed: number
+  /** How many times a Capture was dismissed. */
+  capturesDismissed: number
   /** Every size the Task Creation window was asked to take, most recent last. */
   taskCreationFits: boolean[]
   /** What the settings store holds, readable without going through a facade. */
@@ -68,16 +70,22 @@ export interface FakeDesktop extends Desktop {
   alertsFail: boolean
   /**
    * An Entry Point names a section of the Main Window — the Tray Menu, or a
-   * clicked Task Alert. Called before the window is rendered it leaves the
-   * section pending, as a request that built the window does; called after, it
-   * is delivered to the window on screen.
+   * clicked Task Alert. Written down for a window that has yet to ask, and
+   * announced for one already on screen, so whichever section was named last
+   * is the one the window lands on.
+   *
+   * Null is an Entry Point that names no section — a click on the Dock icon,
+   * which opens the window on History and takes away whatever an earlier
+   * request left waiting.
    */
-  requestSection(section: MainSection): void
+  requestSection(section: MainSection | null): void
   /**
    * The section waiting to be claimed by the Main Window it named. Null when
    * nothing has asked for one, which resolves to History.
    */
   pendingSection: MainSection | null
+  /** How many times a window has asked which section it opened on. */
+  sectionsClaimed: number
   /** The user clicks a Task Alert. */
   openTaskAlert(taskId: string): void
   /**
@@ -159,6 +167,7 @@ export function fakeDesktop({
     windowsClosed: 0,
     taskCreationsBegun: 0,
     taskCreationsDismissed: 0,
+    capturesDismissed: 0,
     taskCreationFits: [],
     alertPermission,
     alertPrompted: false,
@@ -167,6 +176,7 @@ export function fakeDesktop({
     alertsFail: false,
     notificationSettingsOpened: 0,
     pendingSection: null,
+    sectionsClaimed: 0,
     pendingTaskAlert: null,
 
     beginCapture: () => captureShown.announce(undefined),
@@ -209,7 +219,9 @@ export function fakeDesktop({
         },
       })),
 
-    dismissCapture: async () => {},
+    dismissCapture: async () => {
+      desktop.capturesDismissed += 1
+    },
     fitCapture: async (fit) => {
       desktop.fits.push(fit)
     },
@@ -252,18 +264,26 @@ export function fakeDesktop({
     },
     requestSection: (section) => {
       // Both, exactly as the Rust side does it: written down for a Main Window
-      // this request is about to build, and announced for one already open.
+      // that has yet to ask — one this request is about to build, or one still
+      // starting up — and announced for a window already listening.
       desktop.pendingSection = section
-      sectionRequested.announce(section)
+      if (section !== null) sectionRequested.announce(section)
     },
     requestedSection: async () => {
       // Handed over exactly once, like the Alert: the section an Entry Point
       // named is for the window it opened, not for every window after it.
+      desktop.sectionsClaimed += 1
       const waiting = desktop.pendingSection
       desktop.pendingSection = null
       return waiting
     },
-    onSectionRequested: async (handle) => sectionRequested.add(handle),
+    onSectionRequested: async (handle) => {
+      // Listening begins only once this has settled, as it does across the
+      // IPC: a window whose webview is still coming up hears nothing, which
+      // is the whole reason an Entry Point writes its section down as well.
+      await Promise.resolve()
+      return sectionRequested.add(handle)
+    },
 
     onTaskAlertOpened: async (handle) => taskAlertOpened.add(handle),
     announceTaskAlertsReconciled: async (held) =>

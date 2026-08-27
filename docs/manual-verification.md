@@ -70,7 +70,7 @@ The palette is the point of this section, and the moment to watch is the one the
 - [ ] The window opens wide enough for the sidebar and everything History's header holds; dragging it narrow stops at a width that still shows both.
 - [ ] `Cmd+Shift+D` toggles the Theme from the Main Window, and the sidebar repaints with it.
 
-## The Main Window menu bar
+## The menu bar
 
 - [ ] With the Main Window active, the menu bar shows exactly **Work Journal** and **Edit** — no View, Window, Help or other framework menu.
 - [ ] The **Work Journal** menu contains **About**, **Settings**, **Close Window** and **Quit**, and **About** opens the native About panel.
@@ -80,7 +80,9 @@ The palette is the point of this section, and the moment to watch is the one the
 - [ ] `Cmd+W` closes the Main Window without quitting; the tray icon, Hotkeys, Tray Count, Meeting Import and pending Task Alerts keep running.
 - [ ] `Cmd+Q` quits the app, matching **Quit** in the Tray Menu.
 - [ ] There is no View menu and no section-switching shortcut; sections are changed only from the sidebar.
-- [ ] Closing the Main Window removes both the Dock icon and the app-owned menu bar; reopening it restores the two menus.
+- [ ] Closing the Main Window removes the Dock icon and the **Work Journal** menu; reopening it restores both.
+- [ ] With no Main Window open, `Cmd+C`, `Cmd+X`, `Cmd+V` and `Cmd+Z` all work in the Capture field.
+- [ ] With no Main Window open, the same four work in the Task Creation field.
 
 ## Capture from the Tray Menu
 
@@ -93,6 +95,18 @@ The palette is the point of this section, and the moment to watch is the one the
 - [ ] Re-opening **New Note** after abandoning a Capture shows an empty field.
 - [ ] Re-opening **New Note** straight after committing a Note shows an empty field too — the committed text is not still sitting there.
 - [ ] Notes committed before quitting are still there after relaunching the app, and after a restart of the machine.
+
+## A Capture survives the Main Window opening
+
+Start each of these with **New Note**, half a Note typed and the field never left.
+
+- [ ] **View Notes** in the Tray Menu opens the Main Window on History; the capture panel goes away, and **New Note** again shows the same half-typed words rather than an empty field.
+- [ ] The same for **View Tasks**, and for **Settings**.
+- [ ] The same for a click on the Dock icon, with the Main Window already open and then closed.
+- [ ] The same for a clicked Task Alert — schedule a Task a minute out, start a Capture, and click the alert.
+- [ ] Clicking on another application instead still discards the Capture and clears the field.
+- [ ] With the Main Window on screen, **New Note** puts the capture panel over it rather than behind it, and the panel stays on top while the Main Window is clicked.
+- [ ] `Escape` on that Capture clears the field, hands focus back to the application that was in front, and leaves the Main Window on screen.
 
 ## The two Hotkeys and relaunch
 
