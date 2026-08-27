@@ -1,11 +1,13 @@
 mod alerts;
 mod calendar;
+mod dock;
 mod export;
 mod frontmost;
 mod hotkey;
 
 use alerts::{Permission, TaskAlert};
 use calendar::{Access, CalendarEvent, CalendarInfo};
+use dock::{Dock, Presence};
 use export::ExportedFile;
 use frontmost::PreviousApplication;
 use hotkey::{HotkeyAction, Hotkeys};
@@ -14,7 +16,7 @@ use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     webview::Color,
-    Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
+    Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_sql::{DbInstances, DbPool, Migration, MigrationKind};
@@ -146,6 +148,16 @@ pub fn run() {
                 .add_migrations(DATABASE_URL, migrations())
                 .build(),
         )
+        // The Main Window is genuinely closed rather than hidden, so its
+        // destruction is what takes the app back out of the Dock. Every other
+        // window passes through here and the Dock ignores it.
+        .on_window_event(|window, event| {
+            if matches!(event, WindowEvent::Destroyed) {
+                let app = window.app_handle();
+                let presence = app.state::<Dock>().window_closed(window.label());
+                show_presence(app, presence);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             dismiss_capture,
             start_task_creation,
@@ -174,9 +186,14 @@ pub fn run() {
                 )?;
             }
 
-            // Menu bar only: no Dock icon and no Cmd+Tab entry.
+            // Menu bar only: no Dock icon and no Cmd+Tab entry. The Main
+            // Window puts the app in the Dock for as long as it is open, and
+            // nothing else does — see docs/adr/0023-the-app-enters-the-dock-only-while-the-main-window-is-open.md.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            // Before any window is built, so the window event handler above
+            // always has something to ask.
+            app.manage(Dock::default());
 
             // Before the resident windows, so that neither webview can ask for
             // a Hotkey's status before there is one to hand it.
@@ -223,8 +240,17 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app, _event| {
+            // A click on the Dock icon. It names no section, so it opens the
+            // Main Window on the section it opens on by default — History —
+            // and raises it when one is already there.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                open_main_window(_app);
+            }
+        });
 }
 
 /// The schema lives in `.sql` files rather than Rust string literals so the
@@ -421,6 +447,11 @@ fn show_on_demand_window(
         return window.set_focus();
     }
 
+    // Before the window exists, so it is born into an application that already
+    // owns a Dock icon and a Cmd+Tab entry rather than acquiring them under the
+    // user. Only the Main Window moves this; the Dock ignores the rest.
+    show_presence(app, app.state::<Dock>().window_opened(label));
+
     // A window opens on whatever it was built with and keeps it until its
     // webview has something of its own to show — a fifth of a second later. Both
     // of these are about that gap: the window is painted the palette it is
@@ -447,12 +478,43 @@ fn show_on_demand_window(
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true);
 
-    let window = builder.build()?;
+    let window = match builder.build() {
+        Ok(window) => window,
+        Err(error) => {
+            // Nothing was built, so nothing should be left in the Dock either.
+            show_presence(app, app.state::<Dock>().window_closed(label));
+            return Err(error);
+        }
+    };
 
     // A Dock-less app does not reliably receive focus when a window appears.
     window.set_focus()?;
 
     Ok(())
+}
+
+/// Tells macOS how the app shows itself now, when that has changed at all.
+/// `None` is the ordinary case — most windows opening and closing say nothing
+/// about the Dock.
+fn show_presence(app: &tauri::AppHandle, presence: Option<Presence>) {
+    let Some(presence) = presence else {
+        return;
+    };
+
+    #[cfg(target_os = "macos")]
+    {
+        let policy = match presence {
+            Presence::InTheDock => tauri::ActivationPolicy::Regular,
+            Presence::MenuBarOnly => tauri::ActivationPolicy::Accessory,
+        };
+
+        if let Err(error) = app.set_activation_policy(policy) {
+            log::error!("could not change how the app shows itself: {error}");
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, presence);
 }
 
 /// Opens Tasks View, building the window if it is not already open. It may sit
