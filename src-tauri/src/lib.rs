@@ -352,13 +352,14 @@ fn raise_resident_window(
         return window.set_focus();
     }
 
+    // Whoever the panel is about to float over, remembered before anything
+    // moves: dismissing it hands focus straight back to them, and hiding the
+    // other panel first would let macOS promote somebody else in the meantime.
+    remember_frontmost_application(app);
+
     if let Some(other) = app.get_webview_window(other_resident_window(label)) {
         other.hide()?;
     }
-
-    // Whoever the panel is about to float over, remembered before it does:
-    // dismissing it hands focus straight back to them.
-    remember_frontmost_application(app);
 
     window.show()?;
     window.set_focus()?;
@@ -1033,26 +1034,18 @@ fn hide_resident_window(app: &tauri::AppHandle, label: &str) -> tauri::Result<()
 /// Takes note of the application a resident panel is about to cover, so that
 /// dismissing the panel can hand focus back to it.
 fn remember_frontmost_application(app: &tauri::AppHandle) {
-    #[cfg(target_os = "macos")]
     app.state::<PreviousApplication>().note(
-        frontmost::frontmost_application(),
-        frontmost::own_application(),
+        frontmost::frontmost_process_id(),
+        frontmost::own_process_id(),
     );
-
-    #[cfg(not(target_os = "macos"))]
-    let _ = app;
 }
 
 /// Hands focus back to the application a resident panel covered. Nothing to
 /// hand it to — nothing was ever in front — leaves focus where it is.
 fn hand_focus_back(app: &tauri::AppHandle) {
-    #[cfg(target_os = "macos")]
     if let Some(previous) = app.state::<PreviousApplication>().remembered_id() {
         frontmost::activate(previous);
     }
-
-    #[cfg(not(target_os = "macos"))]
-    let _ = app;
 }
 
 /// Become active without unhiding windows. Needed before the Tray Menu opens:

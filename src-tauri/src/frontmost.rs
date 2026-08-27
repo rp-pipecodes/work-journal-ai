@@ -28,66 +28,88 @@ impl PreviousApplication {
             return;
         };
 
-        *self.remembered() = Some(frontmost);
+        *self.locked() = Some(frontmost);
     }
 
     /// Who to hand focus back to, if anyone. The answer is kept rather than
     /// consumed: two dismissals in a row both belong to the same application.
+    /// It goes stale the moment that application quits, and macOS is free to
+    /// hand its process id to something else — the cost is one dismissal that
+    /// activates the wrong application, against a Capture that would otherwise
+    /// hand focus nowhere every time.
     pub fn remembered_id(&self) -> Option<ProcessId> {
-        *self.remembered()
+        *self.locked()
     }
 
     /// A poisoned lock is nothing to take the app down for — the worst it costs
     /// is one dismissal that hands focus nowhere.
-    fn remembered(&self) -> std::sync::MutexGuard<'_, Option<ProcessId>> {
+    fn locked(&self) -> std::sync::MutexGuard<'_, Option<ProcessId>> {
         self.0.lock().unwrap_or_else(|error| error.into_inner())
     }
 }
 
-/// What macOS has in front right now, if it is an application at all — a
-/// full-screen login window or the Dock's own overlay is nobody.
 #[cfg(target_os = "macos")]
-pub fn frontmost_application() -> Option<ProcessId> {
+mod app_kit {
+    use super::ProcessId;
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
     use objc2::{class, msg_send};
 
-    unsafe {
-        let workspace: Retained<AnyObject> = msg_send![class!(NSWorkspace), sharedWorkspace];
-        let frontmost: Option<Retained<AnyObject>> = msg_send![&*workspace, frontmostApplication];
-        let frontmost = frontmost?;
-        Some(msg_send![&*frontmost, processIdentifier])
+    /// What macOS has in front right now, if it is an application at all — a
+    /// full-screen login window or the Dock's own overlay is nobody.
+    pub fn frontmost_process_id() -> Option<ProcessId> {
+        unsafe {
+            let workspace: Retained<AnyObject> = msg_send![class!(NSWorkspace), sharedWorkspace];
+            let frontmost: Option<Retained<AnyObject>> =
+                msg_send![&*workspace, frontmostApplication];
+            Some(msg_send![&*frontmost?, processIdentifier])
+        }
+    }
+
+    /// This application's own process id, so it is never the one remembered.
+    pub fn own_process_id() -> ProcessId {
+        std::process::id() as ProcessId
+    }
+
+    /// Hands focus to the application that was in front. Nothing happens if it
+    /// has quit in the meantime, which is the right outcome: the user is left
+    /// wherever macOS put them instead.
+    pub fn activate(id: ProcessId) {
+        unsafe {
+            let application: Option<Retained<AnyObject>> = msg_send![
+                class!(NSRunningApplication),
+                runningApplicationWithProcessIdentifier: id
+            ];
+            let Some(application) = application else {
+                return;
+            };
+            // No options are needed: this only ever runs while Work Journal is
+            // the active application, putting a panel away, so macOS lets the
+            // activation through without being told to ignore anyone.
+            let _: bool = msg_send![&*application, activateWithOptions: 0usize];
+        }
     }
 }
 
-/// This application's own process id, so it is never the one remembered.
-#[cfg(target_os = "macos")]
-pub fn own_application() -> ProcessId {
-    std::process::id() as ProcessId
-}
+/// Nowhere else has an application to hand focus back to, so nothing is ever
+/// in front and nothing is ever activated. Putting a panel away is all that
+/// happens there.
+#[cfg(not(target_os = "macos"))]
+mod app_kit {
+    use super::ProcessId;
 
-/// Hands focus to the application that was in front. Nothing happens if it has
-/// quit in the meantime, which is the right outcome: the user is left wherever
-/// macOS put them instead.
-#[cfg(target_os = "macos")]
-pub fn activate(id: ProcessId) {
-    use objc2::rc::Retained;
-    use objc2::runtime::AnyObject;
-    use objc2::{class, msg_send};
-
-    unsafe {
-        let application: Option<Retained<AnyObject>> = msg_send![
-            class!(NSRunningApplication),
-            runningApplicationWithProcessIdentifier: id
-        ];
-        let Some(application) = application else {
-            return;
-        };
-        // No options: the application comes forward with the windows it had,
-        // rather than being told which of them to raise.
-        let _: bool = msg_send![&*application, activateWithOptions: 0usize];
+    pub fn frontmost_process_id() -> Option<ProcessId> {
+        None
     }
+
+    pub fn own_process_id() -> ProcessId {
+        0
+    }
+
+    pub fn activate(_id: ProcessId) {}
 }
+
+pub use app_kit::{activate, frontmost_process_id, own_process_id};
 
 #[cfg(test)]
 mod tests {
