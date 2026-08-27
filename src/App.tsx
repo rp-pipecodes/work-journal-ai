@@ -2,7 +2,7 @@ import type { Clock, Journal } from './journal/journal'
 import type { Desktop } from './platform/desktop'
 import type { AppSettings } from './settings/app-settings'
 import CaptureView from './views/capture/CaptureView'
-import HistoryView from './views/history/HistoryView'
+import MainWindow from './views/main/MainWindow'
 import TaskCreationView from './views/tasks/TaskCreationView'
 import TasksView from './views/tasks/TasksView'
 import SettingsView from './views/settings/SettingsView'
@@ -43,8 +43,8 @@ export default function App({
     return <TaskCreationView desktop={desktop} journal={journal} />
   }
 
-  if (view === 'history') {
-    return <HistoryView desktop={desktop} journal={journal} />
+  if (view === 'main') {
+    return <MainWindow desktop={desktop} journal={journal} />
   }
 
   if (view === 'tasks') {

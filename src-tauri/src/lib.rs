@@ -38,7 +38,7 @@ const QUIT_MENU_ITEM: &str = "quit";
 /// The window labels the frontend routes on — see `src/views/route.ts`.
 const CAPTURE_WINDOW: &str = "capture";
 const TASK_CREATION_WINDOW: &str = "task-creation";
-const HISTORY_WINDOW: &str = "history";
+const MAIN_WINDOW: &str = "main";
 const TASKS_WINDOW: &str = "tasks";
 const SETTINGS_WINDOW: &str = "settings";
 
@@ -377,23 +377,36 @@ fn other_resident_window(label: &str) -> &'static str {
     }
 }
 
-/// Opens History, building the window if it is not already open. Unlike the
+/// Opens the Main Window, building it if it is not already open. Unlike the
 /// capture window this one is created on demand and genuinely closed on
-/// dismiss — see docs/adr/0002-capture-window-is-hidden-never-closed.md.
-fn open_history(app: &tauri::AppHandle) {
-    if let Err(error) = show_history_window(app) {
-        log::error!("could not open History: {error}");
+/// dismiss — see docs/adr/0002-capture-window-is-hidden-never-closed.md and
+/// docs/adr/0022-one-main-window-for-reading-and-settings.md.
+fn open_main_window(app: &tauri::AppHandle) {
+    if let Err(error) = show_main_window(app) {
+        log::error!("could not open the Main Window: {error}");
     }
 }
 
-fn show_history_window(app: &tauri::AppHandle) -> tauri::Result<()> {
-    show_on_demand_window(app, HISTORY_WINDOW, "Notes", (520.0, 620.0), (380.0, 320.0))
+/// One size for the whole window, whichever section is showing: the sidebar's
+/// width on top of the room History had when it was a window of its own — see
+/// `SectionSidebar` in `src/views/main/SectionSidebar.tsx`. A window that
+/// resized itself when the user clicked a sidebar item would be disorienting,
+/// and would have nothing to say about a window already resized by hand.
+fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    show_on_demand_window(
+        app,
+        MAIN_WINDOW,
+        "Work Journal",
+        (696.0, 620.0),
+        (556.0, 320.0),
+    )
 }
 
 /// A window built the first time it is asked for and raised every time after,
-/// until it is dismissed and genuinely closed. The two windows that work this
-/// way — History and Settings — differ only in their label and their size; the
-/// awkward parts are the same for both, so they are only written once.
+/// until it is dismissed and genuinely closed. The windows that work this way
+/// — the Main Window, Tasks View and Settings — differ only in their label,
+/// their title and their size; the awkward parts are the same for all of them,
+/// so they are only written once.
 fn show_on_demand_window(
     app: &tauri::AppHandle,
     label: &str,
@@ -456,7 +469,7 @@ fn show_tasks_window(app: &tauri::AppHandle) -> tauri::Result<()> {
 }
 
 /// Opens Settings, building the window if it is not already open. Created on
-/// demand and genuinely closed on dismiss, like History.
+/// demand and genuinely closed on dismiss, like the Main Window.
 fn open_settings(app: &tauri::AppHandle) {
     if let Err(error) = show_settings_window(app) {
         log::error!("could not open Settings: {error}");
@@ -989,7 +1002,10 @@ async fn journal_transaction(
             .map_err(|error| error.to_string())?;
     }
 
-    transaction.commit().await.map_err(|error| error.to_string())
+    transaction
+        .commit()
+        .await
+        .map_err(|error| error.to_string())
 }
 
 /// Ends a Capture, whether it committed a Note or discarded one. The window is
@@ -1012,7 +1028,6 @@ fn start_task_creation(app: tauri::AppHandle) {
 fn dismiss_task_creation(app: tauri::AppHandle) -> Result<(), String> {
     hide_resident_window(&app, TASK_CREATION_WINDOW).map_err(|error| error.to_string())
 }
-
 
 /// Puts a resident window away, whether it committed anything or not. Only
 /// ever hidden — see docs/adr/0002-capture-window-is-hidden-never-closed.md.
@@ -1168,7 +1183,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             NEW_NOTE_MENU_ITEM => start_capture(app),
             NEW_TASK_MENU_ITEM => start_task_creation_window(app),
-            VIEW_NOTES_MENU_ITEM => open_history(app),
+            VIEW_NOTES_MENU_ITEM => open_main_window(app),
             VIEW_TASKS_MENU_ITEM => open_tasks(app),
             COPY_YESTERDAY_DIGEST_MENU_ITEM => copy_yesterday_digest(app),
             SETTINGS_MENU_ITEM => open_settings(app),

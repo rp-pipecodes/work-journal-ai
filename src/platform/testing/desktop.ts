@@ -153,7 +153,7 @@ export function fakeDesktop({
     requestYesterdayDigest: () => yesterdayDigestRequested.announce(undefined),
     wake: () => systemWoke.announce(undefined),
 
-    windowLabel: () => 'history',
+    windowLabel: () => 'main',
     appIdentity: async () => appIdentity,
     closeWindow: async () => {},
     windowVisible: true,
