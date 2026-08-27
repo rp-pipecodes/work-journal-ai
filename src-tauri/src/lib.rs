@@ -574,22 +574,30 @@ fn rollback_main_window_open(app: &tauri::AppHandle, menu_was_attempted: bool) {
 /// already showing and opens a new one on History.
 ///
 /// Which section is said twice, exactly as a Task Alert is: written down for a
-/// window this call is about to build, which has no webview to hear anything
-/// yet, and announced for one that is already open and has long since asked.
+/// window that has yet to ask — one this call is about to build, or one built
+/// a moment ago whose webview is still coming up — and announced for one that
+/// is already open and has long since asked.
+///
+/// Said both ways every time, rather than one or the other depending on
+/// whether a window exists yet. A window that exists is not necessarily
+/// listening, and deciding between them left a request arriving while the
+/// window was still starting up written down nowhere and announced to nothing.
+/// The window takes whichever of the two arrives last.
 fn open_main_window(app: &tauri::AppHandle, section: Option<&str>) {
-    // A window already open claims nothing, so writing the section down for it
-    // would only leave it waiting for whatever opens the window next.
-    let waiting = match app.get_webview_window(MAIN_WINDOW) {
-        Some(_) => None,
-        None => section,
-    };
-    remember_requested_section(app, waiting);
+    // An Entry Point that names no section — a click on the Dock icon — takes
+    // away what an earlier request left waiting, so the window it opens starts
+    // on History rather than inheriting that request.
+    remember_requested_section(app, section);
 
     if let Err(error) = show_main_window(app) {
         log::error!("could not open the Main Window: {error}");
-        // Nothing was built, so nothing is going to come and ask.
-        remember_requested_section(app, None);
-        return;
+        if app.get_webview_window(MAIN_WINDOW).is_none() {
+            // Nothing was built, so nothing is going to come and ask.
+            remember_requested_section(app, None);
+            return;
+        }
+        // The window is there and will come and ask — building it succeeded
+        // and only taking focus failed — so what was written down stands.
     }
 
     let Some(section) = section else {
