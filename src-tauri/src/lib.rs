@@ -185,10 +185,12 @@ pub fn run() {
             if matches!(event, WindowEvent::Destroyed) {
                 let app = window.app_handle();
                 let presence = app.state::<Dock>().window_closed(window.label());
-                if presence == Some(Presence::MenuBarOnly) {
-                    remove_main_window_menu(app);
-                }
+                // The app stops drawing a menu bar first, so the moment
+                // between the two menus is never a menu bar of one.
                 show_presence(app, presence);
+                if presence == Some(Presence::MenuBarOnly) {
+                    remove_app_menu(app);
+                }
             }
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -546,9 +548,9 @@ fn install_main_window_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
 
 /// Takes the app menu away as the Main Window is destroyed, leaving the Edit
 /// menu the resident panels keep their clipboard and undo shortcuts through.
-fn remove_main_window_menu(app: &tauri::AppHandle) {
+fn remove_app_menu(app: &tauri::AppHandle) {
     if let Err(error) = install_edit_menu(app) {
-        log::error!("could not remove the Main Window menu: {error}");
+        log::error!("could not restore the Edit menu on its own: {error}");
     }
 }
 
@@ -556,10 +558,10 @@ fn remove_main_window_menu(app: &tauri::AppHandle) {
 /// complete. Both the app menu and the Dock state are transactions around the
 /// window build, so neither may be left claiming an absent window.
 fn rollback_main_window_open(app: &tauri::AppHandle, menu_was_attempted: bool) {
-    if menu_was_attempted {
-        remove_main_window_menu(app);
-    }
     show_presence(app, app.state::<Dock>().window_closed(MAIN_WINDOW));
+    if menu_was_attempted {
+        remove_app_menu(app);
+    }
 }
 
 /// Opens the Main Window, building it if it is not already open. Unlike the
@@ -649,12 +651,14 @@ fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
         return window.set_focus();
     }
 
-    // Before the window exists, so it is born into an application that already
-    // owns a Dock icon and a Cmd+Tab entry rather than acquiring them under the
-    // user. Only the Main Window moves this; the Dock ignores the rest.
+    // Both before the window exists, so it is born into an application that
+    // already owns a Dock icon and a Cmd+Tab entry rather than acquiring them
+    // under the user. Only the Main Window moves this; the Dock ignores the
+    // rest.
     let presence = app.state::<Dock>().window_opened(MAIN_WINDOW);
-    show_presence(app, presence);
 
+    // The app menu goes up before the app starts drawing a menu bar, so the
+    // first bar the user sees is already the two menus and never Edit alone.
     let menu_was_attempted = presence == Some(Presence::InTheDock);
     if menu_was_attempted {
         if let Err(error) = install_main_window_menu(app) {
@@ -662,6 +666,8 @@ fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
             return Err(error);
         }
     }
+
+    show_presence(app, presence);
 
     // A window opens on whatever it was built with and keeps it until its
     // webview has something of its own to show — a fifth of a second later. Both
