@@ -11,6 +11,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import WindowTitleBar from '@/components/WindowTitleBar'
+import { useOffScreen } from '@/components/on-screen-context'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
@@ -118,6 +119,15 @@ export default function TasksView({
   // Null until the OS has been asked, and after a question it refused.
   const [hotkeys, setHotkeys] = useState<HotkeyStatuses | null>(null)
   const page = useRef<HTMLDivElement>(null)
+
+  // A confirmation is portalled to the end of the document, so hiding this
+  // section leaves it standing over whatever is showing instead — see
+  // docs/adr/0024-a-view-is-told-whether-it-is-on-screen.md. It goes with the
+  // section, and going is dismissing: a question the user was taken away from
+  // is not one they still have open, and nothing has been done to the Task.
+  // The Editor stays exactly as it was; it is drawn inside this section, and
+  // a half-typed change survives the trip like everything else here.
+  useOffScreen(() => setDeleting(null))
 
   useEffect(() => {
     // A Dock-less app does not reliably hand focus to a new window, and Escape
@@ -684,6 +694,10 @@ function TaskEditor({
   // A change to the schedule that would stop an existing recurrence, waiting
   // to be confirmed. Null until one is asked for.
   const [stopping, setStopping] = useState<TaskTiming | null>(null)
+  // The question goes with the section, though the Editor underneath it does
+  // not: it is a dialog portalled out of the document, and the answer changes
+  // nothing until it is given. What was typed here is untouched.
+  useOffScreen(() => setStopping(null))
   const said = description.trim()
   // Only the Task Description is editable while a Task is Completed: reopening
   // is what makes a schedule changeable again, and it is a decision the user
