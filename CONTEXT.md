@@ -139,6 +139,10 @@ _Avoid_: Menu bar, status item
 How many Captured Notes today's Journal Day holds, shown beside the menu bar glyph. The app solicits nothing about journalling — no prompts or scheduled nudges — so this is the only reminder to journal there is, and the only reason the app is noticed on a day nothing has been written. Captured Notes only: Imported Notes and Tasks would make the number mean two incompatible things. A day with none reads as a blank rather than as a zero, because a total reads as a day already accounted for.
 _Avoid_: Badge, counter, notification
 
+**Dock Icon**:
+The app's icon in the Dock, present only while the Main Window is open and gone the moment it closes — with the Cmd+Tab entry and the menu bar that come with it. Nothing else puts it there: a Capture or a Task Creation raised over anything leaves it exactly as it was. Clicking it is the one way into the Main Window that names no section, so it lands on History.
+_Avoid_: App icon, taskbar, activation policy
+
 ## Time
 
 **Captured At**:
