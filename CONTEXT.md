@@ -44,7 +44,7 @@ _Avoid_: Due At, deadline, reminder time
 An Open Task with no Scheduled For. It is still a complete Task, not a draft waiting for a date.
 
 **Task Alert**:
-A local operating-system alert and sound derived from the journal's authoritative Open Task state for a future Scheduled For that includes a time. Only that one Open Task Occurrence is registered with macOS; completion or recurrence edits cancel it and register its successor. It shows the full Task Description and presents even while Work Journal is active, leaving preview and sound suppression to macOS. Clicking it opens Tasks View focused on that Task; it has no Complete or Snooze actions, and an already-past schedule never produces a retroactive Alert. A nonexistent daylight-saving time fires at the first valid instant afterward that day; a repeated time fires once at its first occurrence. Failed operating-system scheduling never rolls back the Task; future Alerts are reconciled on launch, wake, permission restoration, and schedule changes. It is not a remote push message and is never required for the Task itself to work.
+A local operating-system alert and sound derived from the journal's authoritative Open Task state for a future Scheduled For that includes a time. Only that one Open Task Occurrence is registered with macOS; completion or recurrence edits cancel it and register its successor. It shows the full Task Description and presents even while Work Journal is active, leaving preview and sound suppression to macOS. Clicking it opens the Main Window on Tasks View focused on that Task, replacing whatever section was showing; it has no Complete or Snooze actions, and an already-past schedule never produces a retroactive Alert. A nonexistent daylight-saving time fires at the first valid instant afterward that day; a repeated time fires once at its first occurrence. Failed operating-system scheduling never rolls back the Task; future Alerts are reconciled on launch, wake, permission restoration, and schedule changes. It is not a remote push message and is never required for the Task itself to work.
 _Avoid_: Push notification, reminder
 
 **Task Alert Permission**:
@@ -68,11 +68,11 @@ Remove the recurrence rule from a Recurring Task while retaining its current Tas
 _Avoid_: End series, cancel repeat
 
 **Tasks View**:
-The dedicated, independently openable window for creating and managing Tasks; it may coexist with History because Tasks are organized prospectively by state and schedule, while Notes are organized retrospectively by Journal Day. Opens on Open Tasks grouped as Overdue, Today, Upcoming, and Unscheduled; Completed Tasks are a separate view, with no arbitrary filters or Search. A checkbox completes a Task immediately without confirmation; Recurring Tasks advance and expose Undo Completion while safe. Scheduled groups sort earliest first, Unscheduled sorts newest Task Created At first, and Completed sorts newest Task Completed At first. Every Task surface observes the same journal state immediately, and group membership refreshes at local midnight and whenever the app wakes or regains focus.
+The Main Window section for creating and managing Tasks. Tasks are organized prospectively by state and schedule and Notes retrospectively by Journal Day, so Tasks View and History answer different questions — but they are sections of one window and are never on screen at once. Opens on Open Tasks grouped as Overdue, Today, Upcoming, and Unscheduled; Completed Tasks are a separate view, with no arbitrary filters or Search. A checkbox completes a Task immediately without confirmation; Recurring Tasks advance and expose Undo Completion while safe. Scheduled groups sort earliest first, Unscheduled sorts newest Task Created At first, and Completed sorts newest Task Completed At first. Every Task surface observes the same journal state immediately, and group membership refreshes at local midnight and whenever the app wakes or regains focus.
 _Avoid_: Task History, Notes filter
 
 **Task Editor**:
-The sheet inside Tasks View that changes an existing Task. Save commits the changes; Cancel or closing discards them. It never reuses the resident Task Creation window, whose unfinished new Task therefore remains untouched.
+The sheet inside Tasks View that changes an existing Task, in the Main Window that section belongs to. Save commits the changes; Cancel or closing discards them. It never reuses the resident Task Creation window, whose unfinished new Task therefore remains untouched.
 _Avoid_: Task Creation, edit window
 
 **Body**:
@@ -132,7 +132,7 @@ The independently stored combination and registration status of either Note Hotk
 _Avoid_: Shortcut setting, key binding
 
 **Tray Menu**:
-The menu bar icon's menu. The Entry Point that always works, offering both New Note and New Task so it is the fallback when either configured combination is unavailable. Also the one place the journal is read back without opening a window: Yesterday's Digest is copied from here.
+The menu bar icon's menu. The Entry Point that always works, offering both New Note and New Task so it is the fallback when either configured combination is unavailable. The way into the Main Window as well, and the one Entry Point that names which section to land on — View Notes, View Tasks and Settings each open their own. Also the one place the journal is read back without opening a window: Yesterday's Digest is copied from here.
 _Avoid_: Menu bar, status item
 
 **Tray Count**:
@@ -153,6 +153,14 @@ The instant a Note was last changed after capture — reworded, refiled to anoth
 _Avoid_: Updated at, modified, revision
 
 ## Reading back
+
+**Main Window**:
+The one window the journal is read and configured in: History, Tasks View and Settings as sections of a sidebar, exactly one of them showing. An Entry Point that names a section decides which; anything that names none lands on History. A section holds whatever the user did to it while another is showing, but the window itself is gone when closed, so the next one opens fresh. While it is open the app has a Dock icon and a menu bar; when it closes the app is the menu bar glyph again.
+_Avoid_: Main view, dashboard, home, shell
+
+**History**:
+The Main Window section where Notes are read back — everything the Filter describes, under the Journal Day each Note is filed under. Where a Note is reworded, refiled, deleted, and where a Digest is copied. The retrospective axis of the journal, which is why Tasks View is a section beside it rather than part of it.
+_Avoid_: Journal view, timeline, feed, Notes list
 
 **Filter**:
 What is currently being viewed: a range of Journal Days, plus an optional Project constraint (a named Project, Unfiled, or Any). Opens on the most recent Occupied Day with Project = Any, and only changes when the user changes it — never on its own, even as new Notes arrive. Day range and Project constraint are independent axes; both must match for a Note to appear.
@@ -189,7 +197,7 @@ Confirmed permanent removal of a Note or Task. There is no trash, no archive, no
 ## Settings
 
 **Settings**:
-What the user gets to decide about the app: the Note and Task Hotkeys, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars, and how to recover unavailable Task Alert Permission — plus Export as its one action rather than a setting. Reached from the Tray Menu, and closed on dismiss rather than kept resident.
+What the user gets to decide about the app: the Note and Task Hotkeys, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars, and how to recover unavailable Task Alert Permission — plus Export as its one action rather than a setting. A Main Window section, reached from the sidebar or named directly from the Tray Menu.
 
 **Meeting Import**:
 Whether Import runs, and over which calendars. Off until turned on, with no calendar ticked, so enabling it sweeps nothing until the user says which calendars mean work; an unticked calendar is ignored entirely. Turning it on is also where the calendar permission is asked for, because it is the one moment the user has said they want it. The stored setting is the user's wish for Import, and only the user writes it; whether Import runs is that wish and the OS answer together. Permission refused or revoked therefore leaves the wish standing and the toggle reading off, with a line saying why — a routine path rather than an exceptional one, since macOS keys the grant to the exact binary and every rebuilt release is asked about once. A grant restored in System Settings resumes Import without asking a second time, and pressing the toggle while it reads off withdraws the wish. The app never nags, and the journal keeps working exactly as before.
