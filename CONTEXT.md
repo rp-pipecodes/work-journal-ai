@@ -139,8 +139,16 @@ _Avoid_: Menu bar, status item
 How many Captured Notes today's Journal Day holds, shown beside the menu bar glyph. The app solicits nothing about journalling — no prompts or scheduled nudges — so this is the only reminder to journal there is, and the only reason the app is noticed on a day nothing has been written. Captured Notes only: Imported Notes and Tasks would make the number mean two incompatible things. A day with none reads as a blank rather than as a zero, because a total reads as a day already accounted for.
 _Avoid_: Badge, counter, notification
 
+**App Menu**:
+The menu named Work Journal at the left of the menu bar, holding About, Settings, Close Window and Quit. It belongs to the Main Window and exists only while one is open, because those are the commands an app in the Dock owns and a menu bar glyph does not. It is never where the journal is read or written from — that is the Tray Menu.
+_Avoid_: Menu bar, Tray Menu, application menu
+
+**Edit Menu**:
+The menu holding Undo, Redo, Cut, Copy, Paste and Select All. It belongs to the application rather than to any window and is never taken away, because macOS grants a text field its clipboard and undo shortcuts through these items — so without it the Capture and Task Creation fields lose them the moment the Main Window closes.
+_Avoid_: App Menu, clipboard shortcuts
+
 **Dock Icon**:
-The app's icon in the Dock, present only while the Main Window is open and gone the moment it closes — with the Cmd+Tab entry and the menu bar that come with it. Nothing else puts it there: a Capture or a Task Creation raised over anything leaves it exactly as it was. Clicking it is the one way into the Main Window that names no section, so it lands on History.
+The app's icon in the Dock, present only while the Main Window is open and gone the moment it closes — with the Cmd+Tab entry and the app menu that come with it; the Edit menu is the application's own and stays whether or not the icon is there. Nothing else puts it there: a Capture or a Task Creation raised over anything leaves it exactly as it was. Clicking it is the one way into the Main Window that names no section, so it lands on History.
 _Avoid_: App icon, taskbar, activation policy
 
 ## Time
@@ -159,7 +167,7 @@ _Avoid_: Updated at, modified, revision
 ## Reading back
 
 **Main Window**:
-The one window the journal is read and configured in: History, Tasks View and Settings as sections of a sidebar, exactly one of them showing. An Entry Point that names a section decides which; anything that names none lands on History. A section holds whatever the user did to it while another is showing, but the window itself is gone when closed, so the next one opens fresh. While it is open the app has a Dock icon and a menu bar; when it closes the app is the menu bar glyph again.
+The one window the journal is read and configured in: History, Tasks View and Settings as sections of a sidebar, exactly one of them showing. An Entry Point that names a section decides which; anything that names none lands on History. A section holds whatever the user did to it while another is showing, but the window itself is gone when closed, so the next one opens fresh. While it is open the app has a Dock icon and its app menu; when it closes the app is the menu bar glyph again.
 _Avoid_: Main view, dashboard, home, shell
 
 **History**:
