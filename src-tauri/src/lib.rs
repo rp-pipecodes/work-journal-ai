@@ -43,7 +43,14 @@ const APP_MENU_ID: &str = "app-menu";
 const EDIT_MENU_ID: &str = "edit-menu";
 const APP_NAME: &str = "Work Journal";
 
-/// The window labels the frontend routes on — see `src/views/route.ts`.
+/// The strings below that are also declared in `src/platform/desktop.ts` are
+/// checked against it by `src/platform/desktop-rust.test.ts`: a window label,
+/// a section or an event name that drifts fails the suite rather than leaving
+/// a window that never hears something.
+///
+/// The window labels the frontend routes on — see `src/views/route.ts`. Must
+/// match `CAPTURE_WINDOW`, `TASK_CREATION_WINDOW` and `MAIN_WINDOW` in
+/// `src/platform/desktop.ts`.
 const CAPTURE_WINDOW: &str = "capture";
 const TASK_CREATION_WINDOW: &str = "task-creation";
 const MAIN_WINDOW: &str = "main";
@@ -54,7 +61,8 @@ const HISTORY_SECTION: &str = "history";
 const TASKS_SECTION: &str = "tasks";
 const SETTINGS_SECTION: &str = "settings";
 
-/// Where the settings live. Written from both sides — see
+/// Where the settings live. Must match `SETTINGS_FILE` in
+/// `src/platform/desktop.ts`. Written from both sides — see
 /// `src/settings/tauri-settings.ts` — which is acceptable only because v1 has
 /// no secrets in it; see docs/adr/0001-defer-voice-capture-to-v2.md.
 const SETTINGS_FILE: &str = "settings.json";
@@ -78,7 +86,8 @@ const THEME_KEY: &str = "theme";
 
 /// Told to the capture window every time it is shown. It is long-lived, so it
 /// clears its field and takes focus on this rather than on being built — see
-/// docs/adr/0002-capture-window-is-hidden-never-closed.md.
+/// docs/adr/0002-capture-window-is-hidden-never-closed.md. Must match
+/// `CAPTURE_SHOWN_EVENT` in `src/platform/desktop.ts`.
 const CAPTURE_SHOWN_EVENT: &str = "capture://shown";
 
 /// Told to the Task Creation window every time it is shown, for the same
@@ -126,7 +135,8 @@ const TASK_CREATION_HEIGHT: f64 = 219.0;
 const RESIDENT_WINDOW_WIDTH: f64 = 626.0;
 
 /// Relative, so plugin-sql resolves it inside the app's data directory and the
-/// journal survives a restart of the app and of the machine.
+/// journal survives a restart of the app and of the machine. Must match
+/// `DATABASE_URL` in `src/platform/desktop.ts`.
 const DATABASE_URL: &str = "sqlite:work-journal.db";
 
 /// The two Entry Point items of the Tray Menu, held so that remapping either
