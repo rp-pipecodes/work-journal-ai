@@ -352,6 +352,18 @@ describe('the four groups', () => {
     await screen.findByText('renew the cert')
     expect(groupHeadings()).toEqual([])
   })
+
+  it('shows the year in a scheduled Task row', async () => {
+    const { core, desktop } = await showTasks()
+    await core.createTask('plan next year', {
+      date: '2027-03-16',
+      time: null,
+    })
+    await desktop.announceTasksChanged()
+
+    const task = await screen.findByText('plan next year')
+    expect(task.closest('li')?.textContent).toContain('2027')
+  })
 })
 
 describe('the schedule controls', () => {
