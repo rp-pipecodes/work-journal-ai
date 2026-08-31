@@ -43,22 +43,18 @@ const APP_MENU_ID: &str = "app-menu";
 const EDIT_MENU_ID: &str = "edit-menu";
 const APP_NAME: &str = "Work Journal";
 
-/// The window labels the frontend routes on — see `src/views/route.ts`. Their
-/// shared strings are checked by `src/platform/desktop-rust.test.ts`.
+/// The window labels the frontend routes on — see `src/views/route.ts`.
 const CAPTURE_WINDOW: &str = "capture";
 const TASK_CREATION_WINDOW: &str = "task-creation";
 const MAIN_WINDOW: &str = "main";
 
 /// The sections of the Main Window an Entry Point here can name. Must match
-/// `MainSection` in `src/platform/desktop.ts`; checked by
-/// `src/platform/desktop-rust.test.ts`.
+/// `MainSection` in `src/platform/desktop.ts`.
 const HISTORY_SECTION: &str = "history";
 const TASKS_SECTION: &str = "tasks";
 const SETTINGS_SECTION: &str = "settings";
 
-/// Where the settings live. Must match `SETTINGS_FILE` in
-/// `src/platform/desktop.ts`; checked by `src/platform/desktop-rust.test.ts`.
-/// Written from both sides — see
+/// Where the settings live. Written from both sides — see
 /// `src/settings/tauri-settings.ts` — which is acceptable only because v1 has
 /// no secrets in it; see docs/adr/0001-defer-voice-capture-to-v2.md.
 const SETTINGS_FILE: &str = "settings.json";
@@ -77,21 +73,18 @@ const TASK_HOTKEY_KEY: &str = "taskHotkey";
 const START_AT_LOGIN_KEY: &str = "startAtLogin";
 
 /// The Theme the user settled on. Must match `THEME_KEY` in
-/// `src/platform/desktop.ts`; checked by `src/platform/desktop-rust.test.ts`.
+/// `src/platform/desktop.ts`.
 const THEME_KEY: &str = "theme";
 
 /// Told to the capture window every time it is shown. It is long-lived, so it
 /// clears its field and takes focus on this rather than on being built — see
-/// docs/adr/0002-capture-window-is-hidden-never-closed.md. Must match
-/// `CAPTURE_SHOWN_EVENT` in `src/platform/desktop.ts`; checked by
-/// `src/platform/desktop-rust.test.ts`.
+/// docs/adr/0002-capture-window-is-hidden-never-closed.md.
 const CAPTURE_SHOWN_EVENT: &str = "capture://shown";
 
 /// Told to the Task Creation window every time it is shown, for the same
 /// reason: it is resident and hidden between uses rather than rebuilt — see
 /// docs/adr/0019-task-creation-has-its-own-resident-window.md. Must match
-/// `TASK_CREATION_SHOWN_EVENT` in `src/platform/desktop.ts`; checked by
-/// `src/platform/desktop-rust.test.ts`.
+/// `TASK_CREATION_SHOWN_EVENT` in `src/platform/desktop.ts`.
 const TASK_CREATION_SHOWN_EVENT: &str = "task-creation://shown";
 
 /// Asked of the capture window when the Tray Menu wants yesterday's Digest.
@@ -99,28 +92,24 @@ const TASK_CREATION_SHOWN_EVENT: &str = "task-creation://shown";
 /// plugin-sql from a webview — so the tray asks and the window answers. The
 /// capture window is the one that is always there to hear it; see
 /// docs/adr/0002-capture-window-is-hidden-never-closed.md. Must match
-/// `COPY_YESTERDAY_DIGEST_EVENT` in `src/platform/desktop.ts`; checked by
-/// `src/platform/desktop-rust.test.ts`.
+/// `COPY_YESTERDAY_DIGEST_EVENT` in `src/platform/desktop.ts`.
 const COPY_YESTERDAY_DIGEST_EVENT: &str = "digest://yesterday";
 
 /// The machine woke from sleep, so anything that looks at the world afresh has
 /// to look again — Import above all, since a lid closed before a meeting ended
 /// would otherwise lose that meeting for good. Must match `SYSTEM_WOKE_EVENT`
-/// in `src/platform/desktop.ts`; checked by
-/// `src/platform/desktop-rust.test.ts`.
+/// in `src/platform/desktop.ts`.
 const SYSTEM_WOKE_EVENT: &str = "system://woke";
 
 /// An Entry Point named a section of the Main Window. Told to a window already
 /// open; one this request is about to build asks for `requested_section`
-/// instead. Must match `SECTION_REQUESTED_EVENT` in
-/// `src/platform/desktop.ts`; checked by
-/// `src/platform/desktop-rust.test.ts`.
+/// instead. Must match `SECTION_REQUESTED_EVENT` in `src/platform/desktop.ts`.
 const SECTION_REQUESTED_EVENT: &str = "main://section";
 
 /// The user clicked a Task Alert. macOS hands the click to this side, which is
 /// the only part of the app it talks to; the Main Window opens on Tasks View,
 /// focused on the Task. Must match `TASK_ALERT_OPENED_EVENT` in
-/// `src/platform/desktop.ts`; checked by `src/platform/desktop-rust.test.ts`.
+/// `src/platform/desktop.ts`.
 const TASK_ALERT_OPENED_EVENT: &str = "task-alert://opened";
 
 /// The resting height of each resident window: the panel its view draws, plus
@@ -137,9 +126,7 @@ const TASK_CREATION_HEIGHT: f64 = 219.0;
 const RESIDENT_WINDOW_WIDTH: f64 = 626.0;
 
 /// Relative, so plugin-sql resolves it inside the app's data directory and the
-/// journal survives a restart of the app and of the machine. Must match
-/// `DATABASE_URL` in `src/platform/desktop.ts`; checked by
-/// `src/platform/desktop-rust.test.ts`.
+/// journal survives a restart of the app and of the machine.
 const DATABASE_URL: &str = "sqlite:work-journal.db";
 
 /// The two Entry Point items of the Tray Menu, held so that remapping either
