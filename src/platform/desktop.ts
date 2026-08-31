@@ -60,6 +60,15 @@ export const SETTINGS_FILE = 'settings.json'
 export const THEME_KEY = 'theme'
 
 /**
+ * Whether the app starts at login. The one settings key declared here rather
+ * than in `src/settings/settings.ts` with the rest: the Rust side reads it too,
+ * to decide whether this is a first run and the question is worth asking. Must
+ * match `START_AT_LOGIN_KEY` in `src-tauri/src/lib.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
+ */
+export const START_AT_LOGIN_KEY = 'startAtLogin'
+
+/**
  * Where a window is told its Resolved Theme, before its document is parsed and
  * so before anything is painted — the Rust side works the palette out and sets
  * this, because the store cannot be read in time to get the first frame right.

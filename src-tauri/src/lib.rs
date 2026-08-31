@@ -77,7 +77,8 @@ const HOTKEY_KEY: &str = "hotkey";
 const TASK_HOTKEY_KEY: &str = "taskHotkey";
 
 /// Whether the app starts at login. Only its presence is read here: an absent
-/// answer is a first run, and a first run is when the question gets asked.
+/// answer is a first run, and a first run is when the question gets asked. Must
+/// match `START_AT_LOGIN_KEY` in `src/platform/desktop.ts`.
 const START_AT_LOGIN_KEY: &str = "startAtLogin";
 
 /// The Theme the user settled on. Must match `THEME_KEY` in
