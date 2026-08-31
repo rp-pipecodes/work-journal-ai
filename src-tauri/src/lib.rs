@@ -33,6 +33,7 @@ const NEW_TASK_MENU_ITEM: &str = "new-task";
 
 const VIEW_NOTES_MENU_ITEM: &str = "view-notes";
 const VIEW_TASKS_MENU_ITEM: &str = "view-tasks";
+const WRITE_STANDUP_POST_MENU_ITEM: &str = "write-standup-post";
 const COPY_YESTERDAY_DIGEST_MENU_ITEM: &str = "copy-yesterday-digest";
 const SETTINGS_MENU_ITEM: &str = "settings";
 const MAIN_SETTINGS_MENU_ITEM: &str = "main-settings";
@@ -58,9 +59,11 @@ const MAIN_WINDOW: &str = "main";
 
 /// The sections of the Main Window an Entry Point here can name. Must match
 /// the members of `MainSection` in `src/platform/desktop.ts` — `HISTORY_SECTION`,
-/// `TASKS_SECTION` and `SETTINGS_SECTION` — as `src/platform/desktop-rust.test.ts` checks.
+/// `TASKS_SECTION`, `STANDUP_POST_SECTION` and `SETTINGS_SECTION` — as
+/// `src/platform/desktop-rust.test.ts` checks.
 const HISTORY_SECTION: &str = "history";
 const TASKS_SECTION: &str = "tasks";
+const STANDUP_POST_SECTION: &str = "standup-post";
 const SETTINGS_SECTION: &str = "settings";
 
 /// Where the settings live. Must match `SETTINGS_FILE` in
@@ -1453,6 +1456,13 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         MenuItem::with_id(app, VIEW_NOTES_MENU_ITEM, "View Notes", true, None::<&str>)?;
     let view_tasks =
         MenuItem::with_id(app, VIEW_TASKS_MENU_ITEM, "View Tasks", true, None::<&str>)?;
+    let write_standup_post = MenuItem::with_id(
+        app,
+        WRITE_STANDUP_POST_MENU_ITEM,
+        "Write Standup Post…",
+        true,
+        None::<&str>,
+    )?;
     // The other half of the loop: what was captured yesterday, ready to paste
     // into the work log the user owes their chat group every morning.
     let copy_yesterday = MenuItem::with_id(
@@ -1472,6 +1482,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             &new_task,
             &view_notes,
             &view_tasks,
+            &write_standup_post,
             &copy_yesterday,
             &settings,
             &separator,
@@ -1505,6 +1516,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             NEW_TASK_MENU_ITEM => start_task_creation_window(app),
             VIEW_NOTES_MENU_ITEM => open_main_window(app, Some(HISTORY_SECTION)),
             VIEW_TASKS_MENU_ITEM => open_main_window(app, Some(TASKS_SECTION)),
+            WRITE_STANDUP_POST_MENU_ITEM => open_main_window(app, Some(STANDUP_POST_SECTION)),
             COPY_YESTERDAY_DIGEST_MENU_ITEM => copy_yesterday_digest(app),
             SETTINGS_MENU_ITEM => open_settings(app),
             QUIT_MENU_ITEM => app.exit(0),
