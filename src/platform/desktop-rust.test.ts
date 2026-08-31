@@ -1,9 +1,10 @@
 /**
- * The names shared with the Rust side, checked. A window label, a section name
- * or an event name that stops matching its counterpart in `src-tauri/src/lib.rs`
- * is silent: no error, no failed build, and no symptom except a window that
- * never hears something. This reads the Rust source as text, because that is
- * enough — there is no build step and no generated file in the Rust tree.
+ * The names `desktop.ts` shares with the Rust side, checked. A window label, a
+ * section name or an event name that stops matching its counterpart in
+ * `src-tauri/src/lib.rs` is silent: no error, no failed build, and no symptom
+ * except a window that never hears something. This reads the Rust source as
+ * text, because that is enough — there is no build step and no generated file
+ * in the Rust tree.
  *
  * The geometry constants are deliberately not here: the Rust numbers are only
  * the size a resident window is built at before its webview boots, and
@@ -33,17 +34,24 @@ const TEST_FILE = 'src/platform/desktop-rust.test.ts'
 const RUST_FILE = 'src-tauri/src/lib.rs'
 
 /**
- * Every shared string, under the name the Rust side declares it by. The
- * sections are the three members of `MainSection`, which is a type rather than
- * three constants — written out here, and checked against the type.
+ * What the Rust side calls each member of `MainSection`, which is a type
+ * rather than three constants. Keyed by the member so that a fourth section
+ * has to be named here rather than going unchecked.
  */
-const shared = {
+const sectionNames: Record<MainSection, string> = {
+  history: 'HISTORY_SECTION',
+  tasks: 'TASKS_SECTION',
+  settings: 'SETTINGS_SECTION',
+}
+
+/** Every shared string, under the name the Rust side declares it by. */
+const shared: Record<string, string> = {
   CAPTURE_WINDOW,
   TASK_CREATION_WINDOW,
   MAIN_WINDOW,
-  HISTORY_SECTION: 'history' satisfies MainSection,
-  TASKS_SECTION: 'tasks' satisfies MainSection,
-  SETTINGS_SECTION: 'settings' satisfies MainSection,
+  ...Object.fromEntries(
+    Object.entries(sectionNames).map(([section, name]) => [name, section]),
+  ),
   CAPTURE_SHOWN_EVENT,
   TASK_CREATION_SHOWN_EVENT,
   COPY_YESTERDAY_DIGEST_EVENT,
@@ -57,6 +65,12 @@ const shared = {
 
 function read(file: string): string {
   return readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8')
+}
+
+/** The members of the `MainSection` union, as the source declares them. */
+function sections(source: string): string[] {
+  const union = source.match(/export type MainSection =([^\n]*)/)?.[1] ?? ''
+  return [...union.matchAll(/'([^']*)'/g)].map(([, section]) => section)
 }
 
 /** `const NAME: &str = "value";`, which is how every shared name is declared. */
@@ -81,20 +95,22 @@ function mustMatchComments(source: string): [string, string[]][] {
   return [...source.matchAll(/\/\*\*[\s\S]*?\*\//g)]
     .map(([comment]): [string, string[]] => [
       comment,
-      [...comment.matchAll(/`([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)`/g)].map(
+      [...comment.matchAll(/`([A-Z][A-Z0-9_]*)`/g)].map(
         ([, name]) => name,
       ),
     ])
     .filter(
       ([comment, names]) =>
-        /ust match/.test(comment) &&
+        /[Mm]ust match/.test(comment) &&
         comment.includes(RUST_FILE) &&
         names.length > 0,
     )
 }
 
+const DESKTOP_FILE = 'src/platform/desktop.ts'
+const desktop = read(DESKTOP_FILE)
 const rust = rustStrings(read(RUST_FILE))
-const comments = mustMatchComments(read('src/platform/desktop.ts'))
+const comments = mustMatchComments(desktop)
 
 describe('the names shared with the Rust side', () => {
   for (const [name, value] of Object.entries(shared)) {
@@ -106,6 +122,13 @@ describe('the names shared with the Rust side', () => {
       ).toBe(value)
     })
   }
+
+  it('checks every member of MainSection', () => {
+    // Read from the source rather than imported: `MainSection` is a type, and
+    // a member renamed in it and nowhere else is a change `vitest run` would
+    // otherwise never see.
+    expect(sections(desktop)).toEqual(Object.keys(sectionNames))
+  })
 
   it('checks every name declared with a "must match" comment', () => {
     const claimed = comments.flatMap(([, names]) => names)
