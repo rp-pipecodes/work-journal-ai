@@ -90,34 +90,49 @@ function rustStrings(source: string): Map<string, string> {
   )
 }
 
-/** Both comment forms: a TypeScript `/** *\/` block and a run of Rust `///`. */
+/**
+ * Both comment forms — a TypeScript `/** *\/` block and a run of Rust `///` —
+ * each as one line of prose. The line breaks and the prefixes go, because a
+ * "must match" that a formatter wrapped over two lines has to read the same as
+ * one that fits: a claim that goes unrecognised is a claim nothing enforces.
+ */
 function docComments(source: string): string[] {
   return [
     ...(source.match(/\/\*\*[\s\S]*?\*\//g) ?? []),
     ...(source.match(/(?:^[ \t]*\/\/[^\n]*\n)+/gm) ?? []),
-  ]
+  ].map((comment) =>
+    comment
+      .replace(/\/\*\*|\*\/|^\s*(\*|\/\/\/?)/gm, ' ')
+      .replace(/\s+/g, ' ')
+      .trim(),
+  )
+}
+
+/** A comment claiming some names match the other side's, and those names. */
+interface Claim {
+  comment: string
+  names: string[]
 }
 
 /**
- * The comments in one file that claim a name matches one in the other, paired
- * with the names they claim it of — so that a name declared with such a comment
- * and missing from `shared` above fails rather than going unchecked.
+ * The comments in one file that claim a name matches one in the other, with
+ * the names they claim it of — so that a name declared with such a comment and
+ * missing from `shared` above fails rather than going unchecked.
  *
  * A comment that names no constant of its own is not one of these: the
  * `__THEME__` global is written by a Rust method rather than declared as a
  * shared string, and there is nothing here for it to be checked against.
  */
-function mustMatchComments(
-  source: string,
-  otherFile: string,
-): [string, string[]][] {
+function mustMatchComments(source: string, otherFile: string): Claim[] {
   return docComments(source)
-    .map((comment): [string, string[]] => [
+    .map((comment) => ({
       comment,
-      [...comment.matchAll(/`([A-Z][A-Z0-9_]*)`/g)].map(([, name]) => name),
-    ])
+      names: [...comment.matchAll(/`([A-Z][A-Z0-9_]*)`/g)].map(
+        ([, name]) => name,
+      ),
+    }))
     .filter(
-      ([comment, names]) =>
+      ({ comment, names }) =>
         /[Mm]ust match/.test(comment) &&
         comment.includes(otherFile) &&
         names.length > 0,
@@ -126,16 +141,22 @@ function mustMatchComments(
 
 const rustSource = read(RUST_FILE)
 const rust = rustStrings(rustSource)
-const comments = mustMatchComments(desktop, RUST_FILE)
+
 /**
- * Both sides' claims. The Rust side's are held to the pointer rule below and
- * to nothing else: its geometry comments name `CAPTURE_HEIGHT` and the rest,
- * which are deliberately not checked here, so demanding a counterpart for
- * every name it claims would demand the one thing this test does not do.
+ * Every claim that has to be honoured here: all of `desktop.ts`'s, and the
+ * Rust ones about a string the Rust side declares. Membership of that map is
+ * what leaves the geometry comments out — `CAPTURE_HEIGHT` and the rest are
+ * `f64`, deliberately unchecked, and a comment about one has no business
+ * naming this test.
  */
-const allComments = [
-  ...comments,
-  ...mustMatchComments(rustSource, DESKTOP_FILE),
+const claims: Claim[] = [
+  ...mustMatchComments(desktop, RUST_FILE),
+  ...mustMatchComments(rustSource, DESKTOP_FILE)
+    .map(({ comment, names }) => ({
+      comment,
+      names: names.filter((name) => rust.has(name)),
+    }))
+    .filter(({ names }) => names.length > 0),
 ]
 
 describe('the names shared with the Rust side', () => {
@@ -150,7 +171,7 @@ describe('the names shared with the Rust side', () => {
   }
 
   it('checks every name declared with a "must match" comment', () => {
-    const claimed = comments.flatMap(([, names]) => names)
+    const claimed = claims.flatMap(({ names }) => names)
     // Said with the Rust value, because the two ways to get here are a name
     // that never had a counterpart and a name that has one under a spelling
     // `desktop.ts` has since dropped — and which of those it is, is exactly
@@ -168,14 +189,8 @@ describe('the names shared with the Rust side', () => {
   })
 
   it('points every "must match" comment on either side at this test', () => {
-    // Only the comments claiming a name this test checks: a comment about
-    // something it deliberately leaves alone has no business naming it.
-    const checked = allComments.filter(([, names]) =>
-      names.some((name) => name in shared),
-    )
-
-    expect(checked.length).toBeGreaterThan(0)
-    for (const [comment] of checked) {
+    expect(claims.length).toBeGreaterThan(0)
+    for (const { comment } of claims) {
       expect(comment, comment).toContain(TEST_FILE)
     }
   })
