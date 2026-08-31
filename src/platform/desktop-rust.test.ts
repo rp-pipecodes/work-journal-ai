@@ -20,7 +20,6 @@ import {
   COPY_YESTERDAY_DIGEST_EVENT,
   DATABASE_URL,
   MAIN_WINDOW,
-  type MainSection,
   SECTION_REQUESTED_EVENT,
   SETTINGS_FILE,
   START_AT_LOGIN_KEY,
@@ -33,26 +32,43 @@ import {
 
 const TEST_FILE = 'src/platform/desktop-rust.test.ts'
 const RUST_FILE = 'src-tauri/src/lib.rs'
+const DESKTOP_FILE = 'src/platform/desktop.ts'
+
+function read(file: string): string {
+  return readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8')
+}
 
 /**
- * What the Rust side calls each member of `MainSection`, which is a type
- * rather than three constants. Keyed by the member so that a fourth section
- * has to be named here rather than going unchecked.
+ * The members of the `MainSection` union, under the name the Rust side declares
+ * each by. Read from the source rather than imported, because `MainSection` is
+ * a type: a member renamed in it and nowhere else is a change `vitest run`
+ * would otherwise never see, and one renamed here is then checked — and found
+ * missing — under its new name.
+ *
+ * A union this cannot read yields no sections at all, which would leave them
+ * unchecked rather than failing. What catches that is the coverage test below:
+ * the comment on `MainSection` names all three, and every name a "must match"
+ * comment claims has to be checked here.
  */
-const sectionNames: Record<MainSection, string> = {
-  history: 'HISTORY_SECTION',
-  tasks: 'TASKS_SECTION',
-  settings: 'SETTINGS_SECTION',
+function sectionStrings(source: string): Record<string, string> {
+  const union = source.match(/export type MainSection =([^\n]*)/)?.[1] ?? ''
+
+  return Object.fromEntries(
+    [...union.matchAll(/'([^']*)'/g)].map(([, section]) => [
+      `${section.toUpperCase()}_SECTION`,
+      section,
+    ]),
+  )
 }
+
+const desktop = read(DESKTOP_FILE)
 
 /** Every shared string, under the name the Rust side declares it by. */
 const shared: Record<string, string> = {
   CAPTURE_WINDOW,
   TASK_CREATION_WINDOW,
   MAIN_WINDOW,
-  ...Object.fromEntries(
-    Object.entries(sectionNames).map(([section, name]) => [name, section]),
-  ),
+  ...sectionStrings(desktop),
   CAPTURE_SHOWN_EVENT,
   TASK_CREATION_SHOWN_EVENT,
   COPY_YESTERDAY_DIGEST_EVENT,
@@ -63,16 +79,6 @@ const shared: Record<string, string> = {
   THEME_KEY,
   START_AT_LOGIN_KEY,
   DATABASE_URL,
-}
-
-function read(file: string): string {
-  return readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8')
-}
-
-/** The members of the `MainSection` union, as the source declares them. */
-function sections(source: string): string[] {
-  const union = source.match(/export type MainSection =([^\n]*)/)?.[1] ?? ''
-  return [...union.matchAll(/'([^']*)'/g)].map(([, section]) => section)
 }
 
 /** `const NAME: &str = "value";`, which is how every shared name is declared. */
@@ -109,8 +115,6 @@ function mustMatchComments(source: string): [string, string[]][] {
     )
 }
 
-const DESKTOP_FILE = 'src/platform/desktop.ts'
-const desktop = read(DESKTOP_FILE)
 const rust = rustStrings(read(RUST_FILE))
 const comments = mustMatchComments(desktop)
 
@@ -124,13 +128,6 @@ describe('the names shared with the Rust side', () => {
       ).toBe(value)
     })
   }
-
-  it('checks every member of MainSection', () => {
-    // Read from the source rather than imported: `MainSection` is a type, and
-    // a member renamed in it and nowhere else is a change `vitest run` would
-    // otherwise never see.
-    expect(sections(desktop)).toEqual(Object.keys(sectionNames))
-  })
 
   it('checks every name declared with a "must match" comment', () => {
     const claimed = comments.flatMap(([, names]) => names)
