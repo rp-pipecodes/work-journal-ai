@@ -19,7 +19,8 @@ export type Unlisten = () => void
 /**
  * The window labels. One Vite build serves every window and the label is the
  * only thing that says which — must match `CAPTURE_WINDOW`,
- * `TASK_CREATION_WINDOW` and `MAIN_WINDOW` in `src-tauri/src/lib.rs`.
+ * `TASK_CREATION_WINDOW` and `MAIN_WINDOW` in `src-tauri/src/lib.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
  *
  * `MAIN_WINDOW` is the window the journal is read in, a section at a time —
  * see docs/adr/0022-one-main-window-for-reading-and-settings.md.
@@ -29,28 +30,52 @@ export const TASK_CREATION_WINDOW = 'task-creation'
 export const MAIN_WINDOW = 'main'
 
 /**
- * A section of the Main Window, named by whatever asked for it: the Tray Menu
- * and a clicked Task Alert both say which one they mean. The names live here
- * because they cross to the Rust side — must match `HISTORY_SECTION`,
- * `TASKS_SECTION` and `SETTINGS_SECTION` in `src-tauri/src/lib.rs`, and the
- * sidebar's own list in
- * `src/views/main/sections.ts`.
+ * The sections of the Main Window, named by whatever asked for one: the Tray
+ * Menu and a clicked Task Alert both say which they mean. Constants rather than
+ * three bare members of the union below, so that a section has a name of its
+ * own on this side too and a drift is reported against it — must match
+ * `HISTORY_SECTION`, `TASKS_SECTION` and `SETTINGS_SECTION` in
+ * `src-tauri/src/lib.rs`, as `src/platform/desktop-rust.test.ts` checks, and
+ * the sidebar's own list in `src/views/main/sections.ts`.
  */
-export type MainSection = 'history' | 'tasks' | 'settings'
+export const HISTORY_SECTION = 'history'
+export const TASKS_SECTION = 'tasks'
+export const SETTINGS_SECTION = 'settings'
+
+/** A section of the Main Window: one of the three above and nothing else. */
+export type MainSection =
+  | typeof HISTORY_SECTION
+  | typeof TASKS_SECTION
+  | typeof SETTINGS_SECTION
 
 /**
  * An Entry Point named a section of the Main Window. Addressed to a window
  * already open — one this very request is about to build hears nothing and
  * asks for `requestedSection` instead. Must match `SECTION_REQUESTED_EVENT` in
- * `src-tauri/src/lib.rs`.
+ * `src-tauri/src/lib.rs`, as `src/platform/desktop-rust.test.ts` checks.
  */
 export const SECTION_REQUESTED_EVENT = 'main://section'
 
-/** Must match `SETTINGS_FILE` in `src-tauri/src/lib.rs`. */
+/**
+ * Must match `SETTINGS_FILE` in `src-tauri/src/lib.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
+ */
 export const SETTINGS_FILE = 'settings.json'
 
-/** Must match `THEME_KEY` in `src-tauri/src/lib.rs`. */
+/**
+ * Must match `THEME_KEY` in `src-tauri/src/lib.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
+ */
 export const THEME_KEY = 'theme'
+
+/**
+ * Whether the app starts at login. The one settings key declared here rather
+ * than in `src/settings/settings.ts` with the rest: the Rust side reads it too,
+ * to decide whether this is a first run and the question is worth asking. Must
+ * match `START_AT_LOGIN_KEY` in `src-tauri/src/lib.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
+ */
+export const START_AT_LOGIN_KEY = 'startAtLogin'
 
 /**
  * Where a window is told its Resolved Theme, before its document is parsed and
@@ -66,10 +91,16 @@ declare global {
   }
 }
 
-/** Must match `DATABASE_URL` in `src-tauri/src/lib.rs`. */
+/**
+ * Must match `DATABASE_URL` in `src-tauri/src/lib.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
+ */
 export const DATABASE_URL = 'sqlite:work-journal.db'
 
-/** Must match `CAPTURE_SHOWN_EVENT` in `src-tauri/src/lib.rs`. */
+/**
+ * Must match `CAPTURE_SHOWN_EVENT` in `src-tauri/src/lib.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
+ */
 export const CAPTURE_SHOWN_EVENT = 'capture://shown'
 
 /**
@@ -77,7 +108,8 @@ export const CAPTURE_SHOWN_EVENT = 'capture://shown'
  * window is built at startup and only ever shown and hidden — see
  * docs/adr/0019-task-creation-has-its-own-resident-window.md — so it is told
  * on being shown rather than on being built. Must match
- * `TASK_CREATION_SHOWN_EVENT` in `src-tauri/src/lib.rs`.
+ * `TASK_CREATION_SHOWN_EVENT` in `src-tauri/src/lib.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
  */
 export const TASK_CREATION_SHOWN_EVENT = 'task-creation://shown'
 
@@ -85,7 +117,8 @@ export const TASK_CREATION_SHOWN_EVENT = 'task-creation://shown'
  * The Tray Menu asked for yesterday's Digest. Spoken by the Rust side, which
  * owns the menu but not the journal — the Notes are only reachable from a
  * webview, so the tray asks and a window answers. Must match
- * `COPY_YESTERDAY_DIGEST_EVENT` in `src-tauri/src/lib.rs`.
+ * `COPY_YESTERDAY_DIGEST_EVENT` in `src-tauri/src/lib.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
  */
 export const COPY_YESTERDAY_DIGEST_EVENT = 'digest://yesterday'
 
@@ -209,7 +242,8 @@ export const IMPORT_CHANGED_EVENT = 'settings://import'
 
 /**
  * The machine woke up. Spoken by the Rust side, which is the only part of the
- * app the OS tells. Must match `SYSTEM_WOKE_EVENT` in `src-tauri/src/lib.rs`.
+ * app the OS tells. Must match `SYSTEM_WOKE_EVENT` in `src-tauri/src/lib.rs`,
+ * as `src/platform/desktop-rust.test.ts` checks.
  *
  * Import needs it: a lid closed before a meeting ended would otherwise lose
  * that meeting for good, since nothing ever looks back for it — see
@@ -237,7 +271,7 @@ export const TASKS_CHANGED_EVENT = 'tasks://changed'
  * The user clicked a Task Alert. Spoken by the Rust side, which is the only
  * part of the app macOS hands the click to, and carried to Tasks View so it can
  * open focused on that Task. Must match `TASK_ALERT_OPENED_EVENT` in
- * `src-tauri/src/lib.rs`.
+ * `src-tauri/src/lib.rs`, as `src/platform/desktop-rust.test.ts` checks.
  */
 export const TASK_ALERT_OPENED_EVENT = 'task-alert://opened'
 

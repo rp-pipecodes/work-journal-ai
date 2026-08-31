@@ -9,6 +9,8 @@
  * if voice ever returns.
  */
 
+import { START_AT_LOGIN_KEY } from '@/platform/desktop'
+
 /** The whole of the app's settings storage: string keys to JSON values. */
 export interface SettingsStore {
   get<T>(key: string): Promise<T | undefined>
@@ -52,8 +54,11 @@ export const DEFAULT_SETTINGS: Settings = {
   importCalendars: [],
 }
 
-/** The store keys. The Hotkey's own key is written from Rust. */
-const START_AT_LOGIN_KEY = 'startAtLogin'
+/**
+ * The store keys. The Hotkey's own key is written from Rust, and start at login
+ * is imported rather than declared here because the Rust side reads that one —
+ * every name shared with it lives in `src/platform/desktop.ts`.
+ */
 const IMPORT_MEETINGS_KEY = 'importMeetings'
 const IMPORT_CALENDARS_KEY = 'importCalendars'
 
