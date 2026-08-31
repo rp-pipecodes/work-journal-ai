@@ -2229,6 +2229,7 @@ export function formatScheduledFor(task: Task): string | null {
   const day = new Intl.DateTimeFormat(undefined, {
     day: 'numeric',
     month: 'short',
+    year: 'numeric',
   }).format(at)
 
   if (schedule.time === null) return day
