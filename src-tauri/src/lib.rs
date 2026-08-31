@@ -43,11 +43,11 @@ const APP_MENU_ID: &str = "app-menu";
 const EDIT_MENU_ID: &str = "edit-menu";
 const APP_NAME: &str = "Work Journal";
 
-/// The strings below that are also declared in `src/platform/desktop.ts` are
-/// checked against it by `src/platform/desktop-rust.test.ts`: a window label,
-/// a section or an event name that drifts fails the suite rather than leaving
-/// a window that never hears something.
-///
+// The strings below that are also declared in `src/platform/desktop.ts` are
+// checked against it by `src/platform/desktop-rust.test.ts`: a name that
+// drifts fails the suite rather than leaving a window that never hears
+// something. A "must match" comment is what puts a name in that test's reach.
+
 /// The window labels the frontend routes on — see `src/views/route.ts`. Must
 /// match `CAPTURE_WINDOW`, `TASK_CREATION_WINDOW` and `MAIN_WINDOW` in
 /// `src/platform/desktop.ts`.
