@@ -88,10 +88,14 @@ const shared: Record<string, string> = {
  * The strings `desktop.ts` declares, which is the list the checked ones are
  * drawn from: whatever is not checked against Rust has to be accounted for as
  * this side's own, so that a new one lands in neither by accident.
+ *
+ * A declaration wrapped after the `=` reads the same as one that fits, for the
+ * reason the comments do: a name this cannot see is a name nothing accounts
+ * for, and that is the one way to be missed here without a word being said.
  */
 function desktopStrings(source: string): Map<string, string> {
   return new Map(
-    [...source.matchAll(/^export const ([A-Z][A-Z0-9_]*) = '(.*)'$/gm)].map(
+    [...source.matchAll(/^export const ([A-Z][A-Z0-9_]*) =\s+'([^']*)'/gm)].map(
       ([, name, value]) => [name, value],
     ),
   )
@@ -116,28 +120,42 @@ const typeScriptOnly = new Set([
 /** `const NAME: &str = "value";`, which is how every shared name is declared. */
 function rustStrings(source: string): Map<string, string> {
   return new Map(
-    [...source.matchAll(/^const ([A-Z][A-Z0-9_]*): &str = "(.*)";$/gm)].map(
+    [...source.matchAll(/^const ([A-Z][A-Z0-9_]*): &str =\s+"([^"]*)";/gm)].map(
       ([, name, value]) => [name, value],
     ),
   )
 }
 
 /**
- * Both comment forms — a TypeScript `/** *\/` block and a run of Rust `///` —
- * each as one line of prose. The line breaks and the prefixes go, because a
- * "must match" that a formatter wrapped over two lines has to read the same as
- * one that fits: a claim that goes unrecognised is a claim nothing enforces.
+ * A comment as one line of prose. The line breaks and the prefixes go, because
+ * a "must match" that a formatter wrapped over two lines has to read the same
+ * as one that fits: a claim that goes unrecognised is a claim nothing enforces.
  */
-function docComments(source: string): string[] {
+function oneLine(comment: string): string {
+  return comment
+    .replace(/\/\*\*|\*\/|^\s*(\*|\/\/\/?)/gm, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** The `/** *\/` blocks of `desktop.ts`. */
+function desktopComments(source: string): string[] {
+  return (source.match(/\/\*\*[\s\S]*?\*\//g) ?? []).map(oneLine)
+}
+
+/**
+ * Each run of `///` lines in the Rust file with the constant it documents.
+ * What a comment is attached to is what says whether this test can hold it to
+ * anything: the geometry constants are `f64` and deliberately unchecked, and a
+ * comment documenting one of those is not making a claim about a shared
+ * string. Judging by the names a comment happens to mention instead would let
+ * a comment naming its counterpart under some other spelling say nothing at
+ * all — and it would say it silently.
+ */
+function rustComments(source: string): { comment: string; documents: string }[] {
   return [
-    ...(source.match(/\/\*\*[\s\S]*?\*\//g) ?? []),
-    ...(source.match(/(?:^[ \t]*\/\/[^\n]*\n)+/gm) ?? []),
-  ].map((comment) =>
-    comment
-      .replace(/\/\*\*|\*\/|^\s*(\*|\/\/\/?)/gm, ' ')
-      .replace(/\s+/g, ' ')
-      .trim(),
-  )
+    ...source.matchAll(/((?:^[ \t]*\/\/\/[^\n]*\n)+)[ \t]*const ([A-Z][A-Z0-9_]*)/gm),
+  ].map(([, comment, documents]) => ({ comment: oneLine(comment), documents }))
 }
 
 /** A comment claiming some names match the other side's, and those names. */
@@ -155,8 +173,8 @@ interface Claim {
  * `__THEME__` global is written by a Rust method rather than declared as a
  * shared string, and there is nothing here for it to be checked against.
  */
-function mustMatchComments(source: string, otherFile: string): Claim[] {
-  return docComments(source)
+function mustMatchComments(comments: string[], otherFile: string): Claim[] {
+  return comments
     .map((comment) => ({
       comment,
       names: [...comment.matchAll(/`([A-Z][A-Z0-9_]*)`/g)].map(
@@ -177,19 +195,16 @@ const declared = desktopStrings(desktop)
 
 /**
  * Every claim that has to be honoured here: all of `desktop.ts`'s, and the
- * Rust ones about a string the Rust side declares. Membership of that map is
- * what leaves the geometry comments out — `CAPTURE_HEIGHT` and the rest are
- * `f64`, deliberately unchecked, and a comment about one has no business
- * naming this test.
+ * Rust ones documenting a string the Rust side declares.
  */
 const claims: Claim[] = [
-  ...mustMatchComments(desktop, RUST_FILE),
-  ...mustMatchComments(rustSource, DESKTOP_FILE)
-    .map(({ comment, names }) => ({
-      comment,
-      names: names.filter((name) => rust.has(name)),
-    }))
-    .filter(({ names }) => names.length > 0),
+  ...mustMatchComments(desktopComments(desktop), RUST_FILE),
+  ...mustMatchComments(
+    rustComments(rustSource)
+      .filter(({ documents }) => rust.has(documents))
+      .map(({ comment }) => comment),
+    DESKTOP_FILE,
+  ),
 ]
 
 describe('the names shared with the Rust side', () => {
