@@ -84,6 +84,35 @@ const shared: Record<string, string> = {
   DATABASE_URL,
 }
 
+/**
+ * The strings `desktop.ts` declares, which is the list the checked ones are
+ * drawn from: whatever is not checked against Rust has to be accounted for as
+ * this side's own, so that a new one lands in neither by accident.
+ */
+function desktopStrings(source: string): Map<string, string> {
+  return new Map(
+    [...source.matchAll(/^export const ([A-Z][A-Z0-9_]*) = '(.*)'$/gm)].map(
+      ([, name, value]) => [name, value],
+    ),
+  )
+}
+
+/**
+ * The announcements spoken and heard only in TypeScript. They sit in
+ * `desktop.ts` so that every event name in the app is in one place, and they
+ * are named here so that a name arriving there is either checked against the
+ * Rust side or deliberately one of these — never neither because a comment
+ * happened to be worded in a way this file did not recognise.
+ */
+const typeScriptOnly = new Set([
+  'NOTE_CAPTURED_EVENT',
+  'THEME_CHANGED_EVENT',
+  'IMPORT_CHANGED_EVENT',
+  'JOURNAL_CHANGED_EVENT',
+  'TASKS_CHANGED_EVENT',
+  'TASK_ALERTS_RECONCILED_EVENT',
+])
+
 /** `const NAME: &str = "value";`, which is how every shared name is declared. */
 function rustStrings(source: string): Map<string, string> {
   return new Map(
@@ -144,6 +173,7 @@ function mustMatchComments(source: string, otherFile: string): Claim[] {
 
 const rustSource = read(RUST_FILE)
 const rust = rustStrings(rustSource)
+const declared = desktopStrings(desktop)
 
 /**
  * Every claim that has to be honoured here: all of `desktop.ts`'s, and the
@@ -184,18 +214,31 @@ describe('the names shared with the Rust side', () => {
     expect(names.filter((name) => !(name in shared))).toEqual([])
   })
 
+  it('accounts for every string desktop.ts declares', () => {
+    // The comment rule below reads prose, and prose can be written a way it
+    // does not recognise. This one reads the declarations themselves, so a
+    // name arriving in `desktop.ts` is either checked or called this side's
+    // own, whatever its comment says.
+    const unaccounted = [...declared]
+      .filter(([name]) => !(name in shared) && !typeScriptOnly.has(name))
+      .map(([name, value]) => `${name} = ${JSON.stringify(value)}`)
+
+    expect(declared.size).toBeGreaterThan(0)
+    expect(unaccounted, unaccounted.join('; ')).toEqual([])
+  })
+
   it('checks every name declared with a "must match" comment', () => {
     const claimed = [...new Set(claims.flatMap(({ names }) => names))]
-    // Said with the Rust value, because the two ways to get here are a name
-    // that never had a counterpart and a name that has one under a spelling
-    // `desktop.ts` has since dropped — and which of those it is, is exactly
-    // what the Rust side holding something says.
+    // Said with both sides' values: the two ways to get here are a name that
+    // never had a counterpart and a name that has one under a spelling the
+    // other side has since dropped, and what each holds says which.
     const unchecked = claimed
       .filter((name) => !(name in shared))
       .map(
         (name) =>
-          `${name} is ${JSON.stringify(rust.get(name))} in ${RUST_FILE} and ` +
-          `nothing in ${DESKTOP_FILE} is checked against it`,
+          `${name} is ${JSON.stringify(declared.get(name))} in ` +
+          `${DESKTOP_FILE} and ${JSON.stringify(rust.get(name))} in ` +
+          `${RUST_FILE}, and nothing checks the pair`,
       )
 
     expect(claimed.length).toBeGreaterThan(0)
