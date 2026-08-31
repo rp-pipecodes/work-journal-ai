@@ -19,14 +19,17 @@ import {
   CAPTURE_WINDOW,
   COPY_YESTERDAY_DIGEST_EVENT,
   DATABASE_URL,
+  HISTORY_SECTION,
   MAIN_WINDOW,
   SECTION_REQUESTED_EVENT,
   SETTINGS_FILE,
+  SETTINGS_SECTION,
   START_AT_LOGIN_KEY,
   SYSTEM_WOKE_EVENT,
   TASK_ALERT_OPENED_EVENT,
   TASK_CREATION_SHOWN_EVENT,
   TASK_CREATION_WINDOW,
+  TASKS_SECTION,
   THEME_KEY,
 } from './desktop'
 
@@ -39,26 +42,24 @@ function read(file: string): string {
 }
 
 /**
- * The members of the `MainSection` union, under the name the Rust side declares
- * each by. Read from the source rather than imported, because `MainSection` is
- * a type: a member renamed in it and nowhere else is a change `vitest run`
- * would otherwise never see, and one renamed here is then checked — and found
- * missing — under its new name.
- *
- * A union this cannot read yields no sections at all, which would leave them
- * unchecked rather than failing. What catches that is the coverage test below:
- * the comment on `MainSection` names all three, and every name a "must match"
- * comment claims has to be checked here.
+ * What the `MainSection` union is made of: the constants it refers to, and any
+ * member written as a bare string instead. Read from the source rather than
+ * imported, because `MainSection` is a type — a fourth section spelled out in
+ * the union has no name to be checked under, and `vitest run` compiles nothing
+ * that would say so.
  */
-function sectionStrings(source: string): Record<string, string> {
-  const union = source.match(/export type MainSection =([^\n]*)/)?.[1] ?? ''
+function sectionMembers(source: string): {
+  names: string[]
+  literals: string[]
+} {
+  const union = source.match(/export type MainSection =([\s\S]*?)\n\n/)?.[1] ?? ''
 
-  return Object.fromEntries(
-    [...union.matchAll(/'([^']*)'/g)].map(([, section]) => [
-      `${section.toUpperCase()}_SECTION`,
-      section,
-    ]),
-  )
+  return {
+    names: [...union.matchAll(/typeof ([A-Z][A-Z0-9_]*)/g)].map(
+      ([, name]) => name,
+    ),
+    literals: [...union.matchAll(/'([^']*)'/g)].map(([, member]) => member),
+  }
 }
 
 const desktop = read(DESKTOP_FILE)
@@ -68,7 +69,9 @@ const shared: Record<string, string> = {
   CAPTURE_WINDOW,
   TASK_CREATION_WINDOW,
   MAIN_WINDOW,
-  ...sectionStrings(desktop),
+  HISTORY_SECTION,
+  TASKS_SECTION,
+  SETTINGS_SECTION,
   CAPTURE_SHOWN_EVENT,
   TASK_CREATION_SHOWN_EVENT,
   COPY_YESTERDAY_DIGEST_EVENT,
@@ -170,8 +173,19 @@ describe('the names shared with the Rust side', () => {
     })
   }
 
+  it('builds MainSection out of names this checks', () => {
+    const { names, literals } = sectionMembers(desktop)
+
+    // A member spelled out in the union has no constant behind it, so a drift
+    // in it could only ever be reported as a section that appeared and one
+    // that vanished, never as one name holding two values.
+    expect(literals, literals.join('; ')).toEqual([])
+    expect(names.length).toBeGreaterThan(0)
+    expect(names.filter((name) => !(name in shared))).toEqual([])
+  })
+
   it('checks every name declared with a "must match" comment', () => {
-    const claimed = claims.flatMap(({ names }) => names)
+    const claimed = [...new Set(claims.flatMap(({ names }) => names))]
     // Said with the Rust value, because the two ways to get here are a name
     // that never had a counterpart and a name that has one under a spelling
     // `desktop.ts` has since dropped — and which of those it is, is exactly

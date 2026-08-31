@@ -30,14 +30,23 @@ export const TASK_CREATION_WINDOW = 'task-creation'
 export const MAIN_WINDOW = 'main'
 
 /**
- * A section of the Main Window, named by whatever asked for it: the Tray Menu
- * and a clicked Task Alert both say which one they mean. The names live here
- * because they cross to the Rust side — must match `HISTORY_SECTION`,
- * `TASKS_SECTION` and `SETTINGS_SECTION` in `src-tauri/src/lib.rs`, as
- * `src/platform/desktop-rust.test.ts` checks, and the sidebar's own list in
- * `src/views/main/sections.ts`.
+ * The sections of the Main Window, named by whatever asked for one: the Tray
+ * Menu and a clicked Task Alert both say which they mean. Constants rather than
+ * three bare members of the union below, so that a section has a name of its
+ * own on this side too and a drift is reported against it — must match
+ * `HISTORY_SECTION`, `TASKS_SECTION` and `SETTINGS_SECTION` in
+ * `src-tauri/src/lib.rs`, as `src/platform/desktop-rust.test.ts` checks, and
+ * the sidebar's own list in `src/views/main/sections.ts`.
  */
-export type MainSection = 'history' | 'tasks' | 'settings'
+export const HISTORY_SECTION = 'history'
+export const TASKS_SECTION = 'tasks'
+export const SETTINGS_SECTION = 'settings'
+
+/** A section of the Main Window: one of the three above and nothing else. */
+export type MainSection =
+  | typeof HISTORY_SECTION
+  | typeof TASKS_SECTION
+  | typeof SETTINGS_SECTION
 
 /**
  * An Entry Point named a section of the Main Window. Addressed to a window
