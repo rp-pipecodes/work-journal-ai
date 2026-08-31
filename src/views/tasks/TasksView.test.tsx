@@ -364,6 +364,25 @@ describe('the four groups', () => {
     const task = await screen.findByText('plan next year')
     expect(task.closest('li')?.textContent).toContain('2027')
   })
+
+  it('puts schedule metadata below the larger Task description', async () => {
+    const { core, desktop } = await showTasks(['renew the cert'])
+    const [task] = await core.openTasks()
+    await core.editTask(task.id, {
+      description: 'renew the cert',
+      schedule: { date: '2027-03-16', time: '14:00' },
+      recurrence: { unit: 'day', interval: 1, weekdays: [] },
+    })
+    await desktop.announceTasksChanged()
+
+    const description = await screen.findByText('renew the cert')
+    const metadata = description.nextElementSibling
+
+    expect(description.className).toContain('type-title')
+    expect(metadata?.textContent).toContain('every day')
+    expect(metadata?.textContent).toContain('2027')
+    expect(description.parentElement?.firstElementChild).toBe(description)
+  })
 })
 
 describe('the schedule controls', () => {
