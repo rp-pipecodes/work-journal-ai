@@ -453,8 +453,10 @@ function TaskGroupSection({
 /**
  * One Task as it reads now: the checkbox that completes it, what it says, when
  * it is meant to be done, how often it comes round again, and the ways to
- * change or remove it. Pressing the description opens the Editor — a Task is
- * one line, and changing it is a decision rather than a place to put a cursor.
+ * change or remove it. The description is the primary line; its schedule is
+ * supporting metadata beneath it. Pressing the description opens the Editor —
+ * a Task is one line, and changing it is a decision rather than a place to put
+ * a cursor.
  *
  * The checkbox completes immediately and asks nothing: completing is reversible
  * from the row beside it, and a confirmation on the most ordinary action in the
@@ -501,7 +503,7 @@ function TaskLine({
     <li
       ref={row}
       aria-current={focused ? 'true' : undefined}
-      className={`group rounded-md py-1.5 pl-2 pr-1 type-body hover:bg-muted/40 focus-within:bg-muted/40 ${
+      className={`group rounded-md py-2 pl-2 pr-1 hover:bg-muted/40 focus-within:bg-muted/40 ${
         focused ? 'bg-muted/60 ring-2 ring-ring/40' : ''
       }`}
     >
@@ -518,40 +520,39 @@ function TaskLine({
           />
         </span>
 
-        <button
-          type="button"
-          onClick={onEdit}
-          className={`min-w-0 flex-1 cursor-text rounded-sm py-0.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ${
-            done ? 'text-muted-foreground line-through' : ''
-          }`}
-        >
-          {task.description}
-        </button>
-
-        {/* What the Task repeats on, in the same words an export writes. */}
-        {task.recurrence !== null && (
-          <span className="flex shrink-0 items-center gap-1 pt-1 type-meta text-muted-foreground">
-            <RepeatIcon className="size-3" aria-hidden />
-            {formatRecurrence(task.recurrence)}
-          </span>
-        )}
-
-        {/* Only while the commitment is still open: a Task that was kept is
-            about when it was kept, not about when it was meant to be. */}
-        {!done && scheduled !== null && (
-          <span className="shrink-0 pt-1 tabular-nums type-meta text-muted-foreground">
-            {scheduled}
-          </span>
-        )}
-
-        {task.completedAt !== null && (
-          <time
-            dateTime={task.completedAt}
-            className="shrink-0 pt-1 tabular-nums type-meta text-muted-foreground"
+        <div className="min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={onEdit}
+            className={`block w-full min-w-0 cursor-text rounded-sm py-0.5 text-left type-title outline-none focus-visible:ring-2 focus-visible:ring-ring/30 ${
+              done ? 'text-muted-foreground line-through' : ''
+            }`}
           >
-            {formatTaskCompletedAt(task.completedAt)}
-          </time>
-        )}
+            {task.description}
+          </button>
+
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 type-meta text-muted-foreground">
+            {/* What the Task repeats on, in the same words an export writes. */}
+            {task.recurrence !== null && (
+              <span className="flex items-center gap-1">
+                <RepeatIcon className="size-3" aria-hidden />
+                {formatRecurrence(task.recurrence)}
+              </span>
+            )}
+
+            {/* Only while the commitment is still open: a Task that was kept
+                is about when it was kept, not about when it was meant to be. */}
+            {!done && scheduled !== null && (
+              <span className="tabular-nums">{scheduled}</span>
+            )}
+
+            {task.completedAt !== null && (
+              <time dateTime={task.completedAt} className="tabular-nums">
+                {formatTaskCompletedAt(task.completedAt)}
+              </time>
+            )}
+          </div>
+        </div>
 
         <div className="flex shrink-0 items-center gap-0.5 pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
           {/* Offered only while it is safe. A completion whose successor was
