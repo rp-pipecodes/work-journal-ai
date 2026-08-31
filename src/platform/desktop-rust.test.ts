@@ -123,7 +123,7 @@ describe('the names shared with the Rust side', () => {
     it(`declares ${name} the same on both sides`, () => {
       expect(
         rust.get(name),
-        `${name} is ${JSON.stringify(value)} in src/platform/desktop.ts and ` +
+        `${name} is ${JSON.stringify(value)} in ${DESKTOP_FILE} and ` +
           `${JSON.stringify(rust.get(name))} in ${RUST_FILE}`,
       ).toBe(value)
     })
@@ -131,9 +131,20 @@ describe('the names shared with the Rust side', () => {
 
   it('checks every name declared with a "must match" comment', () => {
     const claimed = comments.flatMap(([, names]) => names)
+    // Said with the Rust value, because the two ways to get here are a name
+    // that never had a counterpart and a name that has one under a spelling
+    // `desktop.ts` has since dropped — and which of those it is, is exactly
+    // what the Rust side holding something says.
+    const unchecked = claimed
+      .filter((name) => !(name in shared))
+      .map(
+        (name) =>
+          `${name} is ${JSON.stringify(rust.get(name))} in ${RUST_FILE} and ` +
+          `nothing in ${DESKTOP_FILE} is checked against it`,
+      )
 
     expect(claimed.length).toBeGreaterThan(0)
-    expect(claimed.filter((name) => !(name in shared))).toEqual([])
+    expect(unchecked, unchecked.join('; ')).toEqual([])
   })
 
   it('points every "must match" comment at this test', () => {
