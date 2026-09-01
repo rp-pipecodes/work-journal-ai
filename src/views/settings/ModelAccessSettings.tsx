@@ -46,10 +46,12 @@ export default function ModelAccessSettings({
   // a locked keychain and a denied prompt do not read the same. Nothing until
   // there is something to say.
   const [keychainProblem, setKeychainProblem] = useState<string | null>(null)
-  // A Base URL or Model the store would not take. Said rather than rolled
+  // Which fields the store would not take, one flag each: a write that
+  // succeeded says nothing about the other field, and a line about Base URL
+  // must not be answered by a keystroke in Model. Said rather than rolled
   // back: the field is text the user is still typing, and putting an older
   // value back under the cursor would throw away the keystrokes since.
-  const [storeProblem, setStoreProblem] = useState<string | null>(null)
+  const [unsaved, setUnsaved] = useState({ modelBaseUrl: false, model: false })
   // Which of the two fields the user has already typed in. The settings file
   // opens while this window is on screen, so a whole Base URL can be typed
   // before the read lands — and a free-text field is where that gap shows in a
@@ -91,14 +93,21 @@ export default function ModelAccessSettings({
     setKeychainProblem(`${KEYCHAIN_REFUSED} macOS said: ${saidBy(error)}`)
   }
 
+  /** How the last write to one field went, and only that field. */
+  function record(field: 'modelBaseUrl' | 'model', failed: boolean): void {
+    setUnsaved((before) =>
+      before[field] === failed ? before : { ...before, [field]: failed },
+    )
+  }
+
   function changeBaseUrl(next: string) {
     typedIn.current.modelBaseUrl = true
     setModelBaseUrl(next)
     settings.saveModelBaseUrl(next).then(
-      () => setStoreProblem(null),
+      () => record('modelBaseUrl', false),
       (error: unknown) => {
         console.error('could not change where the model is', error)
-        setStoreProblem(NOT_STORED)
+        record('modelBaseUrl', true)
       },
     )
   }
@@ -107,10 +116,10 @@ export default function ModelAccessSettings({
     typedIn.current.model = true
     setModel(next)
     settings.saveModel(next).then(
-      () => setStoreProblem(null),
+      () => record('model', false),
       (error: unknown) => {
         console.error('could not change which model is asked', error)
-        setStoreProblem(NOT_STORED)
+        record('model', true)
       },
     )
   }
@@ -199,7 +208,9 @@ export default function ModelAccessSettings({
         </Button>
       </SettingsRow>
 
-      {storeProblem !== null && <SettingsProblem>{storeProblem}</SettingsProblem>}
+      {unsaved.modelBaseUrl && <SettingsProblem>{notStored('Base URL')}</SettingsProblem>}
+
+      {unsaved.model && <SettingsProblem>{notStored('Model')}</SettingsProblem>}
 
       {keychainProblem !== null && (
         <SettingsProblem>{keychainProblem}</SettingsProblem>
@@ -245,9 +256,14 @@ function keyStatus(keySet: boolean): string {
 const KEYCHAIN_REFUSED =
   'macOS is not letting Work Journal reach your Keychain, so the API Key cannot be read or changed. Unlock your login keychain in Keychain Access, or allow Work Journal when macOS asks, and open Settings again.'
 
-/** A Base URL or Model the settings file would not take. */
-const NOT_STORED =
-  'That could not be saved to the settings file, so it will be gone at the next launch.'
+/**
+ * A field the settings file would not take, named: the other field may have
+ * saved perfectly well, and a line that said only "that" would leave the user
+ * guessing which of the two to type again.
+ */
+function notStored(field: string): string {
+  return `${field} could not be saved to the settings file, so it will be gone at the next launch.`
+}
 
 /**
  * What the far side said, whichever side that was: a Tauri command rejects

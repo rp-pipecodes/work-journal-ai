@@ -599,6 +599,72 @@ describe('Model Access', () => {
     expect(stored.modelBaseUrl).toBe('http://localhost:11434/v1')
   })
 
+  it('leaves the unsaved field named while the other one saves', async () => {
+    // Two fields, two writes, and only one of them failing. A line about Base
+    // URL must not be answered by a keystroke in Model: the file still does
+    // not hold the Base URL the user is looking at.
+    const stored: Record<string, unknown> = { startAtLogin: false }
+    // The file stops refusing once the user has been told, so the line has a
+    // way to go away that is not "close the window".
+    let refusingBaseUrl = true
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          // The one field the settings file will not take.
+          if (key === 'modelBaseUrl' && refusingBaseUrl) {
+            throw new Error('the file is read-only')
+          }
+          stored[key] = value
+        },
+      }),
+    })
+
+    showSettings(desktop)
+
+    fireEvent.change(await screen.findByLabelText('Base URL'), {
+      target: { value: 'http://localhost:11434/v1' },
+    })
+    await screen.findByText(/could not be saved/)
+
+    fireEvent.change(screen.getByLabelText('Model'), {
+      target: { value: 'llama3.1' },
+    })
+
+    await expect.poll(() => stored.model).toBe('llama3.1')
+    // Every settled write has had its say before the window is read: the
+    // state updates behind them are promise callbacks, and a macrotask runs
+    // once the whole microtask queue is drained.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // The Model write succeeded; the Base URL is still not in the file.
+    expect(stored.modelBaseUrl).toBe(undefined)
+    const said = screen.queryAllByRole('alert').map((line) => line.textContent)
+    expect(
+      said.join(' | '),
+      'a keystroke in Model answered a line about Base URL',
+    ).toMatch(/could not be saved/)
+    // And the line says which field, so the user knows what to try again.
+    expect(said.join(' | ')).toMatch(/Base URL/)
+
+    // Trying again is what takes the line away.
+    refusingBaseUrl = false
+    fireEvent.change(screen.getByLabelText('Base URL'), {
+      target: { value: 'http://localhost:11434/v2' },
+    })
+
+    await expect
+      .poll(() => screen.queryAllByRole('alert').length)
+      .toBe(0)
+    expect(stored.modelBaseUrl).toBe('http://localhost:11434/v2')
+  })
+
   it('keeps Clear after a Keychain call that failed on its own', async () => {
     // The key is known to be there: the mount read succeeded. A later call
     // failing says the Keychain is busy or locked right now, not that the key
