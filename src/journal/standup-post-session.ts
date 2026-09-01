@@ -43,6 +43,11 @@ export function createStandupPostSession({
   let rollover: ReturnType<typeof setTimeout> | null = null
   let unlisten: Unlisten[] = []
   let latestRead = 0
+  let generation = 0
+
+  function isCurrent(startGeneration: number): boolean {
+    return running && generation === startGeneration
+  }
 
   async function read(): Promise<void> {
     const readTicket = ++latestRead
@@ -61,18 +66,22 @@ export function createStandupPostSession({
     }
   }
 
-  function armRollover(): void {
-    if (!running) return
+  function armRollover(startGeneration: number): void {
+    if (!isCurrent(startGeneration)) return
 
     rollover = setTimeout(() => {
-      void read().then(armRollover)
+      if (!isCurrent(startGeneration)) return
+      void read().then(() => armRollover(startGeneration))
     }, msUntilNextJournalDay(clock.now()))
   }
 
   return {
     async start() {
+      const startGeneration = ++generation
       running = true
-      const refresh = () => void read()
+      const refresh = () => {
+        if (isCurrent(startGeneration)) void read()
+      }
       const stopListening = await Promise.all([
         desktop.onJournalChanged(refresh),
         desktop.onTasksChanged(refresh),
@@ -80,18 +89,19 @@ export function createStandupPostSession({
         desktop.onSystemWoke(refresh),
       ])
 
-      if (!running) {
+      if (!isCurrent(startGeneration)) {
         for (const stop of stopListening) stop()
         return
       }
 
       unlisten = stopListening
       await read()
-      armRollover()
+      armRollover(startGeneration)
     },
 
     stop() {
       running = false
+      generation += 1
       latestRead += 1
       if (rollover !== null) clearTimeout(rollover)
       rollover = null
