@@ -11,6 +11,7 @@
  */
 
 import { START_AT_LOGIN_KEY } from '@/platform/desktop'
+import { DEFAULT_STANDUP_PROMPT } from '@/journal/standup-post'
 
 /** The whole of the app's settings storage: string keys to JSON values. */
 export interface SettingsStore {
@@ -59,6 +60,14 @@ export interface Settings {
    * outlives the model — see docs/adr/0001-defer-voice-capture-to-v2.md.
    */
   model: string
+  /**
+   * The system prompt a Standup Post is written under, as the user's.
+   * Plain text in this store rather than a secret in the Keychain: a prompt
+   * is voice, not a credential — and a consequence of the model call, not
+   * something only Rust may touch. A cleared field reads back as the shipped
+   * prompt, not as an empty one — see `readSettings`.
+   */
+  standupPrompt: string
 }
 
 /** Where Model Access points before the user points it anywhere else. */
@@ -70,6 +79,7 @@ export const DEFAULT_SETTINGS: Settings = {
   importCalendars: [],
   modelBaseUrl: OPENAI_BASE_URL,
   model: '',
+  standupPrompt: DEFAULT_STANDUP_PROMPT,
 }
 
 /**
@@ -86,6 +96,8 @@ const IMPORT_CALENDARS_KEY = 'importCalendars'
  */
 const MODEL_BASE_URL_KEY = 'modelBaseUrl'
 const MODEL_KEY = 'model'
+/** The prompt a Standup Post is written under. A plain setting, like the rest. */
+const STANDUP_PROMPT_KEY = 'standupPrompt'
 
 /**
  * Every setting at once, with a default wherever the store is silent or holds
@@ -93,14 +105,21 @@ const MODEL_KEY = 'model'
  * written by an older version, must not stop the app from starting.
  */
 export async function readSettings(store: SettingsStore): Promise<Settings> {
-  const [startAtLogin, importMeetings, importCalendars, modelBaseUrl, model] =
-    await Promise.all([
-      store.get<unknown>(START_AT_LOGIN_KEY),
-      store.get<unknown>(IMPORT_MEETINGS_KEY),
-      store.get<unknown>(IMPORT_CALENDARS_KEY),
-      store.get<unknown>(MODEL_BASE_URL_KEY),
-      store.get<unknown>(MODEL_KEY),
-    ])
+  const [
+    startAtLogin,
+    importMeetings,
+    importCalendars,
+    modelBaseUrl,
+    model,
+    standupPrompt,
+  ] = await Promise.all([
+    store.get<unknown>(START_AT_LOGIN_KEY),
+    store.get<unknown>(IMPORT_MEETINGS_KEY),
+    store.get<unknown>(IMPORT_CALENDARS_KEY),
+    store.get<unknown>(MODEL_BASE_URL_KEY),
+    store.get<unknown>(MODEL_KEY),
+    store.get<unknown>(STANDUP_PROMPT_KEY),
+  ])
 
   return {
     startAtLogin:
@@ -122,6 +141,14 @@ export async function readSettings(store: SettingsStore): Promise<Settings> {
         ? modelBaseUrl
         : DEFAULT_SETTINGS.modelBaseUrl,
     model: typeof model === 'string' ? model : DEFAULT_SETTINGS.model,
+    // Empty means the default, not silence: a model asked nothing does not
+    // write a standup post, and a cleared field must read as the shipped
+    // prompt — the same fallback a store that says nothing gets. A prompt
+    // that is all whitespace is a cleared one.
+    standupPrompt:
+      typeof standupPrompt === 'string' && standupPrompt.trim() !== ''
+        ? standupPrompt
+        : DEFAULT_SETTINGS.standupPrompt,
   }
 }
 
@@ -139,6 +166,19 @@ export async function writeModel(
   model: string,
 ): Promise<void> {
   await store.set(MODEL_KEY, model)
+}
+
+/**
+ * The prompt a Standup Post is written under, kept as typed. A cleared field
+ * is written too — the default into which it is read is the store's answer
+ * to "nothing was entered" — and Restore Default writes the shipped prompt
+ * back whole.
+ */
+export async function writeStandupPrompt(
+  store: SettingsStore,
+  standupPrompt: string,
+): Promise<void> {
+  await store.set(STANDUP_PROMPT_KEY, standupPrompt)
 }
 
 /** Whether meetings are swept at all. Both answers are the user's. */

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { DEFAULT_STANDUP_PROMPT } from '../journal/standup-post'
 import { fakeDesktop } from '../platform/testing/desktop'
 import { createAppSettings } from './app-settings'
 
@@ -80,5 +81,22 @@ describe('importing meetings', () => {
 
     expect(stored.importMeetings).toBe(false)
     expect(stored.importCalendars).toEqual([])
+  })
+})
+
+describe('the Standup Prompt', () => {
+  it('opens at the shipped prompt until the user has written their own', async () => {
+    const stored = await createAppSettings(fakeDesktop()).load()
+
+    expect(stored.standupPrompt).toBe(DEFAULT_STANDUP_PROMPT)
+  })
+
+  it('reads back what was saved', async () => {
+    const desktop = fakeDesktop()
+    const settings = createAppSettings(desktop)
+
+    await settings.saveStandupPrompt('Write it in pirate speak.')
+
+    expect((await settings.load()).standupPrompt).toBe('Write it in pirate speak.')
   })
 })

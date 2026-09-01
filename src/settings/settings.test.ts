@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_STANDUP_PROMPT } from '@/journal/standup-post'
 import {
   DEFAULT_SETTINGS,
   hasAnsweredStartAtLogin,
@@ -8,6 +9,7 @@ import {
   writeImportMeetings,
   writeModel,
   writeModelBaseUrl,
+  writeStandupPrompt,
   writeStartAtLogin,
   type SettingsStore,
 } from './settings'
@@ -43,6 +45,7 @@ describe('readSettings', () => {
       importCalendars: [],
       modelBaseUrl: OPENAI_BASE_URL,
       model: '',
+      standupPrompt: DEFAULT_STANDUP_PROMPT,
     })
   })
 
@@ -53,6 +56,7 @@ describe('readSettings', () => {
     await writeImportCalendars(store, ['work', 'personal'])
     await writeModelBaseUrl(store, 'http://localhost:11434/v1')
     await writeModel(store, 'llama3.1')
+    await writeStandupPrompt(store, 'Write it in pirate speak.')
 
     expect(await readSettings(store)).toEqual({
       startAtLogin: true,
@@ -60,6 +64,7 @@ describe('readSettings', () => {
       importCalendars: ['work', 'personal'],
       modelBaseUrl: 'http://localhost:11434/v1',
       model: 'llama3.1',
+      standupPrompt: 'Write it in pirate speak.',
     })
   })
 
@@ -102,6 +107,44 @@ describe('readSettings', () => {
       ...DEFAULT_SETTINGS,
       startAtLogin: true,
     })
+  })
+})
+
+describe('the Standup Prompt', () => {
+  it('ships with the prompt the previous ticket shipped', async () => {
+    expect(DEFAULT_SETTINGS.standupPrompt).toBe(DEFAULT_STANDUP_PROMPT)
+  })
+
+  it('starts everyone at the shipped prompt rather than at silence', async () => {
+    const settings = await readSettings(emptyStore())
+
+    expect(settings.standupPrompt).toBe(DEFAULT_STANDUP_PROMPT)
+  })
+
+  it('treats a cleared field as the shipped prompt, not as an empty one', async () => {
+    // The user can clear the field, and a model asked nothing does not write a
+    // standup post: an empty stored prompt must become the shipped one, not
+    // silence. (A whitespace-only prompt is a cleared one.)
+    const store = emptyStore({ standupPrompt: '' })
+
+    expect((await readSettings(store)).standupPrompt).toBe(DEFAULT_STANDUP_PROMPT)
+
+    const blank = emptyStore({ standupPrompt: '   ' })
+    expect((await readSettings(blank)).standupPrompt).toBe(DEFAULT_STANDUP_PROMPT)
+  })
+
+  it('reads back what was written, verbatim', async () => {
+    const store = emptyStore()
+    const prompt = 'Write it in pirate speak.'
+    await writeStandupPrompt(store, prompt)
+
+    expect((await readSettings(store)).standupPrompt).toBe(prompt)
+  })
+
+  it('falls back to the shipped prompt rather than trusting a non-string', async () => {
+    const store = emptyStore({ standupPrompt: { text: 'write a post' } })
+
+    expect((await readSettings(store)).standupPrompt).toBe(DEFAULT_STANDUP_PROMPT)
   })
 })
 

@@ -139,12 +139,12 @@ function taskBullet(task: Task): string {
 }
 
 /**
- * The system prompt a Standup Post is written under, as shipped. Hardcoded
- * here and read by the view until the Standup Prompt setting makes it the
- * user's — see issue #133. Written blind of the actual chat group, so it
- * states the four assumptions #56 settled on: two labelled sections, `#project`
- * names kept, first person, nothing stated that is absent from the input,
- * and the input's language.
+ * The system prompt a Standup Post is written under, as shipped — the value
+ * `readSettings` falls back to while the Standup Prompt setting holds nothing
+ * of the user's, and the one Restore Default puts back: see issue #133.
+ * Written blind of the actual chat group, so it states the four assumptions
+ * #56 settled on: two labelled sections, `#project` names kept, first person,
+ * nothing stated that is absent from the input, and the input's language.
  */
 export const DEFAULT_STANDUP_PROMPT = `You are writing a standup post for the user to paste into a chat group.
 
