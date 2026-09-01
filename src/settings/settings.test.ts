@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_STANDUP_PROMPT } from '@/journal/standup-post'
 import {
   DEFAULT_SETTINGS,
+  DEFAULT_STANDUP_PROMPT,
   hasAnsweredStartAtLogin,
   OPENAI_BASE_URL,
   readSettings,

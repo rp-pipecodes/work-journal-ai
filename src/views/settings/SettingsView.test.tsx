@@ -6,7 +6,7 @@ import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
 import ThemeProvider from '@/components/ThemeProvider'
 import { createAppSettings } from '@/settings/app-settings'
 import type { Journal, JournalExport } from '@/journal/journal'
-import { DEFAULT_STANDUP_PROMPT } from '@/journal/standup-post'
+import { DEFAULT_STANDUP_PROMPT } from '@/settings/settings'
 import SettingsView from './SettingsView'
 
 // Settings as the user meets it. The one seam that cannot be driven from Node:

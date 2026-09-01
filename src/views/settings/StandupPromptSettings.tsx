@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { DEFAULT_STANDUP_PROMPT } from '@/journal/standup-post'
+import { DEFAULT_STANDUP_PROMPT } from '@/settings/settings'
 import type { AppSettings } from '@/settings/app-settings'
 import type { SettingsInitialState } from './SettingsInitialState'
 import { SettingsGroup, SettingsProblem, SettingsRow, notStored } from './SettingsGroup'

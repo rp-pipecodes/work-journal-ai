@@ -11,7 +11,6 @@
  */
 
 import { START_AT_LOGIN_KEY } from '@/platform/desktop'
-import { DEFAULT_STANDUP_PROMPT } from '@/journal/standup-post'
 
 /** The whole of the app's settings storage: string keys to JSON values. */
 export interface SettingsStore {
@@ -72,6 +71,26 @@ export interface Settings {
 
 /** Where Model Access points before the user points it anywhere else. */
 export const OPENAI_BASE_URL = 'https://api.openai.com/v1'
+
+/**
+ * The system prompt a Standup Post is written under, as shipped — the value
+ * `readSettings` falls back to while the Standup Prompt setting holds nothing
+ * of the user's, and the one Restore Default puts back: see issue #133.
+ * Written blind of the actual chat group, so it states the four assumptions
+ * #56 settled on: two labelled sections, `#project` names kept, first person,
+ * nothing stated that is absent from the input, and the input's language.
+ */
+export const DEFAULT_STANDUP_PROMPT = `You are writing a standup post for the user to paste into a chat group.
+
+Write in the first person, as the user would, in the same language as the input.
+
+Structure the post in two labelled sections: what was done yesterday, and what is planned or still to do today.
+
+Keep #project names exactly as they appear in the input.
+
+Say only what the input supports: state nothing that is not in it.
+
+Keep it brief and natural, ready to paste.`
 
 export const DEFAULT_SETTINGS: Settings = {
   startAtLogin: false,

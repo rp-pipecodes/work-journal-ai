@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_STANDUP_PROMPT } from '../journal/standup-post'
+import { DEFAULT_STANDUP_PROMPT } from './settings'
 import { fakeDesktop } from '../platform/testing/desktop'
 import { createAppSettings } from './app-settings'
 
