@@ -555,6 +555,17 @@ export interface Desktop {
    */
   clearApiKey(): Promise<void>
 
+  /**
+   * Generates a completed standup post. The API key is retrieved and used only
+   * by Rust; these are the complete inputs the webview is allowed to provide.
+   */
+  generateStandupPost(input: {
+    baseUrl: string
+    model: string
+    systemPrompt: string
+    userContent: string
+  }): Promise<string>
+
   /** Writes a rendered export to a file, and says where it went. */
   exportJournal(markdown: string, fileName: string): Promise<ExportedFile>
 

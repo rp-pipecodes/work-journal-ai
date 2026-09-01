@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { Copy, Sparkles } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import WindowTitleBar from '@/components/WindowTitleBar'
 import { formatJournalDay, type Clock, type Journal } from '@/journal/journal'
 import {
@@ -7,11 +9,12 @@ import {
 } from '@/journal/standup-post-session'
 import type { Desktop } from '@/platform/desktop'
 import type { StandupPostSelection } from '@/journal/standup-post'
+import { DEFAULT_SETTINGS } from '@/settings/settings'
 
 /**
- * The read-only preview of the material a future Standup Post call would use.
- * It deliberately has no Generate action: this ticket makes the input visible
- * and keeps the model/network call for the next ticket.
+ * Generates a transient standup post from the existing Digest and Task data.
+ * The API key stays behind the Desktop boundary; this view only supplies
+ * rendered Markdown and the configured model settings.
  */
 export default function StandupPostView({
   desktop,
@@ -23,17 +26,72 @@ export default function StandupPostView({
   clock: Clock
 }) {
   const [state, setState] = useState<StandupPostState>({ state: 'loading' })
+  const [post, setPost] = useState<string | null>(null)
+  const [generation, setGeneration] = useState<'idle' | 'generating' | 'failed'>('idle')
+  const [failure, setFailure] = useState<string | null>(null)
+  const [settingsSnapshot, setSettingsSnapshot] = useState({
+    baseUrl: DEFAULT_SETTINGS.modelBaseUrl,
+    model: DEFAULT_SETTINGS.model,
+  })
   const [session] = useState(() =>
     createStandupPostSession({ journal, desktop, clock, onChange: setState }),
   )
 
   useEffect(() => {
     void session.start()
+    void desktop.openSettingsStore().then(async (store) => {
+      const [baseUrl, model] = await Promise.all([
+        store.get<string>('modelBaseUrl'),
+        store.get<string>('model'),
+      ])
+      setSettingsSnapshot({
+        baseUrl: baseUrl ?? DEFAULT_SETTINGS.modelBaseUrl,
+        model: model ?? DEFAULT_SETTINGS.model,
+      })
+    }).catch((error: unknown) => {
+      console.error('could not read model settings', error)
+    })
 
     return () => {
       session.stop()
     }
-  }, [session])
+  }, [desktop, journal, session])
+
+  async function generate(selection: Extract<StandupPostState, { state: 'ready' }>['selection']): Promise<void> {
+    if (selection.notes.length === 0 && selection.completedTasks.length === 0 && selection.openTasks.length === 0) {
+      setFailure('Add a Note or Task before generating a Standup Post.')
+      return
+    }
+
+    setGeneration('generating')
+    setFailure(null)
+    try {
+      const digest = await (await journal).digest({ from: selection.yesterday, to: selection.yesterday })
+      const tasks = [...selection.completedTasks, ...selection.openTasks]
+        .map((task) => `- ${task.description}`)
+        .join('\n')
+      const content = await desktop.generateStandupPost({
+        baseUrl: settingsSnapshot.baseUrl,
+        model: settingsSnapshot.model,
+        systemPrompt: 'Write a concise, natural first-person daily standup update in Markdown. Mention completed work and what remains, without inventing details.',
+        userContent: `${digest.markdown}\n\nTasks:\n${tasks}`,
+      })
+      setPost(content)
+      setGeneration('idle')
+    } catch (error: unknown) {
+      console.error('could not generate the Standup Post', error)
+      setGeneration('failed')
+      setFailure(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  function copyPost(): void {
+    if (post === null) return
+    void desktop.copyToClipboard(post).catch((error: unknown) => {
+      console.error('could not copy the Standup Post', error)
+      setFailure('The Standup Post could not be copied.')
+    })
+  }
 
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>): void {
     if (event.key === 'Escape') void desktop.closeWindow()
@@ -68,7 +126,21 @@ export default function StandupPostView({
           </p>
         )}
 
-        {state.state === 'ready' && <MaterialSummary selection={state.selection} />}
+        {state.state === 'ready' && (
+          <>
+            <MaterialSummary selection={state.selection} />
+            <div className="mt-6 flex items-center gap-2">
+              <Button onClick={() => void generate(state.selection)} disabled={generation === 'generating'}>
+                <Sparkles />
+                {generation === 'generating' ? `Generating with ${settingsSnapshot.model || 'model'}…` : 'Generate'}
+              </Button>
+              {post !== null && <Button variant="outline" onClick={copyPost}><Copy /> Copy</Button>}
+            </div>
+            {generation === 'generating' && <p role="status" className="mt-3 type-meta text-muted-foreground">Writing with {settingsSnapshot.model || 'model'}…</p>}
+            {failure !== null && <p role="alert" className="mt-3 type-meta text-destructive">{failure}</p>}
+            {post !== null && <article className="mt-6 max-w-2xl whitespace-pre-wrap rounded-md border p-4 type-body">{post}</article>}
+          </>
+        )}
       </main>
     </div>
   )

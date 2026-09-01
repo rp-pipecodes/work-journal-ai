@@ -34,6 +34,8 @@ tauri-plugin-clipboard-manager = "2.3.2"
 # The API Key, in the OS keychain rather than in the plaintext settings file —
 # see docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md.
 keyring = "4.2.0"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["time"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

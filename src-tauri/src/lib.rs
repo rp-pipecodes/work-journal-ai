@@ -239,7 +239,8 @@ pub fn run() {
             journal_transaction,
             api_key_set,
             save_api_key,
-            clear_api_key
+            clear_api_key,
+            generate_standup_post
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -1121,6 +1122,101 @@ fn save_api_key(api_key: String) -> Result<(), String> {
 #[tauri::command(async)]
 fn clear_api_key() -> Result<(), String> {
     keychain::clear()
+}
+
+/// Calls an OpenAI-compatible chat completion endpoint without exposing the
+/// API key to the webview. The caller supplies only rendered content and the
+/// non-secret model settings; Rust retrieves the key and waits for one result.
+#[derive(serde::Deserialize)]
+struct StandupInput {
+    base_url: String,
+    model: String,
+    system_prompt: String,
+    user_content: String,
+}
+
+#[derive(serde::Serialize)]
+struct ChatMessage<'a> {
+    role: &'a str,
+    content: &'a str,
+}
+
+#[derive(serde::Serialize)]
+struct ChatRequest<'a> {
+    model: &'a str,
+    messages: Vec<ChatMessage<'a>>,
+}
+
+#[derive(serde::Deserialize)]
+struct ChatResponse {
+    choices: Vec<ChatChoice>,
+}
+
+#[derive(serde::Deserialize)]
+struct ChatChoice {
+    message: ChatMessageResponse,
+}
+
+#[derive(serde::Deserialize)]
+struct ChatMessageResponse {
+    content: Option<String>,
+}
+
+#[tauri::command(async)]
+async fn generate_standup_post(input: StandupInput) -> Result<String, String> {
+    if input.base_url.trim().is_empty() || input.model.trim().is_empty() {
+        return Err("Model Access is not configured. Open Settings to configure it.".into());
+    }
+
+    let key = keychain::password()?;
+    let endpoint = format!("{}/chat/completions", input.base_url.trim_end_matches('/'));
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|error| format!("could not prepare the model request: {error}"))?;
+
+    let response = client
+        .post(endpoint)
+        .bearer_auth(key)
+        .json(&ChatRequest {
+            model: &input.model,
+            messages: vec![
+                ChatMessage { role: "system", content: &input.system_prompt },
+                ChatMessage { role: "user", content: &input.user_content },
+            ],
+        })
+        .send()
+        .await
+        .map_err(|error| {
+            if error.is_timeout() {
+                "The model took longer than 60 seconds to respond.".to_string()
+            } else if error.is_connect() {
+                "The model is offline or could not be reached.".to_string()
+            } else {
+                format!("The model request failed: {error}")
+            }
+        })?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(match status.as_u16() {
+            401 | 403 => "The model rejected the API Key. Check Model Access in Settings.".into(),
+            429 => "The model rate limit was reached. Try again later.".into(),
+            _ => format!("The model returned HTTP {status}.")
+        });
+    }
+
+    let body = response
+        .json::<ChatResponse>()
+        .await
+        .map_err(|error| format!("The model returned an unreadable response: {error}"))?;
+    let content = body.choices.into_iter().next()
+        .and_then(|choice| choice.message.content)
+        .map(|content| content.trim().to_string())
+        .filter(|content| !content.is_empty())
+        .ok_or_else(|| "The model returned an empty response.".to_string())?;
+
+    Ok(content)
 }
 
 /// Puts today's Captured Note count beside the menu bar glyph. What it says is

@@ -53,7 +53,7 @@ describe('Standup Post section', () => {
     expect(await screen.findByText('1 Note')).toBeTruthy()
     expect(await screen.findByText('1 Completed Task')).toBeTruthy()
     expect(await screen.findByText('2 Open Tasks')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /Generate/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /Generate/i })).toBeTruthy()
   })
 
   it('says Nothing to say when both halves are empty', async () => {

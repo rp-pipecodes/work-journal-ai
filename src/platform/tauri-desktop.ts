@@ -228,6 +228,9 @@ export function createTauriDesktop(): Desktop {
     saveApiKey: (apiKey) => invoke('save_api_key', { apiKey }),
     clearApiKey: () => invoke('clear_api_key'),
 
+    generateStandupPost: (input) =>
+      invoke<string>('generate_standup_post', input),
+
     exportJournal: (markdown, fileName) =>
       invoke<ExportedFile>('export_journal', { markdown, fileName }),
 

@@ -43,6 +43,15 @@ pub fn is_set() -> Result<bool, String> {
     }
 }
 
+/// Returns the key only to Rust's model request; it never crosses the command boundary.
+pub fn password() -> Result<String, String> {
+    match entry()?.get_password() {
+        Ok(password) => Ok(password),
+        Err(Error::NoEntry) => Err("Model Access is not configured. Open Settings to configure it.".into()),
+        Err(error) => Err(describe(error)),
+    }
+}
+
 /// Saves the key, over whatever was there before.
 pub fn save(api_key: &str) -> Result<(), String> {
     entry()?.set_password(api_key).map_err(describe)

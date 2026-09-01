@@ -46,6 +46,17 @@ export interface FakeDesktop extends Desktop {
   trayTitle: string | null
   /** What is on the clipboard; null until something is copied there. */
   clipboard: string | null
+  /** Every standup generation request, most recent last. */
+  standupGenerations: Array<{
+    baseUrl: string
+    model: string
+    systemPrompt: string
+    userContent: string
+  }>
+  /** The generated standup response, or null until one succeeds. */
+  standupResponse: string | null
+  /** Whether standup generation rejects, as the provider would. */
+  standupGenerationFails: boolean
   /** The Tray Menu asks for yesterday's Digest. */
   requestYesterdayDigest(): void
   /** The machine wakes from sleep. */
@@ -129,6 +140,8 @@ export function fakeDesktop({
   events = [],
   apiKey = null,
   keychainRefuses = false,
+  standupResponse = 'Generated standup post.',
+  standupGenerationFails = false,
 }: {
   /** Only the tests that reach the journal need one. */
   driver?: SqlDriver
@@ -151,6 +164,10 @@ export function fakeDesktop({
   apiKey?: string | null
   /** Whether the Keychain is locked, or the prompt was refused. */
   keychainRefuses?: boolean
+  /** The response the fake model returns on success. */
+  standupResponse?: string
+  /** Whether model generation rejects. */
+  standupGenerationFails?: boolean
 } = {}): FakeDesktop {
   const captureShown = subscribers<void>()
   const windowBlurred = subscribers<void>()
@@ -175,6 +192,9 @@ export function fakeDesktop({
     fits: [],
     trayTitle: null,
     clipboard: null,
+    standupGenerations: [],
+    standupResponse,
+    standupGenerationFails,
     access,
     prompted: false,
     events,
@@ -363,6 +383,14 @@ export function fakeDesktop({
 
     copyToClipboard: async (text) => {
       desktop.clipboard = text
+    },
+
+    generateStandupPost: async (input) => {
+      desktop.standupGenerations.push(input)
+      if (desktop.standupGenerationFails) {
+        throw new Error('the model could not be reached')
+      }
+      return desktop.standupResponse ?? ''
     },
 
     apiKeySet: async () => {
