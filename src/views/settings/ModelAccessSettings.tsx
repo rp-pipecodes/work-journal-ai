@@ -154,10 +154,11 @@ export default function ModelAccessSettings({
         label="Base URL"
         explanation="Where the model is. Any OpenAI-compatible endpoint."
         controls="model-base-url"
+        stacked
       >
         <Input
           id="model-base-url"
-          className="w-64"
+          className="w-full"
           value={modelBaseUrl}
           spellCheck={false}
           autoComplete="off"
@@ -169,10 +170,11 @@ export default function ModelAccessSettings({
         label="Model"
         explanation="Which model to ask, in that endpoint's own words."
         controls="model"
+        stacked
       >
         <Input
           id="model"
-          className="w-64"
+          className="w-full"
           value={model}
           spellCheck={false}
           autoComplete="off"
@@ -184,11 +186,12 @@ export default function ModelAccessSettings({
         label="API Key"
         explanation="Kept in the macOS Keychain rather than in the settings file, and never shown again."
         controls="api-key"
+        stacked
       >
         <Input
           id="api-key"
           type="password"
-          className="w-64"
+          className="w-full"
           value={typedKey}
           spellCheck={false}
           autoComplete="off"
