@@ -58,20 +58,13 @@ export default function StandupPromptSettings({
   }
 
   /**
-   * The shipped prompt back, whatever the field holds now. An explicit action
-   * rather than a keystroke, so it also counts as the user having spoken: a
-   * read still on its way must not seed an older value over it.
+   * The shipped prompt back, whatever the field holds now. The same change as
+   * any other — the explicit click counts as a keystroke, so a read still on
+   * its way must not seed an older value over it — only with the default as
+   * the value.
    */
   function restoreDefault() {
-    typedIn.current = true
-    setStandupPrompt(DEFAULT_STANDUP_PROMPT)
-    settings.saveStandupPrompt(DEFAULT_STANDUP_PROMPT).then(
-      () => setUnsaved(false),
-      (error: unknown) => {
-        console.error('could not restore the Standup Prompt', error)
-        setUnsaved(true)
-      },
-    )
+    change(DEFAULT_STANDUP_PROMPT)
   }
 
   return (
