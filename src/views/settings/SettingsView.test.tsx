@@ -132,6 +132,22 @@ describe('Start at login', () => {
 
     await expect.poll(() => desktop.stored.startAtLogin).toBe(false)
   })
+
+  it('keeps the window open when Escape belongs to the first-run question', async () => {
+    const desktop = fakeDesktop({ stored: {} })
+    let closed = 0
+    desktop.closeWindow = async () => {
+      closed += 1
+    }
+
+    showSettings(desktop)
+
+    const question = await screen.findByRole('alertdialog')
+    escape(question)
+
+    expect(closed).toBe(0)
+    expect(screen.getByRole('alertdialog')).toBeTruthy()
+  })
 })
 
 describe('the two Hotkeys', () => {

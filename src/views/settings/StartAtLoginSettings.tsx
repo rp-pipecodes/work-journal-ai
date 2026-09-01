@@ -25,7 +25,7 @@ export default function StartAtLoginSettings({
 }: {
   desktop: Desktop
   settings: AppSettings
-  initialSettings: Promise<SettingsInitialState | null>
+  initialSettings: Promise<SettingsInitialState | null> | null
 }) {
   const [startAtLogin, setStartAtLogin] = useState(DEFAULT_SETTINGS.startAtLogin)
   // The first-run question, asked once and never again — whichever way it is
@@ -36,6 +36,8 @@ export default function StartAtLoginSettings({
   const onScreen = useOnScreen()
 
   useEffect(() => {
+    if (initialSettings === null) return
+
     void initialSettings.then((initial) => {
       if (initial === null) return
       setStartAtLogin(initial.startAtLogin)

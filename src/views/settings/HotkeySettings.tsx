@@ -25,7 +25,7 @@ export default function HotkeySettings({
   initialSettings,
 }: {
   desktop: Desktop
-  initialSettings: Promise<SettingsInitialState | null>
+  initialSettings: Promise<SettingsInitialState | null> | null
 }) {
   const [hotkeys, setHotkeys] = useState<HotkeyStatuses | null>(null)
   // The reason the last remap of each action was refused, if it was. Cleared by
@@ -39,6 +39,8 @@ export default function HotkeySettings({
   const [recording, setRecording] = useState<HotkeyAction | null>(null)
 
   useEffect(() => {
+    if (initialSettings === null) return
+
     void initialSettings.then((initial) => {
       if (initial !== null) setHotkeys(initial.hotkeys)
     })

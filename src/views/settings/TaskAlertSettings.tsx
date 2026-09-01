@@ -14,7 +14,7 @@ export default function TaskAlertSettings({
   initialSettings,
 }: {
   desktop: Desktop
-  initialSettings: Promise<SettingsInitialState | null>
+  initialSettings: Promise<SettingsInitialState | null> | null
 }) {
   // What macOS allows of Task Alerts. Read every time the window opens rather
   // than remembered: it is changed in System Settings, which the app never
@@ -23,6 +23,8 @@ export default function TaskAlertSettings({
     useState<TaskAlertPermission | null>(null)
 
   useEffect(() => {
+    if (initialSettings === null) return
+
     void initialSettings.then((initial) => {
       if (initial !== null) setAlertPermission(initial.taskAlertPermission)
     })

@@ -7,6 +7,7 @@ import type {
   Desktop,
 } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
+import { DEFAULT_SETTINGS } from '@/settings/settings'
 import type { SettingsInitialState } from './SettingsInitialState'
 import {
   SettingsAside,
@@ -23,16 +24,22 @@ export default function MeetingImportSettings({
 }: {
   desktop: Desktop
   settings: AppSettings
-  initialSettings: Promise<SettingsInitialState | null>
+  initialSettings: Promise<SettingsInitialState | null> | null
 }) {
-  const [importMeetings, setImportMeetings] = useState(false)
-  const [importCalendars, setImportCalendars] = useState<string[]>([])
+  const [importMeetings, setImportMeetings] = useState(
+    DEFAULT_SETTINGS.importMeetings,
+  )
+  const [importCalendars, setImportCalendars] = useState<string[]>(
+    DEFAULT_SETTINGS.importCalendars,
+  )
   const [calendars, setCalendars] = useState<CalendarInfo[]>([])
   // Why Import is not on, when the reason is the OS rather than the user.
   // Nothing until there is something to say.
   const [calendarProblem, setCalendarProblem] = useState<string | null>(null)
 
   useEffect(() => {
+    if (initialSettings === null) return
+
     void initialSettings.then((initial) => {
       if (initial === null) return
 

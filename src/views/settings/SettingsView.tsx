@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Toaster } from '@/components/ui/sonner'
@@ -10,7 +10,10 @@ import ExportSettings from './ExportSettings'
 import HotkeySettings from './HotkeySettings'
 import MeetingImportSettings from './MeetingImportSettings'
 import StartAtLoginSettings from './StartAtLoginSettings'
-import { loadSettingsInitialState } from './SettingsInitialState'
+import {
+  loadSettingsInitialState,
+  type SettingsInitialState,
+} from './SettingsInitialState'
 import TaskAlertSettings from './TaskAlertSettings'
 import ThemeSettings from './ThemeSettings'
 
@@ -41,10 +44,9 @@ export default function SettingsView({
 }) {
   const [appIdentity, setAppIdentity] = useState<AppIdentity | null>(null)
   const page = useRef<HTMLDivElement>(null)
-  const initialSettings = useMemo(
-    () => loadSettingsInitialState(desktop, settings),
-    [desktop, settings],
-  )
+  const [initialSettings, setInitialSettings] = useState<
+    Promise<SettingsInitialState | null> | null
+  >(null)
 
   useEffect(() => {
     void desktop.appIdentity().then(setAppIdentity, (error: unknown) => {
@@ -56,7 +58,13 @@ export default function SettingsView({
     // A Dock-less app does not reliably hand focus to a new window, and Escape
     // has to reach this view for the window to close.
     page.current?.focus()
-  }, [])
+
+    // This state is the one post-commit handoff of the coordinated read to the
+    // groups. Publishing the in-flight Promise immediately lets every group
+    // observe the same snapshot without starting platform work during render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setInitialSettings(loadSettingsInitialState(desktop, settings))
+  }, [desktop, settings])
 
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
     // HotkeyRecorder and the first-run question stop Escape before it reaches
