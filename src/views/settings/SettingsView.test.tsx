@@ -275,6 +275,81 @@ describe('the Import switch', () => {
       screen.queryByText(/has not been asked about your calendars/),
     ).toBeNull()
   })
+
+  it('discards an older Import rollback still in flight when a newer press lands', async () => {
+    // Press A turns Import on: the wish reaches the file, then the
+    // announcement refuses, so the rollback re-reads the file. The read is
+    // serviced before press B turns it off again, and resolves after — the
+    // older rollback's captured true must not be put back over the newer
+    // change, or the switch would read on while the file held false.
+    const stored: Record<string, unknown> = {
+      importMeetings: false,
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    // The rollback's read of the wish: serviced now, delivered when the test
+    // says so. The initial read's own answer is immediate.
+    let releaseRead = () => {}
+    const readAnswered = new Promise<void>((resolve) => {
+      releaseRead = resolve
+    })
+    let importMeetingsReads = 0
+    let captured: unknown
+    const desktop = fakeDesktop({
+      stored,
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          if (key === 'importMeetings') {
+            importMeetingsReads += 1
+            // The second read is the rollback's; hold its answer.
+            if (importMeetingsReads === 2) {
+              captured = stored.importMeetings
+              return readAnswered.then(() => captured as T)
+            }
+          }
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          stored[key] = value
+        },
+      }),
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    // The switch's own announcement fails; a later one lands.
+    let announcements = 0
+    desktop.announceImportChanged = () => {
+      announcements += 1
+      return announcements === 1
+        ? Promise.reject(new Error('the window is gone'))
+        : Promise.resolve()
+    }
+
+    showSettings(desktop)
+
+    expect(isOn(importSwitch())).toBe(false)
+    // Press A: the wish reaches the file, the announcement refuses, and the
+    // rollback's read is now in flight.
+    importSwitch().click()
+    await expect.poll(() => importMeetingsReads).toBe(2)
+
+    // Press B: off, and this write reaches the file.
+    importSwitch().click()
+    await expect.poll(() => desktop.stored.importMeetings).toBe(false)
+
+    releaseRead()
+
+    // The rollback's delivery has had its chance by the time a macrotask
+    // runs — its state update is a microtask, and it is discarded, so the
+    // switch still agrees with the file.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(isOn(importSwitch())).toBe(false)
+    expect(desktop.stored.importMeetings).toBe(false)
+  })
 })
 
 describe('the Theme control', () => {
@@ -469,6 +544,85 @@ describe('Start at login', () => {
       isOn(screen.getByRole('switch', { name: 'Start at login' })),
     ).toBe(true)
     expect(desktop.stored.startAtLogin).toBe(true)
+  })
+
+  it('discards an older Start at Login rollback still in flight when a newer press lands', async () => {
+    // Press A turns the switch on: the OS accepts, then the file write
+    // refuses, so the rollback re-reads the OS. The read is serviced before
+    // press B turns it off again, and resolves after — the older rollback's
+    // captured true must not be put back over the newer change, or the
+    // switch would read on while the OS and the file held false.
+    const stored: Record<string, unknown> = {
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    // The file takes the first start-at-login write and refuses it.
+    let startAtLoginWrites = 0
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          if (key === 'startAtLogin') {
+            startAtLoginWrites += 1
+            if (startAtLoginWrites === 1) {
+              throw new Error('the file is read-only')
+            }
+          }
+          stored[key] = value
+        },
+      }),
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    // The OS read for press A's rollback: serviced now, delivered when the
+    // test says so. Any other read is answered immediately.
+    let releaseRead = () => {}
+    const readAnswered = new Promise<void>((resolve) => {
+      releaseRead = resolve
+    })
+    let gated = false
+    let captured: boolean | null = null
+    desktop.startsAtLogin = () => {
+      const value = desktop.loginItem
+      if (!gated) return Promise.resolve(value)
+      gated = false
+      captured = value
+      return readAnswered.then(() => value)
+    }
+
+    showSettings(desktop)
+
+    const control = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    expect(isOn(control)).toBe(false)
+
+    // Press A: the login item moves, the file write refuses, and the
+    // rollback's read is now in flight.
+    control.click()
+    gated = true
+    await expect.poll(() => captured).toBe(true)
+
+    // Press B: off, and this write reaches the file.
+    control.click()
+    await expect.poll(() => desktop.stored.startAtLogin).toBe(false)
+
+    releaseRead()
+
+    // The rollback's delivery has had its chance by the time a macrotask
+    // runs — its state update is a microtask, and it is discarded, so the
+    // switch still agrees with the OS and the file.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(desktop.loginItem).toBe(false)
+    expect(
+      isOn(screen.getByRole('switch', { name: 'Start at login' })),
+    ).toBe(false)
+    expect(desktop.stored.startAtLogin).toBe(false)
   })
 })
 

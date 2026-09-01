@@ -34,22 +34,16 @@ export default function MeetingImportSettings({
   // refused. Gating the calendar work on the toggle's ref alone is enough: a
   // tick made in the gap always follows a toggle (the calendars are only on
   // screen once Import is on), and the ticks' own seed guards itself.
-  const [
-    importMeetings,
-    setImportMeetings,
-    importTouched,
-    restoreImportMeetings,
-  ] = useSeededState(
+  const [importMeetings, setImportMeetings, importTouched] = useSeededState(
     initialSettings,
     (initial) => initial.stored.importMeetings,
     DEFAULT_SETTINGS.importMeetings,
   )
-  const [importCalendars, setImportCalendars, , restoreImportCalendars] =
-    useSeededState(
-      initialSettings,
-      (initial) => initial.stored.importCalendars,
-      DEFAULT_SETTINGS.importCalendars,
-    )
+  const [importCalendars, setImportCalendars] = useSeededState(
+    initialSettings,
+    (initial) => initial.stored.importCalendars,
+    DEFAULT_SETTINGS.importCalendars,
+  )
   const [calendars, setCalendars] = useState<CalendarInfo[]>([])
   // Why Import is not on, when the reason is the OS rather than the user.
   // Nothing until there is something to say.
@@ -103,9 +97,11 @@ export default function MeetingImportSettings({
    */
   function toggleImport(next: boolean) {
     void (async () => {
+      // The rollback for whatever this press moved, if it moved anything.
+      let rollback: ((value: boolean) => void) | undefined
       try {
         if (!next) {
-          setImportMeetings(false)
+          rollback = setImportMeetings(false)
           await settings.saveImportMeetings(false)
           return
         }
@@ -119,27 +115,30 @@ export default function MeetingImportSettings({
           // The wish is kept, not discarded: the toggle reads off because the
           // reason underneath it says so, and a grant given in System Settings
           // later resumes Import without being asked for a second time.
-          setImportMeetings(true)
+          rollback = setImportMeetings(true)
           setCalendarProblem(describeCalendarAccess(access))
           await settings.saveImportMeetings(true)
           return
         }
 
-        setImportMeetings(true)
+        rollback = setImportMeetings(true)
         setCalendarProblem(null)
         setCalendars(await desktop.calendars())
         await settings.saveImportMeetings(true)
       } catch (error) {
         console.error('could not change how meetings are imported', error)
-        // Roll back to what the file holds now — the wish is written before
-        // the announcement is sent, so a refusal arrives after the change
-        // took, and a permission refused before that leaves the wish as it
-        // was. Either way the file is the truth. The re-read is newer than
-        // the initial snapshot, so it silences the arriving read; the switch
-        // agrees with the file.
+        // A refusal from the permission check never moved the switch, so
+        // there is nothing to roll back — the arriving read may still seed
+        // it. Anything the press did move is rolled back to what the file
+        // holds now (the wish is written before the announcement is sent, so
+        // a refusal arrives after the change took). The rollback belongs to
+        // this change: a newer press that landed while it was in flight is
+        // not undone by it.
+        if (rollback === undefined) return
+        const rollbackThisChange = rollback
         void settings.load().then(
-          (stored) => restoreImportMeetings(stored.importMeetings),
-          () => restoreImportMeetings(!next),
+          (stored) => rollbackThisChange(stored.importMeetings),
+          () => rollbackThisChange(!next),
         )
       }
     })()
@@ -151,16 +150,18 @@ export default function MeetingImportSettings({
       ? [...importCalendars, id]
       : importCalendars.filter((each) => each !== id)
 
-    setImportCalendars(next)
+    const rollback = setImportCalendars(next)
     settings.saveImportCalendars(next).catch((error: unknown) => {
       console.error('could not change which calendars are imported', error)
       // Roll back to what the file holds now — the ticks are written before
       // the announcement is sent, so a refusal arrives after the tick took.
-      // The re-read is newer than the initial snapshot, so it silences the
-      // arriving read; the ticks agree with the file.
+      // The rollback belongs to this change: a newer press that landed while
+      // the re-read was in flight is not undone by it. The re-read is newer
+      // than the initial snapshot, so it silences the arriving read; the
+      // ticks agree with the file.
       void settings.load().then(
-        (stored) => restoreImportCalendars(stored.importCalendars),
-        () => restoreImportCalendars(importCalendars),
+        (stored) => rollback(stored.importCalendars),
+        () => rollback(importCalendars),
       )
     })
   }

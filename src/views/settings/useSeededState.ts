@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Dispatch, RefObject, SetStateAction } from 'react'
+import type { RefObject, SetStateAction } from 'react'
 import type { SettingsInitialState } from './SettingsInitialState'
 
 /**
@@ -13,23 +13,22 @@ import type { SettingsInitialState } from './SettingsInitialState'
  * The rule is: an arriving read may only seed state that has not been
  * touched since the snapshot was taken — see
  * docs/adr/0028-the-initial-read-seeds-only-what-the-user-has-not-changed.md.
- * The returned setter counts as touching it: any use of it means the user
- * has changed the value.
  *
- * The fourth element is the one other way in: restoring the value after a
- * write failed. The caller re-reads what its source still says and restores
- * the control to that — a re-read at rollback time is newer than the initial
- * snapshot, so like the setter it silences the arriving read, which must not
- * seed the older snapshot back over it. The control agrees with its source
- * whether or not a read is still coming.
+ * The returned setter marks the value touched and hands back the rollback
+ * for that one change: a function that puts the value back unless a newer
+ * change has landed since. A rollback is what a save that failed uses to
+ * undo its own change — the caller re-reads what its source says now (newer
+ * than the initial snapshot, so the read must not seed over it) and rolls
+ * back to that. A rollback from an older change is discarded once a newer
+ * one has landed, so a slow re-read cannot undo a press that came after it.
  *
  * The third element is the ref that remembers whether this value has been
  * touched since the snapshot. It is per value, not per group: each seeded
- * state guards itself,
- * and a press on one never silences another's seed. What it exists for is the
- * parts of the read that are not seeds — the calendars a granted Import
- * reads, say, or the first-run question: a group reads the ref in its own
- * effect to silence those parts of the arriving read too.
+ * state guards itself, and a press on one never silences another's seed.
+ * What it exists for is the parts of the read that are not seeds — the
+ * calendars a granted Import reads, say, or the first-run question: a group
+ * reads the ref in its own effect to silence those parts of the arriving
+ * read too.
  */
 export function useSeededState<T>(
   initialSettings: Promise<SettingsInitialState | null> | null,
@@ -37,33 +36,28 @@ export function useSeededState<T>(
   fallback: T,
 ): [
   T,
-  Dispatch<SetStateAction<T>>,
+  (next: SetStateAction<T>) => (value: T) => void,
   RefObject<boolean>,
-  (value: T) => void,
 ] {
   const [value, setValue] = useState(fallback)
   // The one press that silences the read. Set by the returned setter, and
   // read by the group's other effects, never written by them.
   const touched = useRef(false)
+  // How many changes have been made since the window opened. A rollback
+  // belongs to the change that started it: it is discarded if a newer one
+  // has landed by the time it resolves.
+  const attempts = useRef(0)
 
-  const set = useCallback(
-    (next: SetStateAction<T>) => {
-      touched.current = true
-      setValue(next)
-    },
-    [touched],
-  )
-
-  // The value after a failed write, re-read from the source. The re-read is
-  // newer than the initial snapshot, so like the setter it silences the
-  // arriving read: the snapshot must not be seeded back over it.
-  const restore = useCallback(
-    (value: T) => {
-      touched.current = true
+  const set = useCallback((next: SetStateAction<T>) => {
+    touched.current = true
+    const attempt = ++attempts.current
+    setValue(next)
+    // Roll this change back, unless a newer one has landed since.
+    return (value: T) => {
+      if (attempts.current !== attempt) return
       setValue(value)
-    },
-    [touched],
-  )
+    }
+  }, [])
 
   // The selector as the caller spells it this render, read when the read
   // settles rather than when the effect runs, so the effect attaches once.
@@ -82,5 +76,5 @@ export function useSeededState<T>(
     })
   }, [initialSettings, touched])
 
-  return [value, set, touched, restore]
+  return [value, set, touched]
 }

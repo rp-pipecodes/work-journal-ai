@@ -32,12 +32,11 @@ export default function StartAtLoginSettings({
   // read must not put its older value back over that answer, and the question
   // must not follow it — the switch is the same answer the question would
   // collect.
-  const [startAtLogin, setStartAtLogin, touched, restoreStartAtLogin] =
-    useSeededState(
-      initialSettings,
-      (initial) => initial.startAtLogin,
-      DEFAULT_SETTINGS.startAtLogin,
-    )
+  const [startAtLogin, setStartAtLogin, touched] = useSeededState(
+    initialSettings,
+    (initial) => initial.startAtLogin,
+    DEFAULT_SETTINGS.startAtLogin,
+  )
   // The first-run question, asked once and never again — whichever way it is
   // answered. False until the store has been asked whether it was answered.
   const [asking, setAsking] = useState(false)
@@ -76,17 +75,16 @@ export default function StartAtLoginSettings({
   }, [asking, desktop, settings])
 
   function toggleStartAtLogin(next: boolean) {
-    setStartAtLogin(next)
+    const rollback = setStartAtLogin(next)
     settings.saveStartAtLogin(next).catch((error: unknown) => {
       console.error('could not change the login item', error)
       // Roll back to what the OS says now — the login item is changed before
       // the file is written, so a refusal leaves both holding the earlier
-      // wish. The re-read is newer than the initial snapshot, so it silences
-      // the arriving read; the switch agrees with the OS and the file.
-      void desktop.startsAtLogin().then(
-        (startAtLogin) => restoreStartAtLogin(startAtLogin),
-        () => restoreStartAtLogin(!next),
-      )
+      // wish. The rollback belongs to this change: a newer press that landed
+      // while the re-read was in flight is not undone by it. The re-read is
+      // newer than the initial snapshot, so it silences the arriving read;
+      // the switch agrees with the OS and the file.
+      void desktop.startsAtLogin().then(rollback, () => rollback(!next))
     })
   }
 

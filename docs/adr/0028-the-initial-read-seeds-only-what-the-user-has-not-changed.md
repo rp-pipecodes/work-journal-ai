@@ -13,13 +13,21 @@ A failed write is a touch of the same kind: when a save rejects while the
 read is still coming — the OS refusing the login item, the announcement
 failing after the wish reached the file — the group re-reads what its source
 says now (the OS login item for Start at Login, the file for Import) and
-restores the control to that, through the same seam's `restore`. The re-read
-is newer than the initial snapshot, so like a press it silences the arriving
-read: the snapshot must not be seeded back over it. The control agrees with
-its source whether or not a read is still coming. Without the re-read, the
-rollback would fall back on the stale default and the control would keep it
-while the file held the stored value — the same disagreement the rule exists
-to prevent, with the sign flipped.
+rolls the control back to that. The re-read is newer than the initial
+snapshot, so like a press it silences the arriving read: the snapshot must
+not be seeded back over it. Without the re-read, the rollback would fall
+back on the stale default and the control would keep it while the file held
+the stored value — the same disagreement the rule exists to prevent, with
+the sign flipped.
+
+A rollback belongs to the change that started it, and newest touch wins
+among rollbacks too: the seam's setter hands back the rollback for that one
+change, and a rollback is discarded once a newer change has landed. A failed
+change's re-read is asynchronous — the OS can service it before the next
+press and deliver after — so without the identity, an older rollback could
+put its captured value back over a newer change that succeeded, recreating
+the disagreement in the opposite direction: the control reading one value
+while the OS and the file hold another.
 
 The one seam that carries the rule is `useSeededState` (beside
 `SettingsInitialState.ts`): it seeds until the value has been set by anything
@@ -49,10 +57,12 @@ writes immediate, and the control and the file agreeing.
   gap: the calendars a granted Import fetched over that grant must survive
   the older "not asked" snapshot, which the regression test 'keeps a grant
   won in the gap over the older read' pins.
-- A save that failed rolls the control back through the seam's `restore`,
-  never through the seeded setter: the rollback re-reads the source, and
-  that re-read — newer than the initial snapshot — silences the arriving
-  read exactly as a press does.
+- A save that failed rolls the control back through the rollback its own
+  change returned — never through a fresh call to the setter, which would
+  count as a new press. The rollback re-reads the source, and that re-read —
+  newer than the initial snapshot — silences the arriving read exactly as a
+  press does. A rollback from an older change is discarded once a newer one
+  has landed.
 - A new group that copies the old shape — a bare `.then` on the initial read
   writing state — reintroduces the bug, which is what the settings-race
   regression tests in `SettingsView.test.tsx` exist to catch.
