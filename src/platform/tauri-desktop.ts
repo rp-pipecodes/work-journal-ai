@@ -41,6 +41,8 @@ import {
   type Desktop,
   type ExportedFile,
   type MainSection,
+  type StandupPostRequest,
+  type StandupPostResponse,
   type TaskAlertPermission,
 } from './desktop'
 
@@ -230,6 +232,11 @@ export function createTauriDesktop(): Desktop {
 
     exportJournal: (markdown, fileName) =>
       invoke<ExportedFile>('export_journal', { markdown, fileName }),
+
+    // The Key stays in the Keychain: only what the model needs to hear crosses
+    // to Rust, and the answer comes back as one shape, success or failure.
+    generateStandupPost: (request: StandupPostRequest) =>
+      invoke<StandupPostResponse>('generate_standup_post', { request }),
 
     showTrayCount: (title) => invoke('show_tray_count', { title }),
   }

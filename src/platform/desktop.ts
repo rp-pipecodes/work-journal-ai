@@ -294,6 +294,47 @@ export interface ExportedFile {
   fileName: string
 }
 
+/**
+ * What a Standup Post call asks for: where the model is, which one, and the
+ * two turns. The API Key is deliberately not among them — the Rust side
+ * supplies it, so it never crosses into the webview. Must match
+ * `StandupPostRequest` in `src-tauri/src/standup.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
+ */
+export interface StandupPostRequest {
+  baseUrl: string
+  model: string
+  systemPrompt: string
+  userContent: string
+}
+
+/**
+ * The model's answer, or why there is none — one shape, so a failure is an
+ * answer like any other rather than a rejection the caller has to guess at.
+ * Must match `StandupPostResponse` in `src-tauri/src/standup.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
+ */
+export type StandupPostResponse =
+  | { state: 'generated'; markdown: string }
+  | { state: 'failed'; failure: StandupFailure }
+
+/**
+ * Why there is no post, as one of the few lines the section can say. The
+ * first is this side's own — a call that could not even be prepared is not
+ * the model's answer; the rest must match `StandupFailure` in
+ * `src-tauri/src/standup.rs`, as `src/platform/desktop-rust.test.ts` checks.
+ */
+export type StandupFailure =
+  | { kind: 'local' }
+  | { kind: 'model-access' }
+  | { kind: 'keychain' }
+  | { kind: 'offline' }
+  | { kind: 'unauthorized' }
+  | { kind: 'rate-limited' }
+  | { kind: 'timeout' }
+  | { kind: 'other'; status: number }
+  | { kind: 'empty-response' }
+
 export interface AppIdentity {
   version: string
   isDevelopment: boolean
@@ -557,6 +598,17 @@ export interface Desktop {
 
   /** Writes a rendered export to a file, and says where it went. */
   exportJournal(markdown: string, fileName: string): Promise<ExportedFile>
+
+  /**
+   * Asks the model to write a Standup Post. The command takes only what the
+   * model needs to hear — the API Key is read from the Keychain by the Rust
+   * side and never enters this window; see
+   * docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md.
+   * The answer is one shape, success or failure, so a failure reads as one of
+   * the few lines the section can say rather than as a rejection the caller
+   * has to guess at.
+   */
+  generateStandupPost(request: StandupPostRequest): Promise<StandupPostResponse>
 
   /**
    * Puts a short piece of text beside the menu bar glyph. Rendered by the

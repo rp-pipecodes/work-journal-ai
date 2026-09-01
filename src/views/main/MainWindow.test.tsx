@@ -244,6 +244,72 @@ describe('switching sections', () => {
     expect(days().textContent).toBe(narrowed)
   })
 
+  it('keeps a generated Standup Post through a trip to History and back', async () => {
+    const user = userEvent.setup()
+    await showMainWindow({
+      // The last capture is what leaves the journal's clock on today, so
+      // yesterday is the 8th and the section has something to generate from.
+      captured: [
+        { at: '2026-03-08T10:00:00', body: 'Yesterday\u2019s work' },
+        { at: '2026-03-09T09:00:00', body: 'Today\u2019s own note' },
+      ],
+      stored: {
+        startAtLogin: false,
+        modelBaseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-test',
+      },
+    })
+
+    await user.click(
+      within(sidebar()).getByRole('button', { name: 'Standup Post' }),
+    )
+    await showsStandupPost()
+    await user.click(await screen.findByRole('button', { name: 'Generate' }))
+    await screen.findByText('The standup post the model wrote.')
+
+    await user.click(within(sidebar()).getByRole('button', { name: 'History' }))
+    await showsHistory()
+    await user.click(
+      within(sidebar()).getByRole('button', { name: 'Standup Post' }),
+    )
+    await showsStandupPost()
+
+    // Nothing was persisted and nothing was lost: the post lives as long as
+    // the Main Window that generated it, and the section kept it.
+    expect(screen.getByText('The standup post the model wrote.')).toBeTruthy()
+  })
+
+  it('opens Settings from a missing Model Access failure', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [
+        { at: '2026-03-08T10:00:00', body: 'Yesterday\u2019s work' },
+        { at: '2026-03-09T09:00:00', body: 'Today\u2019s own note' },
+      ],
+      stored: { startAtLogin: false },
+    })
+
+    await user.click(
+      within(sidebar()).getByRole('button', { name: 'Standup Post' }),
+    )
+    await showsStandupPost()
+    await user.click(await screen.findByRole('button', { name: 'Generate' }))
+
+    // Model Access is not configured: the line points at Settings, and the
+    // action switches the section there.
+    expect(
+      await screen.findByText(
+        'Model Access is not configured. Open Settings to add a Base URL, a Model and an API Key.',
+      ),
+    ).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Open Settings' }))
+    await showsSettings()
+
+    // The refusal happened before anything was asked: the Model Access line
+    // is the view's own, and the call never had a chance to spend.
+    expect(desktop.standupRequests).toEqual([])
+  })
+
   it('leaves a Nudge waiting on History, with nothing on the sidebar', async () => {
     const user = userEvent.setup()
     const { desktop } = await showMainWindow({

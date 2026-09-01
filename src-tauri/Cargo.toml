@@ -34,6 +34,14 @@ tauri-plugin-clipboard-manager = "2.3.2"
 # The API Key, in the OS keychain rather than in the plaintext settings file —
 # see docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md.
 keyring = "4.2.0"
+# The model call behind a Standup Post — the first network call the app has
+# ever made, made from Rust so the API Key never enters the webview; see
+# docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md.
+# Already in the tree through tauri and locked at 0.13.4. Default features are
+# dropped for native-tls, which on macOS is the system's own Security
+# framework — the smallest TLS addition there is, and the trust store the OS
+# already manages.
+reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

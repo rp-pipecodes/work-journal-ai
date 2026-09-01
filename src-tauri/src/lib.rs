@@ -5,6 +5,7 @@ mod export;
 mod frontmost;
 mod hotkey;
 mod keychain;
+mod standup;
 
 use alerts::{Permission, TaskAlert};
 use calendar::{Access, CalendarEvent, CalendarInfo};
@@ -239,7 +240,8 @@ pub fn run() {
             journal_transaction,
             api_key_set,
             save_api_key,
-            clear_api_key
+            clear_api_key,
+            generate_standup_post
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -796,6 +798,10 @@ fn show_presence(app: &tauri::AppHandle, presence: Option<Presence>) {
 }
 
 /// Opens the Main Window on Settings, building it if it is not already open.
+/// The Tray Menu and the first-run question reach it here; a Standup Post
+/// showing a Model Access failure links there from inside the window, where
+/// the section switch is its own host's — no command crosses the boundary
+/// for a trip the sidebar already makes.
 fn open_settings(app: &tauri::AppHandle) {
     open_main_window(app, Some(SETTINGS_SECTION));
 }
@@ -1121,6 +1127,43 @@ fn save_api_key(api_key: String) -> Result<(), String> {
 #[tauri::command(async)]
 fn clear_api_key() -> Result<(), String> {
     keychain::clear()
+}
+
+/// Asks the model to write a Standup Post. The webview sent only where the
+/// model is, which one, and what it should hear; the Key is read here, from
+/// the Keychain, and never travels back — see `standup.rs` and
+/// docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md.
+///
+/// Only the Keychain is this side's business: whether the Base URL and the
+/// Model are there at all is settings validation, which lives in TypeScript
+/// — see ADR 0026. Off the main thread twice over: the Keychain can put an
+/// authorization prompt in front of the read, and the call itself is allowed
+/// 60 seconds. A failure is an answer like any other — one of the few kinds
+/// `StandupFailure` names — so the section can say it back as a line. No
+/// retry is attempted: a model call is billable, and a silent retry spends
+/// the user's money twice for one click.
+#[tauri::command(async)]
+async fn generate_standup_post(
+    request: standup::StandupPostRequest,
+) -> standup::StandupPostResponse {
+    let api_key = match keychain::get() {
+        Ok(key) if !key.trim().is_empty() => key,
+        // No key is the same refusal as a missing half of Model Access: the
+        // call is refused before it can spend anything.
+        Ok(_) => {
+            return standup::StandupPostResponse::Failed {
+                failure: standup::StandupFailure::ModelAccess,
+            };
+        }
+        // The Keychain itself refused — locked, or a prompt denied.
+        Err(_) => {
+            return standup::StandupPostResponse::Failed {
+                failure: standup::StandupFailure::Keychain,
+            };
+        }
+    };
+
+    standup::generate(request, &api_key).await
 }
 
 /// Puts today's Captured Note count beside the menu bar glyph. What it says is

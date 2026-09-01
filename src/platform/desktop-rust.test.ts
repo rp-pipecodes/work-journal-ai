@@ -292,17 +292,113 @@ describe('the commands that can block on a person', () => {
     'api_key_set',
     'save_api_key',
     'clear_api_key',
+    // The model call reads the Key — which can sit behind the same prompt —
+    // and is then allowed 60 seconds of network.
+    'generate_standup_post',
     // The two that already carry the rule, here so it reads as a rule.
     'request_calendar_access',
     'request_task_alert_permission',
   ]
 
   it.each(BLOCKING_COMMANDS)('runs %s off the main thread', (command) => {
+    // An `async fn` command is off the main thread by its very shape; the
+    // attribute is what a sync body needs, and is what the declaration is
+    // checked for below.
     const declaration = rustSource.match(
-      new RegExp(`(#\\[tauri::command[^\\]]*\\])\\s*fn ${command}\\b`),
+      new RegExp(`(#\\[tauri::command[^\\]]*\\])\\s*(?:async\\s+)?fn ${command}\\b`),
     )
 
     expect(declaration, `${command} is not a command in ${RUST_FILE}`).toBeTruthy()
     expect(declaration?.[1]).toBe('#[tauri::command(async)]')
   })
 })
+
+/**
+ * The Standup Post call's wire contract, checked the way the rest of the
+ * shared names are — by reading both sides' sources, because a drift between
+ * them is silent: no error, no failed build, and no symptom except a failure
+ * that renders as a blank line. `src-tauri/src/standup.rs` also pins the
+ * exact serialized shapes from its own side; these tests hold the TypeScript
+ * half of the same pairs.
+ */
+describe('the Standup Post call contract', () => {
+  const standupSource = read('src-tauri/src/standup.rs')
+  const desktopSource = read(DESKTOP_FILE)
+
+  it('spells the failure kinds the same on both sides', () => {
+    const rustKinds = rustVariants(standupSource, 'StandupFailure').map(kebab)
+    const tsKinds = tsUnionKinds(desktopSource, 'StandupFailure')
+
+    expect(rustKinds).toEqual([
+      'model-access',
+      'keychain',
+      'offline',
+      'unauthorized',
+      'rate-limited',
+      'timeout',
+      'other',
+      'empty-response',
+    ])
+    // One kind is this side's own — a call that could not even be prepared
+    // is never the model's answer, so Rust has no name for it — and it is
+    // named first in the union, where the comment next to it says so.
+    expect(tsKinds).toEqual(['local', ...rustKinds])
+  })
+
+  it('spells the response states the same on both sides', () => {
+    const rustStates = rustVariants(standupSource, 'StandupPostResponse').map(kebab)
+    const tsStates = tsUnionKinds(desktopSource, 'StandupPostResponse')
+
+    expect(rustStates).toEqual(['generated', 'failed'])
+    expect(tsStates).toEqual(rustStates)
+  })
+
+  it('names the request fields the same on both sides', () => {
+    const rustFields = rustFieldNames(standupSource, 'StandupPostRequest').map(camel)
+    const tsFields = tsFieldNames(desktopSource, 'StandupPostRequest')
+
+    expect(rustFields).toEqual([
+      'baseUrl',
+      'model',
+      'systemPrompt',
+      'userContent',
+    ])
+    expect(tsFields).toEqual(rustFields)
+  })
+})
+
+/** The variant names of one Rust enum, as written. */
+function rustVariants(source: string, name: string): string[] {
+  const body = source.match(new RegExp(`pub enum ${name} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? ''
+  return [...body.matchAll(/^\s*([A-Z][A-Za-z0-9]*)(?=\s*[,{(])/gm)].map(([, variant]) => variant)
+}
+
+/** The field names of one Rust struct, as written. */
+function rustFieldNames(source: string, name: string): string[] {
+  const body = source.match(new RegExp(`pub struct ${name} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? ''
+  return [...body.matchAll(/^\s*pub ([a-z_]+):/gm)].map(([, field]) => field)
+}
+
+/** The quoted member names of one TypeScript union, as written. */
+function tsUnionKinds(source: string, name: string): string[] {
+  const body = source.match(new RegExp(`export type ${name} =\\n([\\s\\S]*?)\\n\\n`))?.[1] ?? ''
+  return [...body.matchAll(/'([a-z-]+)'/g)].map(([, kind]) => kind)
+}
+
+/** The field names of one TypeScript interface, as written. */
+function tsFieldNames(source: string, name: string): string[] {
+  const body = source.match(new RegExp(`export interface ${name} \\{([\\s\\S]*?)\\n\\}`))?.[1] ?? ''
+  return [...body.matchAll(/^\s{2}([a-z][A-Za-z]*):/gm)].map(([, field]) => field)
+}
+
+/** `ModelAccess` to `model-access`, the serde rule the Rust side declares. */
+function kebab(name: string): string {
+  return name.replace(/[A-Z]/g, (letter, at) =>
+    at === 0 ? letter.toLowerCase() : `-${letter.toLowerCase()}`,
+  )
+}
+
+/** `base_url` to `baseUrl`, matching `#[serde(rename_all = "camelCase")]`. */
+function camel(snake: string): string {
+  return snake.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())
+}
