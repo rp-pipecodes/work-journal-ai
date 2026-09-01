@@ -9,13 +9,18 @@
 //! there is one response shape and one 60-second timeout, and nothing else.
 //! No retry is attempted here or anywhere else — a model call is billable,
 //! and a silent retry would spend the user's money twice for one click.
+//!
+//! The wire shapes below are a two-sided contract: the tests at the bottom of
+//! this file pin the exact JSON, and `src/platform/desktop-rust.test.ts` pins
+//! the same names against the TypeScript side it rides in on.
 
 use reqwest::StatusCode;
 use serde::Serialize;
 
 /// What the webview asks for. The API Key is deliberately not among these
 /// fields: it is supplied by the command, from the Keychain. Must match
-/// `StandupPostRequest` in `src/platform/desktop.ts`.
+/// `StandupPostRequest` in `src/platform/desktop.ts`, as
+/// `src/platform/desktop-rust.test.ts` checks.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StandupPostRequest {
@@ -30,9 +35,11 @@ pub struct StandupPostRequest {
 }
 
 /// Why there is no post, as one of the few lines the section can say. Must
-/// match `StandupFailure` in `src/platform/desktop.ts`.
+/// match `StandupFailure` in `src/platform/desktop.ts`, as
+/// `src/platform/desktop-rust.test.ts` checks — the tags are deliberately
+/// kebab-case on both sides.
 #[derive(Clone, Debug, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum StandupFailure {
     /// No Base URL, no Model, or no API Key: the call was refused before it
     /// could spend anything, and the section links to Settings.
@@ -47,8 +54,12 @@ pub enum StandupFailure {
     RateLimited,
     /// No answer within the 60-second timeout.
     Timeout,
-    /// Any other non-2xx status, named so the line can say which one.
-    OtherStatus(u16),
+    /// Any other non-2xx status, named so the line can say which one. A
+    /// struct variant rather than a tuple one: an internally tagged enum
+    /// cannot tag a bare integer, so this shape is what serde can serialize.
+    Other {
+        status: u16,
+    },
     /// The model said nothing — an empty answer, or one that was not an
     /// answer at all.
     EmptyResponse,
@@ -56,9 +67,10 @@ pub enum StandupFailure {
 
 /// The command's answer, as the webview reads it: one shape, success or
 /// failure, so a failure is an answer like any other. Must match
-/// `StandupPostResponse` in `src/platform/desktop.ts`.
+/// `StandupPostResponse` in `src/platform/desktop.ts`, as
+/// `src/platform/desktop-rust.test.ts` checks.
 #[derive(Clone, Serialize)]
-#[serde(tag = "state", rename_all = "camelCase")]
+#[serde(tag = "state", rename_all = "kebab-case")]
 pub enum StandupPostResponse {
     Generated {
         markdown: String,
@@ -117,7 +129,9 @@ pub async fn generate(request: StandupPostRequest, api_key: &str) -> StandupPost
         return failed(StandupFailure::RateLimited);
     }
     if !status.is_success() {
-        return failed(StandupFailure::OtherStatus(status.as_u16()));
+        return failed(StandupFailure::Other {
+            status: status.as_u16(),
+        });
     }
 
     // A 2xx that is not a chat completion is the endpoint not speaking for a
@@ -158,5 +172,67 @@ fn classify(error: reqwest::Error) -> StandupFailure {
         // reachable network can still refuse. Offline is the closest of the
         // few lines there is.
         StandupFailure::Offline
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The wire tags, pinned as serde actually writes them. This is what the
+    /// webview matches on — a rename here that TypeScript does not hear about
+    /// is a failure that renders as a blank line, which is why the exact
+    /// strings are asserted rather than derived.
+    #[test]
+    fn every_failure_kind_serializes_as_the_webview_declares_it() {
+        let pairs = [
+            (
+                StandupFailure::ModelAccess,
+                r#"{"kind":"model-access"}"#,
+            ),
+            (StandupFailure::Keychain, r#"{"kind":"keychain"}"#),
+            (StandupFailure::Offline, r#"{"kind":"offline"}"#),
+            (
+                StandupFailure::Unauthorized,
+                r#"{"kind":"unauthorized"}"#,
+            ),
+            (
+                StandupFailure::RateLimited,
+                r#"{"kind":"rate-limited"}"#,
+            ),
+            (StandupFailure::Timeout, r#"{"kind":"timeout"}"#),
+            (
+                StandupFailure::Other { status: 502 },
+                r#"{"kind":"other","status":502}"#,
+            ),
+            (
+                StandupFailure::EmptyResponse,
+                r#"{"kind":"empty-response"}"#,
+            ),
+        ];
+
+        for (failure, expected) in pairs {
+            assert_eq!(serde_json::to_string(&failure).unwrap(), expected);
+        }
+    }
+
+    /// The two states, and where a failure rides inside one: the shape the
+    /// webview's `state` tag and `failure` field are named for.
+    #[test]
+    fn the_response_serializes_the_way_the_webview_reads_it() {
+        assert_eq!(
+            serde_json::to_string(&StandupPostResponse::Generated {
+                markdown: "hi".to_string(),
+            })
+            .unwrap(),
+            r#"{"state":"generated","markdown":"hi"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&StandupPostResponse::Failed {
+                failure: StandupFailure::Timeout,
+            })
+            .unwrap(),
+            r#"{"state":"failed","failure":{"kind":"timeout"}}"#
+        );
     }
 }

@@ -123,6 +123,7 @@ export default function MainWindow({
           settings={settings}
           journal={journal}
           clock={clock}
+          onOpenSettings={() => setSection('settings')}
         />
       </Section>
     </div>

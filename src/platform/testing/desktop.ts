@@ -399,13 +399,6 @@ export function fakeDesktop({
       return desktop.standupPostResponse
     },
 
-    openSettings: async () => {
-      // Exactly as the Rust side opens Settings: written down for a Main
-      // Window that has yet to ask, and announced for one already listening.
-      desktop.pendingSection = 'settings'
-      sectionRequested.announce('settings')
-    },
-
     showTrayCount: async (title) => {
       desktop.trayTitle = title
     },

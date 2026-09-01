@@ -32,11 +32,17 @@ export default function StandupPostView({
   settings,
   journal,
   clock,
+  onOpenSettings,
 }: {
   desktop: Desktop
   settings: AppSettings
   journal: Promise<Journal>
   clock: Clock
+  /**
+   * The Model Access failure points at Settings; who hosts the switch is the
+   * Main Window's to say, exactly as the sidebar's own items are.
+   */
+  onOpenSettings: () => void
 }) {
   const [state, setState] = useState<StandupPostState>({ state: 'loading' })
   const [session] = useState(() =>
@@ -86,8 +92,10 @@ export default function StandupPostView({
     try {
       const stored = await settings.load()
       // Nothing to name the pending state with and nothing the call could do:
-      // Model Access is the three parts together and useless apart. Refused
-      // here so the section can say so and point at Settings.
+      // Model Access is the three parts together and useless apart. Whether
+      // they are there is settings validation, which lives in TypeScript —
+      // see ADR 0026; Rust only holds the Key. Refused here, so the section
+      // can say so and point at Settings.
       if (stored.modelBaseUrl.trim() === '' || stored.model.trim() === '') {
         setFailure({ kind: 'model-access' })
         return
@@ -113,8 +121,12 @@ export default function StandupPostView({
         setFailure(response.failure)
       }
     } catch (error) {
+      // The call's own failures arrive as `Failed` answers; this catch is
+      // this window's side only — a settings file that would not open, a
+      // journal read that failed — so it says so rather than blaming the
+      // network.
       console.error('could not ask for a Standup Post', error)
-      setFailure({ kind: 'offline' })
+      setFailure({ kind: 'local' })
     } finally {
       inFlight.current = false
       setPending(null)
@@ -191,10 +203,7 @@ export default function StandupPostView({
             </div>
 
             {failure !== null && (
-              <FailureLine
-                failure={failure}
-                onOpenSettings={() => void desktop.openSettings()}
-              />
+              <FailureLine failure={failure} onOpenSettings={onOpenSettings} />
             )}
 
             {post !== null && (
@@ -301,6 +310,8 @@ function FailureLine({
  */
 function describeFailure(failure: StandupFailure): string {
   switch (failure.kind) {
+    case 'local':
+      return 'Could not ask for a Standup Post. Try again.'
     case 'model-access':
       return 'Model Access is not configured. Open Settings to add a Base URL, a Model and an API Key.'
     case 'keychain':

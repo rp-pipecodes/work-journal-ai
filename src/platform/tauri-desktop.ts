@@ -238,8 +238,6 @@ export function createTauriDesktop(): Desktop {
     generateStandupPost: (request: StandupPostRequest) =>
       invoke<StandupPostResponse>('generate_standup_post', { request }),
 
-    openSettings: () => invoke('open_settings'),
-
     showTrayCount: (title) => invoke('show_tray_count', { title }),
   }
 }

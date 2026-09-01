@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
@@ -34,11 +34,13 @@ function renderStandupPost({
   settings,
   journal,
   clock,
+  onOpenSettings = () => undefined,
 }: {
   desktop: FakeDesktop
   settings: ReturnType<typeof createAppSettings>
   journal: Journal
   clock: ReturnType<typeof fixedClock>
+  onOpenSettings?: () => void
 }) {
   render(
     <StandupPostView
@@ -46,6 +48,7 @@ function renderStandupPost({
       settings={settings}
       journal={Promise.resolve(journal)}
       clock={clock}
+      onOpenSettings={onOpenSettings}
     />,
   )
 }
@@ -218,8 +221,9 @@ describe('Standup Post section', () => {
     const user = userEvent.setup()
     const { journal, clock, desktop, settings } = await standupPostAt({})
     await journalWithBothHalves(journal, clock)
+    const onOpenSettings = vi.fn()
 
-    renderStandupPost({ journal, clock, desktop, settings })
+    renderStandupPost({ journal, clock, desktop, settings, onOpenSettings })
     await screen.findByRole('button', { name: 'Generate' })
 
     await user.click(screen.getByRole('button', { name: 'Generate' }))
@@ -232,7 +236,31 @@ describe('Standup Post section', () => {
     expect(desktop.standupRequests).toEqual([])
 
     await user.click(screen.getByRole('button', { name: 'Open Settings' }))
-    expect(desktop.pendingSection).toBe('settings')
+    expect(onOpenSettings).toHaveBeenCalledTimes(1)
+  })
+
+  it('says a call could not be prepared rather than blaming the network', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop } = await standupPostAt()
+    await journalWithBothHalves(journal, clock)
+    // The settings file itself will not open — a local failure, with no model
+    // call behind it and no network involved.
+    const settings = createAppSettings({
+      ...desktop,
+      openSettingsStore: async () => {
+        throw new Error('the settings file would not open')
+      },
+    })
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    await screen.findByRole('button', { name: 'Generate' })
+
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+
+    expect(
+      await screen.findByText('Could not ask for a Standup Post. Try again.'),
+    ).toBeTruthy()
+    expect(desktop.standupRequests).toEqual([])
   })
 
   it.each([

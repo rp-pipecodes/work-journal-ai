@@ -215,7 +215,7 @@ pub fn run() {
             }
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
-            MAIN_SETTINGS_MENU_ITEM => open_settings_window(app),
+            MAIN_SETTINGS_MENU_ITEM => open_settings(app),
             CLOSE_WINDOW_MENU_ITEM => close_main_window(app),
             _ => {}
         })
@@ -241,8 +241,7 @@ pub fn run() {
             api_key_set,
             save_api_key,
             clear_api_key,
-            generate_standup_post,
-            open_settings
+            generate_standup_post
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -308,7 +307,7 @@ pub fn run() {
             // never add itself to the login items without being asked, and
             // must not keep asking after being told no.
             if !has_answered_start_at_login(app.handle()) {
-                open_settings_window(app.handle());
+                open_settings(app.handle());
             }
 
             Ok(())
@@ -799,19 +798,12 @@ fn show_presence(app: &tauri::AppHandle, presence: Option<Presence>) {
 }
 
 /// Opens the Main Window on Settings, building it if it is not already open.
-/// The Tray Menu and the first-run question reach it here; a webview asks
-/// through the `open_settings` command below.
-fn open_settings_window(app: &tauri::AppHandle) {
+/// The Tray Menu and the first-run question reach it here; a Standup Post
+/// showing a Model Access failure links there from inside the window, where
+/// the section switch is its own host's — no command crosses the boundary
+/// for a trip the sidebar already makes.
+fn open_settings(app: &tauri::AppHandle) {
     open_main_window(app, Some(SETTINGS_SECTION));
-}
-
-/// The Main Window asks to show Settings — the Standup Post's Model Access
-/// failure links there. The same journey the Tray Menu's Settings item makes,
-/// so a webview can point the user at the one place the missing half of Model
-/// Access is put right.
-#[tauri::command]
-fn open_settings(app: tauri::AppHandle) {
-    open_settings_window(&app);
 }
 
 /// Closes the Main Window without quitting the app. The resident Capture and
@@ -1142,27 +1134,22 @@ fn clear_api_key() -> Result<(), String> {
 /// the Keychain, and never travels back — see `standup.rs` and
 /// docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md.
 ///
-/// Off the main thread twice over: the Keychain can put an authorization
-/// prompt in front of the read, and the call itself is allowed 60 seconds. A
-/// failure is an answer like any other — one of the few kinds `StandupFailure`
-/// names — so the section can say it back as a line. No retry is attempted:
-/// a model call is billable, and a silent retry spends the user's money twice
-/// for one click.
+/// Only the Keychain is this side's business: whether the Base URL and the
+/// Model are there at all is settings validation, which lives in TypeScript
+/// — see ADR 0026. Off the main thread twice over: the Keychain can put an
+/// authorization prompt in front of the read, and the call itself is allowed
+/// 60 seconds. A failure is an answer like any other — one of the few kinds
+/// `StandupFailure` names — so the section can say it back as a line. No
+/// retry is attempted: a model call is billable, and a silent retry spends
+/// the user's money twice for one click.
 #[tauri::command(async)]
 async fn generate_standup_post(
     request: standup::StandupPostRequest,
 ) -> standup::StandupPostResponse {
-    // Model Access is the three parts together and useless apart; a call that
-    // could not succeed is refused before it can spend anything.
-    if request.base_url.trim().is_empty() || request.model.trim().is_empty() {
-        return standup::StandupPostResponse::Failed {
-            failure: standup::StandupFailure::ModelAccess,
-        };
-    }
-
     let api_key = match keychain::get() {
         Ok(key) if !key.trim().is_empty() => key,
-        // No key is the same refusal as no Base URL or no Model.
+        // No key is the same refusal as a missing half of Model Access: the
+        // call is refused before it can spend anything.
         Ok(_) => {
             return standup::StandupPostResponse::Failed {
                 failure: standup::StandupFailure::ModelAccess,
@@ -1606,7 +1593,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             VIEW_TASKS_MENU_ITEM => open_main_window(app, Some(TASKS_SECTION)),
             WRITE_STANDUP_POST_MENU_ITEM => open_main_window(app, Some(STANDUP_POST_SECTION)),
             COPY_YESTERDAY_DIGEST_MENU_ITEM => copy_yesterday_digest(app),
-            SETTINGS_MENU_ITEM => open_settings(app.clone()),
+            SETTINGS_MENU_ITEM => open_settings(app),
             QUIT_MENU_ITEM => app.exit(0),
             _ => {}
         });

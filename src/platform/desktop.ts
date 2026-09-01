@@ -298,7 +298,8 @@ export interface ExportedFile {
  * What a Standup Post call asks for: where the model is, which one, and the
  * two turns. The API Key is deliberately not among them — the Rust side
  * supplies it, so it never crosses into the webview. Must match
- * `StandupPostRequest` in `src-tauri/src/standup.rs`.
+ * `StandupPostRequest` in `src-tauri/src/standup.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
  */
 export interface StandupPostRequest {
   baseUrl: string
@@ -310,17 +311,21 @@ export interface StandupPostRequest {
 /**
  * The model's answer, or why there is none — one shape, so a failure is an
  * answer like any other rather than a rejection the caller has to guess at.
- * Must match `StandupPostResponse` in `src-tauri/src/standup.rs`.
+ * Must match `StandupPostResponse` in `src-tauri/src/standup.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
  */
 export type StandupPostResponse =
   | { state: 'generated'; markdown: string }
   | { state: 'failed'; failure: StandupFailure }
 
 /**
- * Why there is no post, as one of the few lines the section can say. Must
- * match `StandupFailure` in `src-tauri/src/standup.rs`.
+ * Why there is no post, as one of the few lines the section can say. The
+ * first is this side's own — a call that could not even be prepared is not
+ * the model's answer; the rest must match `StandupFailure` in
+ * `src-tauri/src/standup.rs`, as `src/platform/desktop-rust.test.ts` checks.
  */
 export type StandupFailure =
+  | { kind: 'local' }
   | { kind: 'model-access' }
   | { kind: 'keychain' }
   | { kind: 'offline' }
@@ -604,12 +609,6 @@ export interface Desktop {
    * has to guess at.
    */
   generateStandupPost(request: StandupPostRequest): Promise<StandupPostResponse>
-
-  /**
-   * The Standup Post's Model Access failure points here: the Main Window
-   * switches to Settings, exactly as the Tray Menu's Settings item does.
-   */
-  openSettings(): Promise<void>
 
   /**
    * Puts a short piece of text beside the menu bar glyph. Rendered by the
