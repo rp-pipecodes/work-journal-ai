@@ -535,6 +535,26 @@ export interface Desktop {
    */
   copyToClipboard(text: string): Promise<void>
 
+  /**
+   * Whether an API Key is in the Keychain. Never the key itself: the webview
+   * is where a Body the user typed and a model's answer already meet, and a
+   * billable credential does not belong in it — see
+   * docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md.
+   *
+   * Rejects with what the Keychain said when it will not answer — locked, or a
+   * refused prompt. That is an ordinary state Settings has a line for, not a
+   * failure that should take the rest of the window with it.
+   */
+  apiKeySet(): Promise<boolean>
+  /** Puts the API Key in the Keychain, over whatever was there before. */
+  saveApiKey(apiKey: string): Promise<void>
+  /**
+   * Takes the API Key out of the Keychain. A Keychain entry outlives an
+   * uninstall, so this is the only way out — and clearing one that is already
+   * gone is not an error.
+   */
+  clearApiKey(): Promise<void>
+
   /** Writes a rendered export to a file, and says where it went. */
   exportJournal(markdown: string, fileName: string): Promise<ExportedFile>
 

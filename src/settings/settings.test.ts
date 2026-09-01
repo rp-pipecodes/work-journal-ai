@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_SETTINGS,
   hasAnsweredStartAtLogin,
+  OPENAI_BASE_URL,
   readSettings,
   writeImportCalendars,
   writeImportMeetings,
+  writeModel,
+  writeModelBaseUrl,
   writeStartAtLogin,
   type SettingsStore,
 } from './settings'
@@ -38,6 +41,8 @@ describe('readSettings', () => {
       startAtLogin: false,
       importMeetings: false,
       importCalendars: [],
+      modelBaseUrl: OPENAI_BASE_URL,
+      model: '',
     })
   })
 
@@ -46,11 +51,15 @@ describe('readSettings', () => {
     await writeStartAtLogin(store, true)
     await writeImportMeetings(store, true)
     await writeImportCalendars(store, ['work', 'personal'])
+    await writeModelBaseUrl(store, 'http://localhost:11434/v1')
+    await writeModel(store, 'llama3.1')
 
     expect(await readSettings(store)).toEqual({
       startAtLogin: true,
       importMeetings: true,
       importCalendars: ['work', 'personal'],
+      modelBaseUrl: 'http://localhost:11434/v1',
+      model: 'llama3.1',
     })
   })
 
@@ -70,6 +79,20 @@ describe('readSettings', () => {
     const store = emptyStore({ startAtLogin: 'yes' })
 
     expect(await readSettings(store)).toEqual(DEFAULT_SETTINGS)
+  })
+
+  it('starts Model Access at OpenAI with no model named', async () => {
+    const settings = await readSettings(emptyStore())
+
+    expect(settings.modelBaseUrl).toBe(OPENAI_BASE_URL)
+    expect(settings.model).toBe('')
+  })
+
+  it('falls back to the OpenAI base URL rather than trusting something that is not one', async () => {
+    const store = emptyStore({ modelBaseUrl: 7, model: { name: 'gpt' } })
+
+    expect((await readSettings(store)).modelBaseUrl).toBe(OPENAI_BASE_URL)
+    expect((await readSettings(store)).model).toBe('')
   })
 
   it('ignores a leftover dayStartHour from an older install', async () => {

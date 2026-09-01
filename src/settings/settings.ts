@@ -3,10 +3,11 @@
  * what a valid value is. It depends on one injected collaborator — a key-value
  * store — so it can be driven from a test without Tauri or a file on disk.
  *
- * Nothing here is a secret. v1 has no API key, which is the whole reason a
- * plain JSON store is acceptable at all — see
- * docs/adr/0001-defer-voice-capture-to-v2.md for where a credential would go
- * if voice ever returns.
+ * Nothing here is a secret. Model Access brought the app its first one, and
+ * the API Key is deliberately not in this file: it lives in the macOS Keychain
+ * and is reached through Rust, so a plain JSON store stays acceptable for
+ * everything that is here — see
+ * docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md.
  */
 
 import { START_AT_LOGIN_KEY } from '@/platform/desktop'
@@ -46,12 +47,29 @@ export interface Settings {
    * work. An unticked calendar is ignored entirely.
    */
   importCalendars: string[]
+  /**
+   * Where the model is: any OpenAI-compatible endpoint, which is why this is a
+   * field rather than a list of vendors. OpenAI's own to begin with, because a
+   * default nobody has to look up is worth more than a blank box.
+   */
+  modelBaseUrl: string
+  /**
+   * Which model to ask, in the endpoint's own words. Free text, and empty
+   * until the user names one: a model name baked into the app is a name that
+   * outlives the model — see docs/adr/0001-defer-voice-capture-to-v2.md.
+   */
+  model: string
 }
+
+/** Where Model Access points before the user points it anywhere else. */
+export const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 
 export const DEFAULT_SETTINGS: Settings = {
   startAtLogin: false,
   importMeetings: false,
   importCalendars: [],
+  modelBaseUrl: OPENAI_BASE_URL,
+  model: '',
 }
 
 /**
@@ -61,6 +79,13 @@ export const DEFAULT_SETTINGS: Settings = {
  */
 const IMPORT_MEETINGS_KEY = 'importMeetings'
 const IMPORT_CALENDARS_KEY = 'importCalendars'
+/**
+ * The two halves of Model Access that are not secrets. The third — the API Key
+ * — is never a key in this store; it is in the Keychain, and `Settings` has no
+ * field for it at all.
+ */
+const MODEL_BASE_URL_KEY = 'modelBaseUrl'
+const MODEL_KEY = 'model'
 
 /**
  * Every setting at once, with a default wherever the store is silent or holds
@@ -68,11 +93,14 @@ const IMPORT_CALENDARS_KEY = 'importCalendars'
  * written by an older version, must not stop the app from starting.
  */
 export async function readSettings(store: SettingsStore): Promise<Settings> {
-  const [startAtLogin, importMeetings, importCalendars] = await Promise.all([
-    store.get<unknown>(START_AT_LOGIN_KEY),
-    store.get<unknown>(IMPORT_MEETINGS_KEY),
-    store.get<unknown>(IMPORT_CALENDARS_KEY),
-  ])
+  const [startAtLogin, importMeetings, importCalendars, modelBaseUrl, model] =
+    await Promise.all([
+      store.get<unknown>(START_AT_LOGIN_KEY),
+      store.get<unknown>(IMPORT_MEETINGS_KEY),
+      store.get<unknown>(IMPORT_CALENDARS_KEY),
+      store.get<unknown>(MODEL_BASE_URL_KEY),
+      store.get<unknown>(MODEL_KEY),
+    ])
 
   return {
     startAtLogin:
@@ -89,7 +117,28 @@ export async function readSettings(store: SettingsStore): Promise<Settings> {
     importCalendars: Array.isArray(importCalendars)
       ? importCalendars.filter((id): id is string => typeof id === 'string')
       : DEFAULT_SETTINGS.importCalendars,
+    modelBaseUrl:
+      typeof modelBaseUrl === 'string'
+        ? modelBaseUrl
+        : DEFAULT_SETTINGS.modelBaseUrl,
+    model: typeof model === 'string' ? model : DEFAULT_SETTINGS.model,
   }
+}
+
+/** Where the model is. Kept as typed: what a valid endpoint is, is the endpoint's own answer. */
+export async function writeModelBaseUrl(
+  store: SettingsStore,
+  modelBaseUrl: string,
+): Promise<void> {
+  await store.set(MODEL_BASE_URL_KEY, modelBaseUrl)
+}
+
+/** Which model to ask, in the endpoint's own words. */
+export async function writeModel(
+  store: SettingsStore,
+  model: string,
+): Promise<void> {
+  await store.set(MODEL_KEY, model)
 }
 
 /** Whether meetings are swept at all. Both answers are the user's. */

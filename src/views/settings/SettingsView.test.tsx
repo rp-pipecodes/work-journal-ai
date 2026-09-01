@@ -430,3 +430,266 @@ describe('Task Alerts', () => {
     expect(desktop.alertPrompted).toBe(false)
   })
 })
+
+describe('Model Access', () => {
+  it('remembers the Base URL and the Model as they are typed', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+
+    showSettings(desktop)
+
+    const baseUrl = await screen.findByLabelText('Base URL')
+    // OpenAI's until the user points it somewhere else.
+    expect((baseUrl as HTMLInputElement).value).toBe('https://api.openai.com/v1')
+
+    fireEvent.change(baseUrl, { target: { value: 'http://localhost:11434/v1' } })
+    fireEvent.change(screen.getByLabelText('Model'), {
+      target: { value: 'llama3.1' },
+    })
+
+    await expect
+      .poll(() => desktop.stored.modelBaseUrl)
+      .toBe('http://localhost:11434/v1')
+    expect(desktop.stored.model).toBe('llama3.1')
+  })
+
+  it('opens on what an earlier run stored', async () => {
+    const desktop = fakeDesktop({
+      stored: {
+        startAtLogin: false,
+        modelBaseUrl: 'https://example.test/v1',
+        model: 'gpt-test',
+      },
+    })
+
+    showSettings(desktop)
+
+    const baseUrl = (await screen.findByLabelText(
+      'Base URL',
+    )) as HTMLInputElement
+    await expect.poll(() => baseUrl.value).toBe('https://example.test/v1')
+    expect((screen.getByLabelText('Model') as HTMLInputElement).value).toBe(
+      'gpt-test',
+    )
+  })
+
+  it('puts the API Key in the Keychain and never in the settings file', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+
+    showSettings(desktop)
+
+    await screen.findByText(/No key is saved/)
+    fireEvent.change(screen.getByLabelText('API Key'), {
+      target: { value: 'sk-a-real-key' },
+    })
+    screen.getByRole('button', { name: 'Save' }).click()
+
+    await expect.poll(() => desktop.apiKey).toBe('sk-a-real-key')
+    // Nothing in the store is the key, under any name.
+    expect(Object.values(desktop.stored)).not.toContain('sk-a-real-key')
+    await screen.findByText(/A key is saved/)
+    // And the window keeps no copy of it either.
+    expect((screen.getByLabelText('API Key') as HTMLInputElement).value).toBe('')
+  })
+
+  it('says whether a key is set rather than what it is', async () => {
+    const desktop = fakeDesktop({
+      stored: { startAtLogin: false },
+      apiKey: 'sk-from-an-earlier-run',
+    })
+
+    showSettings(desktop)
+
+    await screen.findByText(/A key is saved/)
+    expect((screen.getByLabelText('API Key') as HTMLInputElement).value).toBe('')
+    expect(document.body.textContent).not.toContain('sk-from-an-earlier-run')
+  })
+
+  it('takes the key out of the Keychain when it is cleared', async () => {
+    const desktop = fakeDesktop({
+      stored: { startAtLogin: false },
+      apiKey: 'sk-from-an-earlier-run',
+    })
+
+    showSettings(desktop)
+
+    const clear = await screen.findByRole('button', { name: 'Clear' })
+    clear.click()
+
+    // A Keychain entry outlives an uninstall, so this is the only way out.
+    await expect.poll(() => desktop.apiKey).toBe(null)
+    await screen.findByText(/No key is saved/)
+  })
+
+  it('says why a refusing Keychain is refusing, and leaves the rest working', async () => {
+    const desktop = fakeDesktop({
+      stored: { startAtLogin: false },
+      keychainRefuses: true,
+    })
+
+    showSettings(desktop)
+
+    // In the Keychain's own words, so a locked one and a denied prompt do not
+    // read the same.
+    await screen.findByText(/the keychain could not be reached/)
+    // And nothing claims to know whether a key is saved while it will not say.
+    expect(screen.queryByRole('button', { name: 'Clear' })).toBe(null)
+    expect(document.body.textContent).not.toContain('A key is saved')
+    // Every other setting still answers for itself.
+    const startAtLogin = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    startAtLogin.click()
+    await expect.poll(() => desktop.loginItem).toBe(true)
+
+    fireEvent.change(screen.getByLabelText('Model'), {
+      target: { value: 'gpt-test' },
+    })
+    await expect.poll(() => desktop.stored.model).toBe('gpt-test')
+  })
+
+  it('does not put the stored value back over what the user has typed', async () => {
+    // The settings file opens when this window is already on screen, and a
+    // free-text field is where that gap shows: the user can have typed a whole
+    // Base URL into it before the file answers. Seeding the field then would
+    // put the older value back under the cursor while the file already held
+    // the new one — the two would disagree, and nothing would say so.
+    const stored: Record<string, unknown> = {
+      startAtLogin: false,
+      modelBaseUrl: 'https://stale.example/v1',
+      model: 'gpt-stored',
+    }
+    let openTheStore = () => {}
+    const opened = new Promise<void>((resolve) => {
+      openTheStore = resolve
+    })
+
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => {
+        await opened
+        return {
+          async get<T>(key: string) {
+            return stored[key] as T | undefined
+          },
+          async has(key: string) {
+            return key in stored
+          },
+          async set(key: string, value: unknown) {
+            stored[key] = value
+          },
+        }
+      },
+    })
+
+    showSettings(desktop)
+
+    // The field is on screen at its default while the file is still opening.
+    const baseUrl = screen.getByLabelText('Base URL') as HTMLInputElement
+    fireEvent.change(baseUrl, { target: { value: 'http://localhost:11434/v1' } })
+
+    openTheStore()
+
+    // Model is seeded by the very same read, so its arrival is what says the
+    // read has landed — no waiting on a clock.
+    await expect
+      .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
+      .toBe('gpt-stored')
+
+    expect(baseUrl.value).toBe('http://localhost:11434/v1')
+    expect(stored.modelBaseUrl).toBe('http://localhost:11434/v1')
+  })
+
+  it('leaves the unsaved field named while the other one saves', async () => {
+    // Two fields, two writes, and only one of them failing. A line about Base
+    // URL must not be answered by a keystroke in Model: the file still does
+    // not hold the Base URL the user is looking at.
+    const stored: Record<string, unknown> = { startAtLogin: false }
+    // The file stops refusing once the user has been told, so the line has a
+    // way to go away that is not "close the window".
+    let refusingBaseUrl = true
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          // The one field the settings file will not take.
+          if (key === 'modelBaseUrl' && refusingBaseUrl) {
+            throw new Error('the file is read-only')
+          }
+          stored[key] = value
+        },
+      }),
+    })
+
+    showSettings(desktop)
+
+    fireEvent.change(await screen.findByLabelText('Base URL'), {
+      target: { value: 'http://localhost:11434/v1' },
+    })
+    await screen.findByText(/could not be saved/)
+
+    fireEvent.change(screen.getByLabelText('Model'), {
+      target: { value: 'llama3.1' },
+    })
+
+    await expect.poll(() => stored.model).toBe('llama3.1')
+    // Every settled write has had its say before the window is read: the
+    // state updates behind them are promise callbacks, and a macrotask runs
+    // once the whole microtask queue is drained.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // The Model write succeeded; the Base URL is still not in the file.
+    expect(stored.modelBaseUrl).toBe(undefined)
+    const said = screen.queryAllByRole('alert').map((line) => line.textContent)
+    expect(
+      said.join(' | '),
+      'a keystroke in Model answered a line about Base URL',
+    ).toMatch(/could not be saved/)
+    // And the line says which field, so the user knows what to try again.
+    expect(said.join(' | ')).toMatch(/Base URL/)
+
+    // Trying again is what takes the line away.
+    refusingBaseUrl = false
+    fireEvent.change(screen.getByLabelText('Base URL'), {
+      target: { value: 'http://localhost:11434/v2' },
+    })
+
+    await expect
+      .poll(() => screen.queryAllByRole('alert').length)
+      .toBe(0)
+    expect(stored.modelBaseUrl).toBe('http://localhost:11434/v2')
+  })
+
+  it('keeps Clear after a Keychain call that failed on its own', async () => {
+    // The key is known to be there: the mount read succeeded. A later call
+    // failing says the Keychain is busy or locked right now, not that the key
+    // has stopped existing — and Clear is the only way out of an entry that
+    // outlives an uninstall, so it must survive a failure the user can retry.
+    const desktop = fakeDesktop({
+      stored: { startAtLogin: false },
+      apiKey: 'sk-from-an-earlier-run',
+    })
+
+    showSettings(desktop)
+
+    const clear = await screen.findByRole('button', { name: 'Clear' })
+    desktop.keychainRefuses = true
+    clear.click()
+
+    await screen.findByText(/the keychain could not be reached/)
+    expect(desktop.apiKey).toBe('sk-from-an-earlier-run')
+    // Still on screen, so the user can unlock the Keychain and press it again.
+    expect(screen.queryByRole('button', { name: 'Clear' })).toBeTruthy()
+
+    desktop.keychainRefuses = false
+    screen.getByRole('button', { name: 'Clear' }).click()
+
+    await expect.poll(() => desktop.apiKey).toBe(null)
+    await screen.findByText(/No key is saved/)
+  })
+})

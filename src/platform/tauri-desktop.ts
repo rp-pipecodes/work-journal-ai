@@ -222,6 +222,12 @@ export function createTauriDesktop(): Desktop {
     // focused, where the webview's own clipboard is not allowed to.
     copyToClipboard: (text) => writeText(text),
 
+    // The key crosses to Rust and never comes back: these three say whether
+    // there is one, replace it, and remove it.
+    apiKeySet: () => invoke<boolean>('api_key_set'),
+    saveApiKey: (apiKey) => invoke('save_api_key', { apiKey }),
+    clearApiKey: () => invoke('clear_api_key'),
+
     exportJournal: (markdown, fileName) =>
       invoke<ExportedFile>('export_journal', { markdown, fileName }),
 

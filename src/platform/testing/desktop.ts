@@ -102,6 +102,14 @@ export interface FakeDesktop extends Desktop {
   prompted: boolean
   /** What the calendars hold today. */
   events: CalendarEvent[]
+  /** The API Key the Keychain holds; null when there is none. */
+  apiKey: string | null
+  /**
+   * Whether the Keychain refuses to answer at all — locked, or a prompt the
+   * user denied. Writable, because that is how it happens: a Keychain open a
+   * moment ago can be shut.
+   */
+  keychainRefuses: boolean
 }
 
 export function fakeDesktop({
@@ -119,6 +127,8 @@ export function fakeDesktop({
   answersAlertPrompt = 'granted',
   calendars = [],
   events = [],
+  apiKey = null,
+  keychainRefuses = false,
 }: {
   /** Only the tests that reach the journal need one. */
   driver?: SqlDriver
@@ -137,6 +147,10 @@ export function fakeDesktop({
   answersAlertPrompt?: TaskAlertPermission
   calendars?: CalendarInfo[]
   events?: CalendarEvent[]
+  /** What the Keychain already holds, as a previous run would have left it. */
+  apiKey?: string | null
+  /** Whether the Keychain is locked, or the prompt was refused. */
+  keychainRefuses?: boolean
 } = {}): FakeDesktop {
   const captureShown = subscribers<void>()
   const windowBlurred = subscribers<void>()
@@ -178,6 +192,8 @@ export function fakeDesktop({
     pendingSection: null,
     sectionsClaimed: 0,
     pendingTaskAlert: null,
+    apiKey,
+    keychainRefuses,
 
     beginCapture: () => captureShown.announce(undefined),
     showTaskCreation: () => taskCreationShown.announce(undefined),
@@ -349,6 +365,19 @@ export function fakeDesktop({
       desktop.clipboard = text
     },
 
+    apiKeySet: async () => {
+      refuseALockedKeychain(desktop)
+      return desktop.apiKey !== null
+    },
+    saveApiKey: async (apiKey) => {
+      refuseALockedKeychain(desktop)
+      desktop.apiKey = apiKey
+    },
+    clearApiKey: async () => {
+      refuseALockedKeychain(desktop)
+      desktop.apiKey = null
+    },
+
     exportJournal: async (markdown, fileName): Promise<ExportedFile> => {
       desktop.exported.push({ markdown, fileName })
       return { path: `/tmp/${fileName}`, fileName }
@@ -360,6 +389,13 @@ export function fakeDesktop({
   }
 
   return desktop
+}
+
+/** What the Keychain says when it will not answer, in the words Rust returns. */
+function refuseALockedKeychain(desktop: FakeDesktop): void {
+  if (desktop.keychainRefuses) {
+    throw new Error('the keychain could not be reached')
+  }
 }
 
 function subscribers<T>() {

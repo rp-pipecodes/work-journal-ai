@@ -269,3 +269,40 @@ describe('the names shared with the Rust side', () => {
     }
   })
 })
+
+/**
+ * A command that can leave a system dialog on screen must not hold the main
+ * thread while it is there. `#[tauri::command]` runs the body on the main
+ * thread; `#[tauri::command(async)]` runs it off it. The difference is silent —
+ * it compiles, it works every time nobody is prompted, and it shows up only as
+ * a frozen app in front of a prompt the user is still reading.
+ *
+ * The rule is not "anything that touches the OS": it is "anything that can
+ * block on a person". The Keychain is one of those, because macOS puts an
+ * authorization prompt in front of a read or a write whenever the binary
+ * asking is not the one that saved the item — see
+ * docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md,
+ * which counts a denied prompt as an ordinary outcome.
+ */
+describe('the commands that can block on a person', () => {
+  const rustSource = read(RUST_FILE)
+
+  const BLOCKING_COMMANDS = [
+    // The keychain prompts on a read or a write, not only on a first save.
+    'api_key_set',
+    'save_api_key',
+    'clear_api_key',
+    // The two that already carry the rule, here so it reads as a rule.
+    'request_calendar_access',
+    'request_task_alert_permission',
+  ]
+
+  it.each(BLOCKING_COMMANDS)('runs %s off the main thread', (command) => {
+    const declaration = rustSource.match(
+      new RegExp(`(#\\[tauri::command[^\\]]*\\])\\s*fn ${command}\\b`),
+    )
+
+    expect(declaration, `${command} is not a command in ${RUST_FILE}`).toBeTruthy()
+    expect(declaration?.[1]).toBe('#[tauri::command(async)]')
+  })
+})

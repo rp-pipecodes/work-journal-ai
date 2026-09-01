@@ -9,6 +9,7 @@ import type { AppSettings } from '@/settings/app-settings'
 import ExportSettings from './ExportSettings'
 import HotkeySettings from './HotkeySettings'
 import MeetingImportSettings from './MeetingImportSettings'
+import ModelAccessSettings from './ModelAccessSettings'
 import StartAtLoginSettings from './StartAtLoginSettings'
 import {
   loadSettingsInitialState,
@@ -112,6 +113,13 @@ export default function SettingsView({
 
         <TaskAlertSettings
           desktop={desktop}
+          initialSettings={initialSettings}
+        />
+        <Separator />
+
+        <ModelAccessSettings
+          desktop={desktop}
+          settings={settings}
           initialSettings={initialSettings}
         />
         <Separator />
