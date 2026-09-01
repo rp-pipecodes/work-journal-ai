@@ -16,7 +16,6 @@ import {
   writeImportMeetings,
   writeModel,
   writeModelBaseUrl,
-  writeStandupPrompt,
   writeStartAtLogin,
   type Settings,
   type SettingsStore,
@@ -60,12 +59,6 @@ export interface AppSettings {
   saveModelBaseUrl(modelBaseUrl: string): Promise<void>
   /** Which model to ask. Stored the same way, and for the same reason. */
   saveModel(model: string): Promise<void>
-  /**
-   * The prompt a Standup Post is written under. Stored the same way, and for
-   * the same reason: nothing but the window it was typed in is looking at it,
-   * and whatever reads it next reads it when it needs it.
-   */
-  saveStandupPrompt(standupPrompt: string): Promise<void>
 }
 
 export function createAppSettings(desktop: Desktop): AppSettings {
@@ -118,10 +111,6 @@ export function createAppSettings(desktop: Desktop): AppSettings {
 
     async saveModel(model) {
       await writeModel(await store(), model)
-    },
-
-    async saveStandupPrompt(standupPrompt) {
-      await writeStandupPrompt(await store(), standupPrompt)
     },
   }
 }

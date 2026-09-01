@@ -194,8 +194,6 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 - [ ] The checkbox afterwards adds and removes the login item, and matches what System Settings shows when the Settings section is re-opened.
 - [ ] Settings shows the exact configured Tauri application version centered at the bottom.
 - [ ] A development build shows a **Dev** label beside that version; a release build shows the version without it.
-- [ ] **Standup Prompt** in Settings opens holding the shipped prompt, with the whole of it reachable: on this machine's WebKit the box is tall enough for the prompt, or the prompt scrolls inside a fixed box — nothing is cut off either way.
-- [ ] Pasting the prompt over itself until it is several times as long never grows the field past its cap: the box stops growing and scrolls inside itself, and **Restore Default** stays put.
 
 ## Capture after midnight
 

@@ -122,9 +122,8 @@ describe('Standup Post section', () => {
     ).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Written by gpt-test' })).toBeTruthy()
 
-    // What was sent: the settings' Base URL and Model, the system prompt the
-    // settings hold — the shipped one while the store says nothing about it —
-    // and the selection's own Digest and Task lists.
+    // What was sent: the settings' Base URL and Model, the shipped system
+    // prompt, and the selection's own Digest and Task lists.
     expect(desktop.standupRequests).toHaveLength(1)
     const request = desktop.standupRequests[0]
     expect(request.baseUrl).toBe('https://api.openai.com/v1')
@@ -198,46 +197,6 @@ describe('Standup Post section', () => {
 
     await screen.findByText('The standup post the model wrote.')
     expect(desktop.standupRequests).toHaveLength(1)
-  })
-
-  it('asks the model under the prompt the user wrote in Settings', async () => {
-    const user = userEvent.setup()
-    const { journal, clock, desktop, settings } = await standupPostAt({
-      ...STORED,
-      standupPrompt: 'Write it in pirate speak.',
-    })
-    await journalWithBothHalves(journal, clock)
-
-    renderStandupPost({ journal, clock, desktop, settings })
-    await screen.findByRole('button', { name: 'Generate' })
-
-    await user.click(screen.getByRole('button', { name: 'Generate' }))
-
-    await screen.findByText('The standup post the model wrote.')
-    expect(desktop.standupRequests[0].systemPrompt).toBe(
-      'Write it in pirate speak.',
-    )
-  })
-
-  it('sends the shipped prompt, not an empty one, when the stored prompt is cleared', async () => {
-    const user = userEvent.setup()
-    const { journal, clock, desktop, settings } = await standupPostAt({
-      ...STORED,
-      standupPrompt: '',
-    })
-    await journalWithBothHalves(journal, clock)
-
-    renderStandupPost({ journal, clock, desktop, settings })
-    await screen.findByRole('button', { name: 'Generate' })
-
-    await user.click(screen.getByRole('button', { name: 'Generate' }))
-
-    await screen.findByText('The standup post the model wrote.')
-    const prompt = desktop.standupRequests[0].systemPrompt
-    expect(prompt).not.toBe('')
-    // A model asked nothing does not write a standup post: the cleared field
-    // reads as the shipped prompt again.
-    expect(prompt).toContain('standup post')
   })
 
   it('generates from today’s Tasks alone when yesterday is empty', async () => {
