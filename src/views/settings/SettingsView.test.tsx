@@ -84,6 +84,112 @@ describe('the Import switch', () => {
     await expect.poll(() => desktop.stored.importMeetings).toBe(false)
     expect(isOn(importSwitch())).toBe(false)
   })
+
+  it('survives a press made before the settings file opens', async () => {
+    // The settings file opens while this window is already on screen, and the
+    // switch is writable in that gap. A press made there is already in the
+    // file by the time the read lands; seeding the switch would flip it back
+    // to the value read before the press, leaving the switch and the file
+    // disagreeing with nothing to say so.
+    const stored: Record<string, unknown> = {
+      importMeetings: false,
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    let openTheStore = () => {}
+    const opened = new Promise<void>((resolve) => {
+      openTheStore = resolve
+    })
+    const desktop = fakeDesktop({
+      stored,
+      access: 'granted',
+      openSettingsStore: async () => {
+        await opened
+        return {
+          async get<T>(key: string) {
+            return stored[key] as T | undefined
+          },
+          async has(key: string) {
+            return key in stored
+          },
+          async set(key: string, value: unknown) {
+            stored[key] = value
+          },
+        }
+      },
+    })
+
+    showSettings(desktop)
+
+    expect(isOn(importSwitch())).toBe(false)
+    importSwitch().click()
+
+    openTheStore()
+
+    // Model is seeded by the very same read, so its arrival is what says the
+    // read has landed — no waiting on a clock.
+    await expect
+      .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
+      .toBe('gpt-stored')
+
+    // The press survives, and the switch agrees with the file afterwards.
+    expect(isOn(importSwitch())).toBe(true)
+    await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+  })
+
+  it('keeps a calendar tick made before the settings file opens', async () => {
+    // Turning Import on is where the calendars are shown, and both can happen
+    // while the settings file is still opening: the tick is already in the
+    // file by the time the read lands, and seeding the ticks would untick it.
+    const stored: Record<string, unknown> = {
+      importMeetings: true,
+      importCalendars: [],
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    let openTheStore = () => {}
+    const opened = new Promise<void>((resolve) => {
+      openTheStore = resolve
+    })
+    const desktop = fakeDesktop({
+      stored,
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+      openSettingsStore: async () => {
+        await opened
+        return {
+          async get<T>(key: string) {
+            return stored[key] as T | undefined
+          },
+          async has(key: string) {
+            return key in stored
+          },
+          async set(key: string, value: unknown) {
+            stored[key] = value
+          },
+        }
+      },
+    })
+
+    showSettings(desktop)
+
+    // The switch reads off until the read lands, so the user turns Import on
+    // and ticks a calendar while the file is still opening.
+    expect(isOn(importSwitch())).toBe(false)
+    importSwitch().click()
+    const work = await screen.findByRole('checkbox', { name: /Work/ })
+    work.click()
+
+    openTheStore()
+
+    await expect
+      .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
+      .toBe('gpt-stored')
+
+    // The tick survives, and the file agrees.
+    expect(isOn(screen.getByRole('checkbox', { name: /Work/ }))).toBe(true)
+    await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
+  })
 })
 
 describe('the Theme control', () => {
@@ -165,6 +271,117 @@ describe('Start at login', () => {
     )
 
     await expect.poll(() => desktop.stored.theme).toBe('dark')
+  })
+
+  it('opens on the stored start-at-login choice', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: true } })
+    // The switch is seeded from the login item the OS reports, which an
+    // earlier run left there.
+    desktop.loginItem = true
+
+    showSettings(desktop)
+
+    const control = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    await expect.poll(() => isOn(control)).toBe(true)
+  })
+
+  it('keeps a switch change made before the settings file opens', async () => {
+    // The switch is writable before the settings file opens, and a change made
+    // there is already in the file by the time the read lands; seeding the
+    // switch would flip it back to the value read before the change.
+    const stored: Record<string, unknown> = {
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    let openTheStore = () => {}
+    const opened = new Promise<void>((resolve) => {
+      openTheStore = resolve
+    })
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => {
+        await opened
+        return {
+          async get<T>(key: string) {
+            return stored[key] as T | undefined
+          },
+          async has(key: string) {
+            return key in stored
+          },
+          async set(key: string, value: unknown) {
+            stored[key] = value
+          },
+        }
+      },
+    })
+
+    showSettings(desktop)
+
+    const control = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    expect(isOn(control)).toBe(false)
+    control.click()
+
+    openTheStore()
+
+    await expect
+      .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
+      .toBe('gpt-stored')
+
+    expect(
+      isOn(screen.getByRole('switch', { name: 'Start at login' })),
+    ).toBe(true)
+    await expect.poll(() => desktop.stored.startAtLogin).toBe(true)
+  })
+
+  it('does not ask the first-run question after the switch was already answered', async () => {
+    // Never asked before, and answered by hand while the file is still
+    // opening: the arriving read must not follow that answer with the
+    // question.
+    const stored: Record<string, unknown> = {
+      model: 'gpt-stored',
+    }
+    let openTheStore = () => {}
+    const opened = new Promise<void>((resolve) => {
+      openTheStore = resolve
+    })
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => {
+        await opened
+        return {
+          async get<T>(key: string) {
+            return stored[key] as T | undefined
+          },
+          async has(key: string) {
+            return key in stored
+          },
+          async set(key: string, value: unknown) {
+            stored[key] = value
+          },
+        }
+      },
+    })
+
+    showSettings(desktop)
+
+    const control = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    control.click()
+
+    openTheStore()
+
+    await expect
+      .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
+      .toBe('gpt-stored')
+
+    // The switch was the answer; the question must not follow it.
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    await expect.poll(() => desktop.stored.startAtLogin).toBe(true)
   })
 })
 
@@ -276,6 +493,71 @@ describe('the two Hotkeys', () => {
     expect(problem.textContent).toContain('Task Hotkey')
     expect(problem.textContent).toContain('already the Note Hotkey')
   })
+
+  it('keeps a remap completed before the settings file opens', async () => {
+    // The read's pair is captured while the file is still opening, so a remap
+    // completed in that gap is newer than it; seeding the pair would put the
+    // stale combination back over the completed one.
+    const stored: Record<string, unknown> = {
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    let openTheStore = () => {}
+    const opened = new Promise<void>((resolve) => {
+      openTheStore = resolve
+    })
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => {
+        await opened
+        return {
+          async get<T>(key: string) {
+            return stored[key] as T | undefined
+          },
+          async has(key: string) {
+            return key in stored
+          },
+          async set(key: string, value: unknown) {
+            stored[key] = value
+          },
+        }
+      },
+    })
+
+    showSettings(desktop)
+
+    const change = await screen.findByRole('button', {
+      name: 'Change Note Hotkey',
+    })
+    change.click()
+    const recorder = await screen.findByRole('button', {
+      name: 'Press a combination…',
+    })
+    recorder.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'K',
+        code: 'KeyK',
+        ctrlKey: true,
+        metaKey: true,
+        bubbles: true,
+      }),
+    )
+
+    // The remap is complete before the read lands.
+    await expect.poll(() => chips('Current Note Hotkey')).toEqual([
+      'Ctrl',
+      'Cmd',
+      'K',
+    ])
+
+    openTheStore()
+
+    await expect
+      .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
+      .toBe('gpt-stored')
+
+    expect(chips('Current Note Hotkey')).toEqual(['Ctrl', 'Cmd', 'K'])
+  })
 })
 
 describe('Escape', () => {
@@ -362,6 +644,13 @@ function titleBarStrip(): HTMLElement {
 function escape(element: HTMLElement) {
   element.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+  )
+}
+
+/** The chips a Hotkey reads as, left to right. */
+function chips(name: string): Array<string | null> {
+  return [...screen.getByRole('group', { name }).querySelectorAll('kbd')].map(
+    (key) => key.textContent,
   )
 }
 

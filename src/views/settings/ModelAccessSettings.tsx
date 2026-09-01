@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { Desktop } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 import type { SettingsInitialState } from './SettingsInitialState'
+import { useSeededState } from './useSeededState'
 import {
   SettingsAside,
   SettingsGroup,
@@ -32,10 +33,20 @@ export default function ModelAccessSettings({
   settings: AppSettings
   initialSettings: Promise<SettingsInitialState | null> | null
 }) {
-  const [modelBaseUrl, setModelBaseUrl] = useState(
+  // A field the user typed in before the read landed is already in the file
+  // by the time it does, and seeding it would put the older value back under
+  // the cursor. Each field seeds independently: typing in one never silences
+  // the other.
+  const [modelBaseUrl, setModelBaseUrl] = useSeededState(
+    initialSettings,
+    (initial) => initial.stored.modelBaseUrl,
     DEFAULT_SETTINGS.modelBaseUrl,
   )
-  const [model, setModel] = useState(DEFAULT_SETTINGS.model)
+  const [model, setModel] = useSeededState(
+    initialSettings,
+    (initial) => initial.stored.model,
+    DEFAULT_SETTINGS.model,
+  )
   // Whether the Keychain holds a key — never which key. Null until it has
   // answered, or while it is refusing to.
   const [keySet, setKeySet] = useState<boolean | null>(null)
@@ -52,25 +63,6 @@ export default function ModelAccessSettings({
   // back: the field is text the user is still typing, and putting an older
   // value back under the cursor would throw away the keystrokes since.
   const [unsaved, setUnsaved] = useState({ modelBaseUrl: false, model: false })
-  // Which of the two fields the user has already typed in. The settings file
-  // opens while this window is on screen, so a whole Base URL can be typed
-  // before the read lands — and a free-text field is where that gap shows in a
-  // way a switch never does. What the user typed is already in the file by
-  // then; seeding the field would put the older value back under the cursor
-  // and leave the two disagreeing with nothing to say so.
-  const typedIn = useRef({ modelBaseUrl: false, model: false })
-
-  useEffect(() => {
-    if (initialSettings === null) return
-
-    void initialSettings.then((initial) => {
-      if (initial === null) return
-
-      // A field nobody has touched, and only that.
-      if (!typedIn.current.modelBaseUrl) setModelBaseUrl(initial.stored.modelBaseUrl)
-      if (!typedIn.current.model) setModel(initial.stored.model)
-    })
-  }, [initialSettings])
 
   // Asked on its own rather than with the settings the store holds: a locked
   // Keychain is an ordinary answer here, and it must not take the rest of the
@@ -101,7 +93,6 @@ export default function ModelAccessSettings({
   }
 
   function changeBaseUrl(next: string) {
-    typedIn.current.modelBaseUrl = true
     setModelBaseUrl(next)
     settings.saveModelBaseUrl(next).then(
       () => record('modelBaseUrl', false),
@@ -113,7 +104,6 @@ export default function ModelAccessSettings({
   }
 
   function changeModel(next: string) {
-    typedIn.current.model = true
     setModel(next)
     settings.saveModel(next).then(
       () => record('model', false),

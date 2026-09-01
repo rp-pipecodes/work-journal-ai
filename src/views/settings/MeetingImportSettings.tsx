@@ -9,6 +9,7 @@ import type {
 import type { AppSettings } from '@/settings/app-settings'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 import type { SettingsInitialState } from './SettingsInitialState'
+import { useSeededState } from './useSeededState'
 import {
   SettingsAside,
   SettingsGroup,
@@ -26,10 +27,20 @@ export default function MeetingImportSettings({
   settings: AppSettings
   initialSettings: Promise<SettingsInitialState | null> | null
 }) {
-  const [importMeetings, setImportMeetings] = useState(
+  // Whether Import was touched while the read was still landing: the read may
+  // only seed what the user has not already changed, and it must not take away
+  // what a toggle made in the gap produced — the calendars fetched over a
+  // permission just granted, or the problem line for one just refused. A tick
+  // made in the gap always follows a toggle (the calendars are only on screen
+  // once Import is on), so the toggle's ref is the whole group's answer.
+  const [importMeetings, setImportMeetings, importTouched] = useSeededState(
+    initialSettings,
+    (initial) => initial.stored.importMeetings,
     DEFAULT_SETTINGS.importMeetings,
   )
-  const [importCalendars, setImportCalendars] = useState<string[]>(
+  const [importCalendars, setImportCalendars] = useSeededState(
+    initialSettings,
+    (initial) => initial.stored.importCalendars,
     DEFAULT_SETTINGS.importCalendars,
   )
   const [calendars, setCalendars] = useState<CalendarInfo[]>([])
@@ -37,16 +48,18 @@ export default function MeetingImportSettings({
   // Nothing until there is something to say.
   const [calendarProblem, setCalendarProblem] = useState<string | null>(null)
 
+  // The calendars to read, and why they are not being read, answered by the
+  // read's snapshot of macOS. Skipped when the user already turned Import on
+  // in the gap: that toggle asked macOS itself and fetched the calendars over
+  // the answer, and the read's older snapshot must not take them away.
   useEffect(() => {
     if (initialSettings === null) return
 
     void initialSettings.then((initial) => {
       if (initial === null) return
+      if (importTouched.current) return
 
       const { stored, calendarAccess } = initial
-      setImportMeetings(stored.importMeetings)
-      setImportCalendars(stored.importCalendars)
-
       if (calendarAccess === 'granted') {
         void desktop.calendars().then(
           setCalendars,
@@ -68,7 +81,7 @@ export default function MeetingImportSettings({
         stored.importMeetings ? describeCalendarAccess(calendarAccess) : null,
       )
     })
-  }, [desktop, initialSettings])
+  }, [desktop, initialSettings, importTouched])
 
   // Import as the window shows it: the user's wish, less whatever macOS is
   // withholding. The stored wish outlives a lost permission — that is what
