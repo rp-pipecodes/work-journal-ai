@@ -148,6 +148,24 @@ describe('Start at login', () => {
     expect(closed).toBe(0)
     expect(screen.getByRole('alertdialog')).toBeTruthy()
   })
+
+  it('keeps the Theme Toggle available while the first-run question is open', async () => {
+    const desktop = fakeDesktop({ stored: {} })
+
+    showSettings(desktop)
+
+    const question = await screen.findByRole('alertdialog')
+    question.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'd',
+        metaKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
+
+    await expect.poll(() => desktop.stored.theme).toBe('dark')
+  })
 })
 
 describe('the two Hotkeys', () => {

@@ -117,7 +117,11 @@ function FirstRunQuestion({
 }) {
   return (
     <AlertDialog open={open}>
-      <AlertDialogContent onKeyDown={(event) => event.stopPropagation()}>
+      <AlertDialogContent
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') event.stopPropagation()
+        }}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>Start Work Journal at login?</AlertDialogTitle>
           <AlertDialogDescription>
