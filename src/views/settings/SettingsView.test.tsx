@@ -155,12 +155,11 @@ describe('the Import switch', () => {
     await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
   })
 
-  it('lets the arriving read correct a switch a failed save rolled back', async () => {
+  it('rolls a failed switch save back to what the file holds', async () => {
     // The wish is written to the file before the announcement is sent, so a
-    // refusal arrives after the change took. Rolling the switch back to the
-    // earlier wish is a failed change, not a new one: it must not count as
-    // the user having changed it, or the arriving read would be silenced and
-    // the switch would keep the default while the file held the wish.
+    // refusal arrives after the change took. The rollback re-reads what the
+    // file holds now — the wish, newer than the initial snapshot, so it
+    // wins over the arriving read — and the switch agrees with the file.
     const stored: Record<string, unknown> = {
       importMeetings: true,
       startAtLogin: false,
@@ -190,12 +189,11 @@ describe('the Import switch', () => {
     await expect.poll(() => desktop.stored.importMeetings).toBe(true)
   })
 
-  it('keeps a calendar tick a failed save rolled back', async () => {
+  it('keeps a calendar tick after its save failed', async () => {
     // The tick is written to the file before the announcement is sent, so a
-    // refusal arrives after the tick took. Rolling it back is a failed
-    // change, not a new one: it must not count as the user having changed
-    // the ticks, or the arriving read would be silenced and the tick would
-    // stay gone while the file held it.
+    // refusal arrives after the tick took. The rollback re-reads what the
+    // file holds now — the tick, newer than the initial snapshot, so it
+    // wins over the arriving read — and the tick agrees with the file.
     const stored: Record<string, unknown> = {
       importMeetings: true,
       importCalendars: ['work'],
@@ -433,12 +431,11 @@ describe('Start at login', () => {
     await expect.poll(() => desktop.stored.startAtLogin).toBe(true)
   })
 
-  it('lets the arriving read correct a switch a failed save rolled back', async () => {
+  it('rolls a failed switch save back to what the OS still says', async () => {
     // The login item is changed before the file is written, so a refusal
-    // leaves both holding the earlier wish. Rolling the switch back to it is
-    // a failed change, not a new one: it must not count as the user having
-    // changed it, or the arriving read would be silenced and the switch
-    // would keep the default while the OS and the file held the wish.
+    // leaves both holding the earlier wish. The rollback re-reads what the
+    // OS says now — newer than the initial snapshot, so it wins over the
+    // arriving read — and the switch agrees with the OS and the file.
     const stored: Record<string, unknown> = {
       startAtLogin: true,
       model: 'gpt-stored',
@@ -466,8 +463,8 @@ describe('Start at login', () => {
     deferred.openTheStore()
     await readLanded()
 
-    // The rollback restored the earlier wish, and the arriving read was
-    // still heard: the switch agrees with the OS and the file.
+    // The rollback re-read the OS and won over the arriving read: the
+    // switch agrees with the OS and the file.
     expect(
       isOn(screen.getByRole('switch', { name: 'Start at login' })),
     ).toBe(true)

@@ -131,13 +131,12 @@ export default function MeetingImportSettings({
         await settings.saveImportMeetings(true)
       } catch (error) {
         console.error('could not change how meetings are imported', error)
-        // Roll back to what the file holds — the wish is written before the
-        // announcement is sent, so a refusal arrives after the change took,
-        // and a permission refused before that leaves the wish as it was.
-        // Either way the file is the truth. The rollback is a failed change,
-        // not a new one: it must not count as the user having changed the
-        // switch, or the arriving read would be silenced and the switch
-        // would keep the default instead of the stored wish.
+        // Roll back to what the file holds now — the wish is written before
+        // the announcement is sent, so a refusal arrives after the change
+        // took, and a permission refused before that leaves the wish as it
+        // was. Either way the file is the truth. The re-read is newer than
+        // the initial snapshot, so it silences the arriving read; the switch
+        // agrees with the file.
         void settings.load().then(
           (stored) => restoreImportMeetings(stored.importMeetings),
           () => restoreImportMeetings(!next),
@@ -155,12 +154,10 @@ export default function MeetingImportSettings({
     setImportCalendars(next)
     settings.saveImportCalendars(next).catch((error: unknown) => {
       console.error('could not change which calendars are imported', error)
-      // Roll back to what the file holds — the ticks are written before the
-      // announcement is sent, so a refusal arrives after the tick took. The
-      // rollback is a failed change, not a new one: it must not count as the
-      // user having changed the ticks, or the arriving read would be
-      // silenced and the ticks would keep the default instead of the stored
-      // choice.
+      // Roll back to what the file holds now — the ticks are written before
+      // the announcement is sent, so a refusal arrives after the tick took.
+      // The re-read is newer than the initial snapshot, so it silences the
+      // arriving read; the ticks agree with the file.
       void settings.load().then(
         (stored) => restoreImportCalendars(stored.importCalendars),
         () => restoreImportCalendars(importCalendars),

@@ -79,12 +79,10 @@ export default function StartAtLoginSettings({
     setStartAtLogin(next)
     settings.saveStartAtLogin(next).catch((error: unknown) => {
       console.error('could not change the login item', error)
-      // Roll back to what the OS still says — the login item is changed
-      // before the file is written, so a refusal leaves both holding the
-      // earlier wish. The rollback is a failed change, not a new one: it
-      // must not count as the user having changed the switch, or the
-      // arriving read would be silenced and the switch would keep the
-      // default instead of the stored wish.
+      // Roll back to what the OS says now — the login item is changed before
+      // the file is written, so a refusal leaves both holding the earlier
+      // wish. The re-read is newer than the initial snapshot, so it silences
+      // the arriving read; the switch agrees with the OS and the file.
       void desktop.startsAtLogin().then(
         (startAtLogin) => restoreStartAtLogin(startAtLogin),
         () => restoreStartAtLogin(!next),
