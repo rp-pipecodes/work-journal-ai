@@ -34,16 +34,22 @@ export default function MeetingImportSettings({
   // refused. Gating the calendar work on the toggle's ref alone is enough: a
   // tick made in the gap always follows a toggle (the calendars are only on
   // screen once Import is on), and the ticks' own seed guards itself.
-  const [importMeetings, setImportMeetings, importTouched] = useSeededState(
+  const [
+    importMeetings,
+    setImportMeetings,
+    importTouched,
+    restoreImportMeetings,
+  ] = useSeededState(
     initialSettings,
     (initial) => initial.stored.importMeetings,
     DEFAULT_SETTINGS.importMeetings,
   )
-  const [importCalendars, setImportCalendars] = useSeededState(
-    initialSettings,
-    (initial) => initial.stored.importCalendars,
-    DEFAULT_SETTINGS.importCalendars,
-  )
+  const [importCalendars, setImportCalendars, , restoreImportCalendars] =
+    useSeededState(
+      initialSettings,
+      (initial) => initial.stored.importCalendars,
+      DEFAULT_SETTINGS.importCalendars,
+    )
   const [calendars, setCalendars] = useState<CalendarInfo[]>([])
   // Why Import is not on, when the reason is the OS rather than the user.
   // Nothing until there is something to say.
@@ -125,7 +131,17 @@ export default function MeetingImportSettings({
         await settings.saveImportMeetings(true)
       } catch (error) {
         console.error('could not change how meetings are imported', error)
-        setImportMeetings(!next)
+        // Roll back to what the file holds — the wish is written before the
+        // announcement is sent, so a refusal arrives after the change took,
+        // and a permission refused before that leaves the wish as it was.
+        // Either way the file is the truth. The rollback is a failed change,
+        // not a new one: it must not count as the user having changed the
+        // switch, or the arriving read would be silenced and the switch
+        // would keep the default instead of the stored wish.
+        void settings.load().then(
+          (stored) => restoreImportMeetings(stored.importMeetings),
+          () => restoreImportMeetings(!next),
+        )
       }
     })()
   }
@@ -139,7 +155,16 @@ export default function MeetingImportSettings({
     setImportCalendars(next)
     settings.saveImportCalendars(next).catch((error: unknown) => {
       console.error('could not change which calendars are imported', error)
-      setImportCalendars(importCalendars)
+      // Roll back to what the file holds — the ticks are written before the
+      // announcement is sent, so a refusal arrives after the tick took. The
+      // rollback is a failed change, not a new one: it must not count as the
+      // user having changed the ticks, or the arriving read would be
+      // silenced and the ticks would keep the default instead of the stored
+      // choice.
+      void settings.load().then(
+        (stored) => restoreImportCalendars(stored.importCalendars),
+        () => restoreImportCalendars(importCalendars),
+      )
     })
   }
 

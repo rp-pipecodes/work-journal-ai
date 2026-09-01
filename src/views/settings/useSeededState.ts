@@ -14,6 +14,13 @@ import type { SettingsInitialState } from './SettingsInitialState'
  * The returned setter is the only way to change the value from here, so any
  * use of it counts as the user having changed it.
  *
+ * The fourth element is the one other way in: restoring the value after a
+ * write failed. A failed write changed nothing, so it is not a change the
+ * user made — the restore does not mark the value touched, and an arriving
+ * read may still seed it. The caller restores the control to what its source
+ * still says (re-read at the rollback), so the control agrees with the
+ * source whether or not a read is still coming.
+ *
  * The third element is the ref that remembers whether this value has been
  * changed. It is per value, not per group: each seeded state guards itself,
  * and a press on one never silences another's seed. What it exists for is the
@@ -25,7 +32,12 @@ export function useSeededState<T>(
   initialSettings: Promise<SettingsInitialState | null> | null,
   select: (initial: SettingsInitialState) => T,
   fallback: T,
-): [T, Dispatch<SetStateAction<T>>, RefObject<boolean>] {
+): [
+  T,
+  Dispatch<SetStateAction<T>>,
+  RefObject<boolean>,
+  (value: T) => void,
+] {
   const [value, setValue] = useState(fallback)
   // The one press that silences the read. Set by the returned setter, and
   // read by the group's other effects, never written by them.
@@ -38,6 +50,13 @@ export function useSeededState<T>(
     },
     [touched],
   )
+
+  // The value after a failed write, without that failure counting as the
+  // user having changed it. The caller restores what the source says; the
+  // arriving read may still seed on top of it.
+  const restore = useCallback((value: T) => {
+    setValue(value)
+  }, [])
 
   // The selector as the caller spells it this render, read when the read
   // settles rather than when the effect runs, so the effect attaches once.
@@ -56,5 +75,5 @@ export function useSeededState<T>(
     })
   }, [initialSettings, touched])
 
-  return [value, set, touched]
+  return [value, set, touched, restore]
 }

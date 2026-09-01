@@ -32,11 +32,12 @@ export default function StartAtLoginSettings({
   // read must not put its older value back over that answer, and the question
   // must not follow it — the switch is the same answer the question would
   // collect.
-  const [startAtLogin, setStartAtLogin, touched] = useSeededState(
-    initialSettings,
-    (initial) => initial.startAtLogin,
-    DEFAULT_SETTINGS.startAtLogin,
-  )
+  const [startAtLogin, setStartAtLogin, touched, restoreStartAtLogin] =
+    useSeededState(
+      initialSettings,
+      (initial) => initial.startAtLogin,
+      DEFAULT_SETTINGS.startAtLogin,
+    )
   // The first-run question, asked once and never again — whichever way it is
   // answered. False until the store has been asked whether it was answered.
   const [asking, setAsking] = useState(false)
@@ -78,7 +79,16 @@ export default function StartAtLoginSettings({
     setStartAtLogin(next)
     settings.saveStartAtLogin(next).catch((error: unknown) => {
       console.error('could not change the login item', error)
-      setStartAtLogin(!next)
+      // Roll back to what the OS still says — the login item is changed
+      // before the file is written, so a refusal leaves both holding the
+      // earlier wish. The rollback is a failed change, not a new one: it
+      // must not count as the user having changed the switch, or the
+      // arriving read would be silenced and the switch would keep the
+      // default instead of the stored wish.
+      void desktop.startsAtLogin().then(
+        (startAtLogin) => restoreStartAtLogin(startAtLogin),
+        () => restoreStartAtLogin(!next),
+      )
     })
   }
 

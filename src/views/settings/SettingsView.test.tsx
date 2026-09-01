@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import {
   deferredStore,
@@ -152,6 +152,86 @@ describe('the Import switch', () => {
     await readLanded()
 
     // The tick survives, and the file agrees.
+    expect(isOn(screen.getByRole('checkbox', { name: /Work/ }))).toBe(true)
+    await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
+  })
+
+  it('lets the arriving read correct a switch a failed save rolled back', async () => {
+    // The wish is written to the file before the announcement is sent, so a
+    // refusal arrives after the change took. Rolling the switch back to the
+    // earlier wish is a failed change, not a new one: it must not count as
+    // the user having changed it, or the arriving read would be silenced and
+    // the switch would keep the default while the file held the wish.
+    const stored: Record<string, unknown> = {
+      importMeetings: true,
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      access: 'granted',
+      openSettingsStore: deferred.openSettingsStore,
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    desktop.announceImportChanged = () =>
+      Promise.reject(new Error('the window is gone'))
+
+    showSettings(desktop)
+
+    expect(isOn(importSwitch())).toBe(false)
+    importSwitch().click()
+
+    deferred.openTheStore()
+    await readLanded()
+
+    // The write reached the file; the switch reads the same wish, not the
+    // default the failed press rolled back to.
+    expect(isOn(importSwitch())).toBe(true)
+    await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+  })
+
+  it('keeps a calendar tick a failed save rolled back', async () => {
+    // The tick is written to the file before the announcement is sent, so a
+    // refusal arrives after the tick took. Rolling it back is a failed
+    // change, not a new one: it must not count as the user having changed
+    // the ticks, or the arriving read would be silenced and the tick would
+    // stay gone while the file held it.
+    const stored: Record<string, unknown> = {
+      importMeetings: true,
+      importCalendars: ['work'],
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+      openSettingsStore: deferred.openSettingsStore,
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    // The switch's own announcement lands; the tick's does not.
+    let announcements = 0
+    desktop.announceImportChanged = () => {
+      announcements += 1
+      return announcements === 1
+        ? Promise.resolve()
+        : Promise.reject(new Error('the window is gone'))
+    }
+
+    showSettings(desktop)
+
+    expect(isOn(importSwitch())).toBe(false)
+    importSwitch().click()
+    const work = await screen.findByRole('checkbox', { name: /Work/ })
+    work.click()
+
+    deferred.openTheStore()
+    await readLanded()
+
+    // The write reached the file; the tick reads the same choice, not the
+    // blank the failed save rolled it back to.
     expect(isOn(screen.getByRole('checkbox', { name: /Work/ }))).toBe(true)
     await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
   })
@@ -309,6 +389,47 @@ describe('Start at login', () => {
     // The switch was the answer; the question must not follow it.
     expect(screen.queryByRole('alertdialog')).toBeNull()
     await expect.poll(() => desktop.stored.startAtLogin).toBe(true)
+  })
+
+  it('lets the arriving read correct a switch a failed save rolled back', async () => {
+    // The login item is changed before the file is written, so a refusal
+    // leaves both holding the earlier wish. Rolling the switch back to it is
+    // a failed change, not a new one: it must not count as the user having
+    // changed it, or the arriving read would be silenced and the switch
+    // would keep the default while the OS and the file held the wish.
+    const stored: Record<string, unknown> = {
+      startAtLogin: true,
+      model: 'gpt-stored',
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: deferred.openSettingsStore,
+    })
+    // An earlier run left the login item there.
+    desktop.loginItem = true
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    desktop.setStartAtLogin = () =>
+      Promise.reject(new Error('macOS refused'))
+
+    showSettings(desktop)
+
+    const control = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    // The switch reads off at its default while the file is still opening.
+    expect(isOn(control)).toBe(false)
+    control.click()
+
+    deferred.openTheStore()
+    await readLanded()
+
+    // The rollback restored the earlier wish, and the arriving read was
+    // still heard: the switch agrees with the OS and the file.
+    expect(
+      isOn(screen.getByRole('switch', { name: 'Start at login' })),
+    ).toBe(true)
+    expect(desktop.stored.startAtLogin).toBe(true)
   })
 })
 
