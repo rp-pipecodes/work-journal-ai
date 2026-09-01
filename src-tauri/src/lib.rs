@@ -1097,20 +1097,28 @@ fn export_journal(
 
 /// Whether an API Key is saved. The key itself never crosses back to the
 /// webview — see `src-tauri/src/keychain.rs`.
-#[tauri::command]
+///
+/// Off the main thread, like every other command that can end up behind a
+/// system dialog: macOS puts an authorization prompt in front of the keychain
+/// whenever the binary asking is not the one that saved the item, and the app
+/// must not sit frozen behind it while the user reads it. Reading is prompted
+/// for exactly as writing is, so all three of these are async.
+#[tauri::command(async)]
 fn api_key_set() -> Result<bool, String> {
     keychain::is_set()
 }
 
-/// Saves the API Key in the keychain, over whatever was there before.
-#[tauri::command]
+/// Saves the API Key in the keychain, over whatever was there before. Off the
+/// main thread, for the reason above.
+#[tauri::command(async)]
 fn save_api_key(api_key: String) -> Result<(), String> {
     keychain::save(&api_key)
 }
 
 /// Removes the API Key from the keychain. A keychain entry outlives an
-/// uninstall, so this is the only way out of one.
-#[tauri::command]
+/// uninstall, so this is the only way out of one. Off the main thread, for the
+/// reason above.
+#[tauri::command(async)]
 fn clear_api_key() -> Result<(), String> {
     keychain::clear()
 }
