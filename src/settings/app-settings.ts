@@ -14,6 +14,8 @@ import {
   readSettings,
   writeImportCalendars,
   writeImportMeetings,
+  writeModel,
+  writeModelBaseUrl,
   writeStartAtLogin,
   type Settings,
   type SettingsStore,
@@ -50,6 +52,13 @@ export interface AppSettings {
   saveImportMeetings(importMeetings: boolean): Promise<void>
   /** Which calendars an Import reads. Announced for the same reason. */
   saveImportCalendars(importCalendars: string[]): Promise<void>
+  /**
+   * Where the model is. Not announced: nothing but the window it was typed in
+   * is looking at it, and whatever reads it next reads it when it needs it.
+   */
+  saveModelBaseUrl(modelBaseUrl: string): Promise<void>
+  /** Which model to ask. Stored the same way, and for the same reason. */
+  saveModel(model: string): Promise<void>
 }
 
 export function createAppSettings(desktop: Desktop): AppSettings {
@@ -94,6 +103,14 @@ export function createAppSettings(desktop: Desktop): AppSettings {
     async saveImportCalendars(importCalendars) {
       await writeImportCalendars(await store(), importCalendars)
       await desktop.announceImportChanged()
+    },
+
+    async saveModelBaseUrl(modelBaseUrl) {
+      await writeModelBaseUrl(await store(), modelBaseUrl)
+    },
+
+    async saveModel(model) {
+      await writeModel(await store(), model)
     },
   }
 }

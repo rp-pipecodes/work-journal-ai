@@ -430,3 +430,120 @@ describe('Task Alerts', () => {
     expect(desktop.alertPrompted).toBe(false)
   })
 })
+
+describe('Model Access', () => {
+  it('remembers the Base URL and the Model as they are typed', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+
+    showSettings(desktop)
+
+    const baseUrl = await screen.findByLabelText('Base URL')
+    // OpenAI's until the user points it somewhere else.
+    expect((baseUrl as HTMLInputElement).value).toBe('https://api.openai.com/v1')
+
+    fireEvent.change(baseUrl, { target: { value: 'http://localhost:11434/v1' } })
+    fireEvent.change(screen.getByLabelText('Model'), {
+      target: { value: 'llama3.1' },
+    })
+
+    await expect
+      .poll(() => desktop.stored.modelBaseUrl)
+      .toBe('http://localhost:11434/v1')
+    expect(desktop.stored.model).toBe('llama3.1')
+  })
+
+  it('opens on what an earlier run stored', async () => {
+    const desktop = fakeDesktop({
+      stored: {
+        startAtLogin: false,
+        modelBaseUrl: 'https://example.test/v1',
+        model: 'gpt-test',
+      },
+    })
+
+    showSettings(desktop)
+
+    const baseUrl = (await screen.findByLabelText(
+      'Base URL',
+    )) as HTMLInputElement
+    await expect.poll(() => baseUrl.value).toBe('https://example.test/v1')
+    expect((screen.getByLabelText('Model') as HTMLInputElement).value).toBe(
+      'gpt-test',
+    )
+  })
+
+  it('puts the API Key in the Keychain and never in the settings file', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+
+    showSettings(desktop)
+
+    await screen.findByText(/No key is saved/)
+    fireEvent.change(screen.getByLabelText('API Key'), {
+      target: { value: 'sk-a-real-key' },
+    })
+    screen.getByRole('button', { name: 'Save' }).click()
+
+    await expect.poll(() => desktop.apiKey).toBe('sk-a-real-key')
+    // Nothing in the store is the key, under any name.
+    expect(Object.values(desktop.stored)).not.toContain('sk-a-real-key')
+    await screen.findByText(/A key is saved/)
+    // And the window keeps no copy of it either.
+    expect((screen.getByLabelText('API Key') as HTMLInputElement).value).toBe('')
+  })
+
+  it('says whether a key is set rather than what it is', async () => {
+    const desktop = fakeDesktop({
+      stored: { startAtLogin: false },
+      apiKey: 'sk-from-an-earlier-run',
+    })
+
+    showSettings(desktop)
+
+    await screen.findByText(/A key is saved/)
+    expect((screen.getByLabelText('API Key') as HTMLInputElement).value).toBe('')
+    expect(document.body.textContent).not.toContain('sk-from-an-earlier-run')
+  })
+
+  it('takes the key out of the Keychain when it is cleared', async () => {
+    const desktop = fakeDesktop({
+      stored: { startAtLogin: false },
+      apiKey: 'sk-from-an-earlier-run',
+    })
+
+    showSettings(desktop)
+
+    const clear = await screen.findByRole('button', { name: 'Clear' })
+    clear.click()
+
+    // A Keychain entry outlives an uninstall, so this is the only way out.
+    await expect.poll(() => desktop.apiKey).toBe(null)
+    await screen.findByText(/No key is saved/)
+  })
+
+  it('says why a refusing Keychain is refusing, and leaves the rest working', async () => {
+    const desktop = fakeDesktop({
+      stored: { startAtLogin: false },
+      keychainRefuses: true,
+    })
+
+    showSettings(desktop)
+
+    // In the Keychain's own words, so a locked one and a denied prompt do not
+    // read the same.
+    await screen.findByText(/the keychain could not be reached/)
+    // And nothing claims to know whether a key is saved while it will not say.
+    expect(screen.queryByRole('button', { name: 'Clear' })).toBe(null)
+    expect(document.body.textContent).not.toContain('A key is saved')
+    // Every other setting still answers for itself.
+    const startAtLogin = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    startAtLogin.click()
+    await expect.poll(() => desktop.loginItem).toBe(true)
+
+    fireEvent.change(screen.getByLabelText('Model'), {
+      target: { value: 'gpt-test' },
+    })
+    await expect.poll(() => desktop.stored.model).toBe('gpt-test')
+  })
+})
