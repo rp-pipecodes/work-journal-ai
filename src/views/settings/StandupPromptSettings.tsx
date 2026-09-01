@@ -4,7 +4,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { DEFAULT_STANDUP_PROMPT } from '@/journal/standup-post'
 import type { AppSettings } from '@/settings/app-settings'
 import type { SettingsInitialState } from './SettingsInitialState'
-import { SettingsGroup, SettingsProblem, SettingsRow } from './SettingsGroup'
+import { SettingsGroup, SettingsProblem, SettingsRow, notStored } from './SettingsGroup'
 
 /**
  * The system prompt a Standup Post is written under, as the user's — plain
@@ -97,10 +97,7 @@ export default function StandupPromptSettings({
       </SettingsRow>
 
       {unsaved && (
-        <SettingsProblem>
-          Standup Prompt could not be saved to the settings file, so it will be
-          gone at the next launch.
-        </SettingsProblem>
+        <SettingsProblem>{notStored('Standup Prompt')}</SettingsProblem>
       )}
     </SettingsGroup>
   )
