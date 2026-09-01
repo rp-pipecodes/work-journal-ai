@@ -292,14 +292,20 @@ describe('the commands that can block on a person', () => {
     'api_key_set',
     'save_api_key',
     'clear_api_key',
+    // The model call reads the Key — which can sit behind the same prompt —
+    // and is then allowed 60 seconds of network.
+    'generate_standup_post',
     // The two that already carry the rule, here so it reads as a rule.
     'request_calendar_access',
     'request_task_alert_permission',
   ]
 
   it.each(BLOCKING_COMMANDS)('runs %s off the main thread', (command) => {
+    // An `async fn` command is off the main thread by its very shape; the
+    // attribute is what a sync body needs, and is what the declaration is
+    // checked for below.
     const declaration = rustSource.match(
-      new RegExp(`(#\\[tauri::command[^\\]]*\\])\\s*fn ${command}\\b`),
+      new RegExp(`(#\\[tauri::command[^\\]]*\\])\\s*(?:async\\s+)?fn ${command}\\b`),
     )
 
     expect(declaration, `${command} is not a command in ${RUST_FILE}`).toBeTruthy()

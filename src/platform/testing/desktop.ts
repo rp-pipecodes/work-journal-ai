@@ -10,6 +10,8 @@ import type {
   Desktop,
   ExportedFile,
   MainSection,
+  StandupPostRequest,
+  StandupPostResponse,
   TaskAlertPermission,
   Unlisten,
 } from '../desktop'
@@ -110,6 +112,13 @@ export interface FakeDesktop extends Desktop {
    * moment ago can be shut.
    */
   keychainRefuses: boolean
+  /** Every Standup Post call asked for, most recent last. */
+  standupRequests: StandupPostRequest[]
+  /**
+   * How a Standup Post call answers. Writable, so a test can script a failure
+   * or a second generation answering differently.
+   */
+  standupPostResponse: StandupPostResponse
 }
 
 export function fakeDesktop({
@@ -194,6 +203,8 @@ export function fakeDesktop({
     pendingTaskAlert: null,
     apiKey,
     keychainRefuses,
+    standupRequests: [],
+    standupPostResponse: { state: 'generated', markdown: GENERATED_POST },
 
     beginCapture: () => captureShown.announce(undefined),
     showTaskCreation: () => taskCreationShown.announce(undefined),
@@ -383,6 +394,18 @@ export function fakeDesktop({
       return { path: `/tmp/${fileName}`, fileName }
     },
 
+    generateStandupPost: async (request): Promise<StandupPostResponse> => {
+      desktop.standupRequests.push(request)
+      return desktop.standupPostResponse
+    },
+
+    openSettings: async () => {
+      // Exactly as the Rust side opens Settings: written down for a Main
+      // Window that has yet to ask, and announced for one already listening.
+      desktop.pendingSection = 'settings'
+      sectionRequested.announce('settings')
+    },
+
     showTrayCount: async (title) => {
       desktop.trayTitle = title
     },
@@ -390,6 +413,9 @@ export function fakeDesktop({
 
   return desktop
 }
+
+/** What the fake model says, distinguishable from anything the user wrote. */
+const GENERATED_POST = 'The standup post the model wrote.'
 
 /** What the Keychain says when it will not answer, in the words Rust returns. */
 function refuseALockedKeychain(desktop: FakeDesktop): void {

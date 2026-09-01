@@ -5,6 +5,7 @@ mod export;
 mod frontmost;
 mod hotkey;
 mod keychain;
+mod standup;
 
 use alerts::{Permission, TaskAlert};
 use calendar::{Access, CalendarEvent, CalendarInfo};
@@ -214,7 +215,7 @@ pub fn run() {
             }
         })
         .on_menu_event(|app, event| match event.id().as_ref() {
-            MAIN_SETTINGS_MENU_ITEM => open_settings(app),
+            MAIN_SETTINGS_MENU_ITEM => open_settings_window(app),
             CLOSE_WINDOW_MENU_ITEM => close_main_window(app),
             _ => {}
         })
@@ -239,7 +240,9 @@ pub fn run() {
             journal_transaction,
             api_key_set,
             save_api_key,
-            clear_api_key
+            clear_api_key,
+            generate_standup_post,
+            open_settings
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -305,7 +308,7 @@ pub fn run() {
             // never add itself to the login items without being asked, and
             // must not keep asking after being told no.
             if !has_answered_start_at_login(app.handle()) {
-                open_settings(app.handle());
+                open_settings_window(app.handle());
             }
 
             Ok(())
@@ -796,8 +799,19 @@ fn show_presence(app: &tauri::AppHandle, presence: Option<Presence>) {
 }
 
 /// Opens the Main Window on Settings, building it if it is not already open.
-fn open_settings(app: &tauri::AppHandle) {
+/// The Tray Menu and the first-run question reach it here; a webview asks
+/// through the `open_settings` command below.
+fn open_settings_window(app: &tauri::AppHandle) {
     open_main_window(app, Some(SETTINGS_SECTION));
+}
+
+/// The Main Window asks to show Settings — the Standup Post's Model Access
+/// failure links there. The same journey the Tray Menu's Settings item makes,
+/// so a webview can point the user at the one place the missing half of Model
+/// Access is put right.
+#[tauri::command]
+fn open_settings(app: tauri::AppHandle) {
+    open_settings_window(&app);
 }
 
 /// Closes the Main Window without quitting the app. The resident Capture and
@@ -1121,6 +1135,48 @@ fn save_api_key(api_key: String) -> Result<(), String> {
 #[tauri::command(async)]
 fn clear_api_key() -> Result<(), String> {
     keychain::clear()
+}
+
+/// Asks the model to write a Standup Post. The webview sent only where the
+/// model is, which one, and what it should hear; the Key is read here, from
+/// the Keychain, and never travels back — see `standup.rs` and
+/// docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md.
+///
+/// Off the main thread twice over: the Keychain can put an authorization
+/// prompt in front of the read, and the call itself is allowed 60 seconds. A
+/// failure is an answer like any other — one of the few kinds `StandupFailure`
+/// names — so the section can say it back as a line. No retry is attempted:
+/// a model call is billable, and a silent retry spends the user's money twice
+/// for one click.
+#[tauri::command(async)]
+async fn generate_standup_post(
+    request: standup::StandupPostRequest,
+) -> standup::StandupPostResponse {
+    // Model Access is the three parts together and useless apart; a call that
+    // could not succeed is refused before it can spend anything.
+    if request.base_url.trim().is_empty() || request.model.trim().is_empty() {
+        return standup::StandupPostResponse::Failed {
+            failure: standup::StandupFailure::ModelAccess,
+        };
+    }
+
+    let api_key = match keychain::get() {
+        Ok(key) if !key.trim().is_empty() => key,
+        // No key is the same refusal as no Base URL or no Model.
+        Ok(_) => {
+            return standup::StandupPostResponse::Failed {
+                failure: standup::StandupFailure::ModelAccess,
+            };
+        }
+        // The Keychain itself refused — locked, or a prompt denied.
+        Err(_) => {
+            return standup::StandupPostResponse::Failed {
+                failure: standup::StandupFailure::Keychain,
+            };
+        }
+    };
+
+    standup::generate(request, &api_key).await
 }
 
 /// Puts today's Captured Note count beside the menu bar glyph. What it says is
@@ -1550,7 +1606,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             VIEW_TASKS_MENU_ITEM => open_main_window(app, Some(TASKS_SECTION)),
             WRITE_STANDUP_POST_MENU_ITEM => open_main_window(app, Some(STANDUP_POST_SECTION)),
             COPY_YESTERDAY_DIGEST_MENU_ITEM => copy_yesterday_digest(app),
-            SETTINGS_MENU_ITEM => open_settings(app),
+            SETTINGS_MENU_ITEM => open_settings(app.clone()),
             QUIT_MENU_ITEM => app.exit(0),
             _ => {}
         });

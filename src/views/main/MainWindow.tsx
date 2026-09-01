@@ -118,7 +118,12 @@ export default function MainWindow({
         on={section === 'standup-post'}
         onScreen={showing}
       >
-        <StandupPostView desktop={desktop} journal={journal} clock={clock} />
+        <StandupPostView
+          desktop={desktop}
+          settings={settings}
+          journal={journal}
+          clock={clock}
+        />
       </Section>
     </div>
   )
