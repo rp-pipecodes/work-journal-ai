@@ -73,8 +73,9 @@ export default function StandupPromptSettings({
         label="Standup Prompt"
         explanation="What a Standup Post is written under. Left empty, the shipped prompt is used — a model is never asked nothing."
         controls="standup-prompt"
+        stacked
       >
-        <div className="flex w-96 flex-col items-end gap-2">
+        <div className="flex w-full flex-col items-end gap-2">
           <Textarea
             id="standup-prompt"
             className="w-full"

@@ -14,15 +14,26 @@ export function SettingsRow({
   label,
   explanation,
   controls,
+  stacked,
   children,
 }: {
   label: string
   explanation: string
   controls?: string
+  /** Render the controls below the label and explanation instead of beside
+   * them — for text fields, which want the full width and read better when
+   * the words they answer to sit directly above them. */
+  stacked?: boolean
   children: React.ReactNode
 }) {
   return (
-    <div className="flex items-start justify-between gap-6">
+    <div
+      className={
+        stacked
+          ? "flex flex-col gap-2"
+          : "flex items-start justify-between gap-6"
+      }
+    >
       <div className="flex flex-col gap-0.5">
         <h2 id={`${headingId(label)}-heading`} className="type-section">
           {controls === undefined ? (
@@ -33,7 +44,15 @@ export function SettingsRow({
         </h2>
         <p className="type-meta text-muted-foreground">{explanation}</p>
       </div>
-      <div className="flex shrink-0 items-center gap-2 pt-0.5">{children}</div>
+      <div
+        className={
+          stacked
+            ? "flex items-center gap-2"
+            : "flex shrink-0 items-center gap-2 pt-0.5"
+        }
+      >
+        {children}
+      </div>
     </div>
   )
 }
