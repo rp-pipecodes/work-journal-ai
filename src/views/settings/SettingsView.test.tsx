@@ -2,7 +2,12 @@
 
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
+import {
+  deferredStore,
+  fakeDesktop,
+  readLanded,
+  type FakeDesktop,
+} from '@/platform/testing/desktop'
 import ThemeProvider from '@/components/ThemeProvider'
 import { createAppSettings } from '@/settings/app-settings'
 import type { Journal, JournalExport } from '@/journal/journal'
@@ -96,27 +101,11 @@ describe('the Import switch', () => {
       startAtLogin: false,
       model: 'gpt-stored',
     }
-    let openTheStore = () => {}
-    const opened = new Promise<void>((resolve) => {
-      openTheStore = resolve
-    })
+    const deferred = deferredStore(stored)
     const desktop = fakeDesktop({
       stored,
       access: 'granted',
-      openSettingsStore: async () => {
-        await opened
-        return {
-          async get<T>(key: string) {
-            return stored[key] as T | undefined
-          },
-          async has(key: string) {
-            return key in stored
-          },
-          async set(key: string, value: unknown) {
-            stored[key] = value
-          },
-        }
-      },
+      openSettingsStore: deferred.openSettingsStore,
     })
 
     showSettings(desktop)
@@ -124,13 +113,8 @@ describe('the Import switch', () => {
     expect(isOn(importSwitch())).toBe(false)
     importSwitch().click()
 
-    openTheStore()
-
-    // Model is seeded by the very same read, so its arrival is what says the
-    // read has landed — no waiting on a clock.
-    await expect
-      .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
-      .toBe('gpt-stored')
+    deferred.openTheStore()
+    await readLanded()
 
     // The press survives, and the switch agrees with the file afterwards.
     expect(isOn(importSwitch())).toBe(true)
@@ -147,28 +131,12 @@ describe('the Import switch', () => {
       startAtLogin: false,
       model: 'gpt-stored',
     }
-    let openTheStore = () => {}
-    const opened = new Promise<void>((resolve) => {
-      openTheStore = resolve
-    })
+    const deferred = deferredStore(stored)
     const desktop = fakeDesktop({
       stored,
       access: 'granted',
       calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
-      openSettingsStore: async () => {
-        await opened
-        return {
-          async get<T>(key: string) {
-            return stored[key] as T | undefined
-          },
-          async has(key: string) {
-            return key in stored
-          },
-          async set(key: string, value: unknown) {
-            stored[key] = value
-          },
-        }
-      },
+      openSettingsStore: deferred.openSettingsStore,
     })
 
     showSettings(desktop)
@@ -180,11 +148,8 @@ describe('the Import switch', () => {
     const work = await screen.findByRole('checkbox', { name: /Work/ })
     work.click()
 
-    openTheStore()
-
-    await expect
-      .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
-      .toBe('gpt-stored')
+    deferred.openTheStore()
+    await readLanded()
 
     // The tick survives, and the file agrees.
     expect(isOn(screen.getByRole('checkbox', { name: /Work/ }))).toBe(true)
@@ -295,26 +260,10 @@ describe('Start at login', () => {
       startAtLogin: false,
       model: 'gpt-stored',
     }
-    let openTheStore = () => {}
-    const opened = new Promise<void>((resolve) => {
-      openTheStore = resolve
-    })
+    const deferred = deferredStore(stored)
     const desktop = fakeDesktop({
       stored,
-      openSettingsStore: async () => {
-        await opened
-        return {
-          async get<T>(key: string) {
-            return stored[key] as T | undefined
-          },
-          async has(key: string) {
-            return key in stored
-          },
-          async set(key: string, value: unknown) {
-            stored[key] = value
-          },
-        }
-      },
+      openSettingsStore: deferred.openSettingsStore,
     })
 
     showSettings(desktop)
@@ -325,11 +274,8 @@ describe('Start at login', () => {
     expect(isOn(control)).toBe(false)
     control.click()
 
-    openTheStore()
-
-    await expect
-      .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
-      .toBe('gpt-stored')
+    deferred.openTheStore()
+    await readLanded()
 
     expect(
       isOn(screen.getByRole('switch', { name: 'Start at login' })),
@@ -344,26 +290,10 @@ describe('Start at login', () => {
     const stored: Record<string, unknown> = {
       model: 'gpt-stored',
     }
-    let openTheStore = () => {}
-    const opened = new Promise<void>((resolve) => {
-      openTheStore = resolve
-    })
+    const deferred = deferredStore(stored)
     const desktop = fakeDesktop({
       stored,
-      openSettingsStore: async () => {
-        await opened
-        return {
-          async get<T>(key: string) {
-            return stored[key] as T | undefined
-          },
-          async has(key: string) {
-            return key in stored
-          },
-          async set(key: string, value: unknown) {
-            stored[key] = value
-          },
-        }
-      },
+      openSettingsStore: deferred.openSettingsStore,
     })
 
     showSettings(desktop)
@@ -373,11 +303,8 @@ describe('Start at login', () => {
     })
     control.click()
 
-    openTheStore()
-
-    await expect
-      .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
-      .toBe('gpt-stored')
+    deferred.openTheStore()
+    await readLanded()
 
     // The switch was the answer; the question must not follow it.
     expect(screen.queryByRole('alertdialog')).toBeNull()
@@ -397,12 +324,8 @@ describe('the two Hotkeys', () => {
 
     showSettings(desktop)
 
-    const chips = await screen.findByRole('group', {
-      name: 'Current Note Hotkey',
-    })
-    expect(
-      [...chips.querySelectorAll('kbd')].map((key) => key.textContent),
-    ).toEqual(['Cmd', 'Shift', 'J'])
+    await screen.findByRole('group', { name: 'Current Note Hotkey' })
+    expect(chips('Current Note Hotkey')).toEqual(['Cmd', 'Shift', 'J'])
   })
 
   it('reports each Hotkey against its own action', async () => {
@@ -455,12 +378,8 @@ describe('the two Hotkeys', () => {
     )
 
     await expect.poll(() => asked).toEqual([['task', 'Ctrl+Cmd+K']])
-    const chips = await screen.findByRole('group', {
-      name: 'Current Task Hotkey',
-    })
-    expect(
-      [...chips.querySelectorAll('kbd')].map((key) => key.textContent),
-    ).toEqual(['Ctrl', 'Cmd', 'K'])
+    await screen.findByRole('group', { name: 'Current Task Hotkey' })
+    expect(chips('Current Task Hotkey')).toEqual(['Ctrl', 'Cmd', 'K'])
   })
 
   it('says so when a remap is refused, and against the right action', async () => {
@@ -502,26 +421,10 @@ describe('the two Hotkeys', () => {
       startAtLogin: false,
       model: 'gpt-stored',
     }
-    let openTheStore = () => {}
-    const opened = new Promise<void>((resolve) => {
-      openTheStore = resolve
-    })
+    const deferred = deferredStore(stored)
     const desktop = fakeDesktop({
       stored,
-      openSettingsStore: async () => {
-        await opened
-        return {
-          async get<T>(key: string) {
-            return stored[key] as T | undefined
-          },
-          async has(key: string) {
-            return key in stored
-          },
-          async set(key: string, value: unknown) {
-            stored[key] = value
-          },
-        }
-      },
+      openSettingsStore: deferred.openSettingsStore,
     })
 
     showSettings(desktop)
@@ -550,11 +453,8 @@ describe('the two Hotkeys', () => {
       'K',
     ])
 
-    openTheStore()
-
-    await expect
-      .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
-      .toBe('gpt-stored')
+    deferred.openTheStore()
+    await readLanded()
 
     expect(chips('Current Note Hotkey')).toEqual(['Ctrl', 'Cmd', 'K'])
   })
@@ -847,27 +747,10 @@ describe('Model Access', () => {
       modelBaseUrl: 'https://stale.example/v1',
       model: 'gpt-stored',
     }
-    let openTheStore = () => {}
-    const opened = new Promise<void>((resolve) => {
-      openTheStore = resolve
-    })
-
+    const deferred = deferredStore(stored)
     const desktop = fakeDesktop({
       stored,
-      openSettingsStore: async () => {
-        await opened
-        return {
-          async get<T>(key: string) {
-            return stored[key] as T | undefined
-          },
-          async has(key: string) {
-            return key in stored
-          },
-          async set(key: string, value: unknown) {
-            stored[key] = value
-          },
-        }
-      },
+      openSettingsStore: deferred.openSettingsStore,
     })
 
     showSettings(desktop)
@@ -876,13 +759,8 @@ describe('Model Access', () => {
     const baseUrl = screen.getByLabelText('Base URL') as HTMLInputElement
     fireEvent.change(baseUrl, { target: { value: 'http://localhost:11434/v1' } })
 
-    openTheStore()
-
-    // Model is seeded by the very same read, so its arrival is what says the
-    // read has landed — no waiting on a clock.
-    await expect
-      .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
-      .toBe('gpt-stored')
+    deferred.openTheStore()
+    await readLanded()
 
     expect(baseUrl.value).toBe('http://localhost:11434/v1')
     expect(stored.modelBaseUrl).toBe('http://localhost:11434/v1')

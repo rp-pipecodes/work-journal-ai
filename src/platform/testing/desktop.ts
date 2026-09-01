@@ -1,3 +1,5 @@
+import { screen } from '@testing-library/react'
+import { expect } from 'vitest'
 import type { CalendarEvent, SqlDriver, TaskAlert } from '../../journal/journal'
 import type { HotkeyStatuses } from '../../settings/hotkey'
 import type { SettingsStore } from '../../settings/settings'
@@ -409,6 +411,53 @@ export function fakeDesktop({
 
 /** What the fake model says, distinguishable from anything the user wrote. */
 const GENERATED_POST = 'The standup post the model wrote.'
+
+/**
+ * A settings store that does not open until the test says so — the fixture
+ * the settings-race tests are built on. Act on a control while the window's
+ * initial read is still landing, then open the store and let it arrive.
+ */
+export function deferredStore(stored: Record<string, unknown>): {
+  /** Lets the settings read land, once the test has acted. */
+  openTheStore: () => void
+  /** Handed to fakeDesktop: the settings file, opened on release. */
+  openSettingsStore: () => Promise<SettingsStore>
+} {
+  let openTheStore = () => {}
+  const opened = new Promise<void>((resolve) => {
+    openTheStore = resolve
+  })
+
+  return {
+    openTheStore,
+    openSettingsStore: async () => {
+      await opened
+      return {
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          stored[key] = value
+        },
+      }
+    },
+  }
+}
+
+/**
+ * The settings read has landed: the Model field — seeded by the very same
+ * read every settings group shares — now holds the stored value. Waited on
+ * rather than on a clock, so a test that acted in the gap knows exactly when
+ * the arriving read has had its say.
+ */
+export async function readLanded(model = 'gpt-stored'): Promise<void> {
+  await expect
+    .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
+    .toBe(model)
+}
 
 /** What the Keychain says when it will not answer, in the words Rust returns. */
 function refuseALockedKeychain(desktop: FakeDesktop): void {

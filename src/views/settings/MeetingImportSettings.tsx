@@ -27,12 +27,13 @@ export default function MeetingImportSettings({
   settings: AppSettings
   initialSettings: Promise<SettingsInitialState | null> | null
 }) {
-  // Whether Import was touched while the read was still landing: the read may
-  // only seed what the user has not already changed, and it must not take away
-  // what a toggle made in the gap produced — the calendars fetched over a
-  // permission just granted, or the problem line for one just refused. A tick
-  // made in the gap always follows a toggle (the calendars are only on screen
-  // once Import is on), so the toggle's ref is the whole group's answer.
+  // Whether the Import switch was touched while the read was still landing:
+  // the read must not put its older value back over that press, and it must
+  // not take away what the toggle made in the gap produced — the calendars
+  // fetched over a permission just granted, or the problem line for one just
+  // refused. Gating the calendar work on the toggle's ref alone is enough: a
+  // tick made in the gap always follows a toggle (the calendars are only on
+  // screen once Import is on), and the ticks' own seed guards itself.
   const [importMeetings, setImportMeetings, importTouched] = useSeededState(
     initialSettings,
     (initial) => initial.stored.importMeetings,
