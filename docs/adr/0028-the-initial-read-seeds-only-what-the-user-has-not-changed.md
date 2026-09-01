@@ -42,7 +42,11 @@ writes immediate, and the control and the file agreeing.
   Login and the Hotkeys all seed through it. Task Alerts only displays the
   read and has no control that changes it.
 - The "touched" ref is per value, and is read (never written) by a group's
-  own effects to gate the non-seed parts of the read.
+  own effects to gate the non-seed parts of the read. The load-bearing case
+  is the read's access snapshot taken before a permission was granted in the
+  gap: the calendars a granted Import fetched over that grant must survive
+  the older "not asked" snapshot, which the regression test 'keeps a grant
+  won in the gap over the older read' pins.
 - A save that failed rolls the control back through the seam's `restore`,
   never through the seeded setter: a failed write is not a change the user
   made, so the arriving read may still seed the control.

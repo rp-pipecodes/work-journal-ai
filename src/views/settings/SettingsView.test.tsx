@@ -235,6 +235,49 @@ describe('the Import switch', () => {
     expect(isOn(screen.getByRole('checkbox', { name: /Work/ }))).toBe(true)
     await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
   })
+
+  it('keeps a grant won in the gap over the older read', async () => {
+    // The read's calendar access is answered while the window is still
+    // opening — before the toggle asked macOS and was granted. The arriving
+    // snapshot is therefore older than the permission the toggle just won,
+    // and must not take it away: the switch reads the granted state the
+    // toggle produced, and the calendars it fetched over the answer stay.
+    const stored: Record<string, unknown> = {
+      importMeetings: true,
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      // Not asked yet when the read is taken; the toggle asks in the gap and
+      // macOS grants.
+      access: 'undetermined',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+      openSettingsStore: deferred.openSettingsStore,
+    })
+
+    showSettings(desktop)
+
+    // The switch reads off at its default while the file is still opening,
+    // so the user turns Import on; macOS answers the grant.
+    expect(isOn(importSwitch())).toBe(false)
+    importSwitch().click()
+    await screen.findByRole('checkbox', { name: /Work/ })
+    expect(desktop.access).toBe('granted')
+
+    deferred.openTheStore()
+    await readLanded()
+
+    // The stale snapshot said "not asked"; the toggle's grant is newer, so
+    // the switch stays on, the calendars it fetched stay, and no reason is
+    // offered for a permission that was just granted.
+    expect(isOn(importSwitch())).toBe(true)
+    expect(screen.getByRole('checkbox', { name: /Work/ })).toBeTruthy()
+    expect(
+      screen.queryByText(/has not been asked about your calendars/),
+    ).toBeNull()
+  })
 })
 
 describe('the Theme control', () => {
