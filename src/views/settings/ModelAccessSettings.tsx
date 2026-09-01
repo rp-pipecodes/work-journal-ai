@@ -195,11 +195,13 @@ export default function ModelAccessSettings({
         <SettingsProblem>{keychainProblem}</SettingsProblem>
       )}
 
-      {/* A Keychain that will not answer has already said so above, and there
-          is nothing truthful to say about a key nobody can see. Clear goes
-          with it: a locked Keychain cannot be cleared either, and the line
-          above is what says why. */}
-      {keychainProblem === null && (
+      {/* Held back only until the Keychain has answered once: before that
+          there is nothing truthful to say about a key nobody can see, and the
+          line above says why. A call that fails after an answer is a different
+          thing — the key is still known to be there, and Clear is the only way
+          out of an entry that outlives an uninstall, so it stays put for the
+          user to unlock the Keychain and press again. */}
+      {keySet !== null && (
         <div className="flex items-center justify-between gap-6">
           <SettingsAside>{keyStatus(keySet)}</SettingsAside>
           {keySet === true && (
@@ -215,11 +217,11 @@ export default function ModelAccessSettings({
 
 /**
  * Whether there is a key, said rather than shown: what the Keychain holds is
- * never read back into this window.
+ * never read back into this window. Only ever asked once the Keychain has
+ * answered — there is no line for "still asking", because nothing of this is
+ * on screen until then.
  */
-function keyStatus(keySet: boolean | null): string {
-  if (keySet === null) return 'Asking the Keychain whether a key is saved.'
-
+function keyStatus(keySet: boolean): string {
   return keySet
     ? 'A key is saved in the Keychain. Saving another replaces it.'
     : 'No key is saved. Nothing reaches a model until there is one.'

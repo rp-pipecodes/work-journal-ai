@@ -546,4 +546,32 @@ describe('Model Access', () => {
     })
     await expect.poll(() => desktop.stored.model).toBe('gpt-test')
   })
+
+  it('keeps Clear after a Keychain call that failed on its own', async () => {
+    // The key is known to be there: the mount read succeeded. A later call
+    // failing says the Keychain is busy or locked right now, not that the key
+    // has stopped existing — and Clear is the only way out of an entry that
+    // outlives an uninstall, so it must survive a failure the user can retry.
+    const desktop = fakeDesktop({
+      stored: { startAtLogin: false },
+      apiKey: 'sk-from-an-earlier-run',
+    })
+
+    showSettings(desktop)
+
+    const clear = await screen.findByRole('button', { name: 'Clear' })
+    desktop.keychainRefuses = true
+    clear.click()
+
+    await screen.findByText(/the keychain could not be reached/)
+    expect(desktop.apiKey).toBe('sk-from-an-earlier-run')
+    // Still on screen, so the user can unlock the Keychain and press it again.
+    expect(screen.queryByRole('button', { name: 'Clear' })).toBeTruthy()
+
+    desktop.keychainRefuses = false
+    screen.getByRole('button', { name: 'Clear' }).click()
+
+    await expect.poll(() => desktop.apiKey).toBe(null)
+    await screen.findByText(/No key is saved/)
+  })
 })
