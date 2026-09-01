@@ -11,7 +11,6 @@ import {
 } from '@/journal/standup-post-session'
 import {
   buildStandupPostInput,
-  DEFAULT_STANDUP_PROMPT,
   standupPostRefuses,
   type StandupPostSelection,
 } from '@/journal/standup-post'
@@ -107,7 +106,10 @@ export default function StandupPostView({
       const response = await desktop.generateStandupPost({
         baseUrl: stored.modelBaseUrl,
         model: stored.model,
-        systemPrompt: DEFAULT_STANDUP_PROMPT,
+        // The user's prompt, or the shipped one whenever nothing of theirs is
+        // stored — `readSettings` resolves a cleared field to the default, so
+        // a model is never asked under an empty system prompt.
+        systemPrompt: stored.standupPrompt,
         userContent: await buildStandupPostInput({
           journal: await journal,
           selection: state.selection,

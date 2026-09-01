@@ -11,6 +11,7 @@ import {
   SettingsGroup,
   SettingsProblem,
   SettingsRow,
+  notStored,
 } from './SettingsGroup'
 
 /**
@@ -245,15 +246,6 @@ function keyStatus(keySet: boolean): string {
  */
 const KEYCHAIN_REFUSED =
   'macOS is not letting Work Journal reach your Keychain, so the API Key cannot be read or changed. Unlock your login keychain in Keychain Access, or allow Work Journal when macOS asks, and open Settings again.'
-
-/**
- * A field the settings file would not take, named: the other field may have
- * saved perfectly well, and a line that said only "that" would leave the user
- * guessing which of the two to type again.
- */
-function notStored(field: string): string {
-  return `${field} could not be saved to the settings file, so it will be gone at the next launch.`
-}
 
 /**
  * What the far side said, whichever side that was: a Tauri command rejects

@@ -47,6 +47,18 @@ export function SettingsProblem({ children }: { children: React.ReactNode }) {
   )
 }
 
+/**
+ * A field the settings file would not take, named: the other field may have
+ * saved perfectly well, and a line that said only "that" would leave the user
+ * guessing which of the two to type again.
+ */
+// A sentence every group may need to say, wherever the settings file
+// refused its field — so it lives beside the group it speaks in.
+// eslint-disable-next-line react-refresh/only-export-components
+export function notStored(field: string): string {
+  return `${field} could not be saved to the settings file, so it will be gone at the next launch.`
+}
+
 export function SettingsAside({ children }: { children: React.ReactNode }) {
   return <p className="type-meta text-muted-foreground">{children}</p>
 }

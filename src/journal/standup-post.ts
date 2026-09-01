@@ -138,22 +138,3 @@ function taskBullet(task: Task): string {
   return `- [${box}] ${task.description}${said}`
 }
 
-/**
- * The system prompt a Standup Post is written under, as shipped. Hardcoded
- * here and read by the view until the Standup Prompt setting makes it the
- * user's — see issue #133. Written blind of the actual chat group, so it
- * states the four assumptions #56 settled on: two labelled sections, `#project`
- * names kept, first person, nothing stated that is absent from the input,
- * and the input's language.
- */
-export const DEFAULT_STANDUP_PROMPT = `You are writing a standup post for the user to paste into a chat group.
-
-Write in the first person, as the user would, in the same language as the input.
-
-Structure the post in two labelled sections: what was done yesterday, and what is planned or still to do today.
-
-Keep #project names exactly as they appear in the input.
-
-Say only what the input supports: state nothing that is not in it.
-
-Keep it brief and natural, ready to paste.`

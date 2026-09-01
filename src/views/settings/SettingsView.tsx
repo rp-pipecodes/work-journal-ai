@@ -10,6 +10,7 @@ import ExportSettings from './ExportSettings'
 import HotkeySettings from './HotkeySettings'
 import MeetingImportSettings from './MeetingImportSettings'
 import ModelAccessSettings from './ModelAccessSettings'
+import StandupPromptSettings from './StandupPromptSettings'
 import StartAtLoginSettings from './StartAtLoginSettings'
 import {
   loadSettingsInitialState,
@@ -119,6 +120,15 @@ export default function SettingsView({
 
         <ModelAccessSettings
           desktop={desktop}
+          settings={settings}
+          initialSettings={initialSettings}
+        />
+        <Separator />
+
+        {/* The prompt a model writes from sits beside where that model is
+            reached: both belong to the same call, and the field is plain
+            text while the Key is not. */}
+        <StandupPromptSettings
           settings={settings}
           initialSettings={initialSettings}
         />
