@@ -9,6 +9,7 @@ import type {
 import type { AppSettings } from '@/settings/app-settings'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 import type { SettingsInitialState } from './SettingsInitialState'
+import { useSeededState } from './useSeededState'
 import {
   SettingsAside,
   SettingsGroup,
@@ -26,10 +27,21 @@ export default function MeetingImportSettings({
   settings: AppSettings
   initialSettings: Promise<SettingsInitialState | null> | null
 }) {
-  const [importMeetings, setImportMeetings] = useState(
+  // Whether the Import switch was touched while the read was still landing:
+  // the read must not put its older value back over that press, and it must
+  // not take away what the toggle made in the gap produced — the calendars
+  // fetched over a permission just granted, or the problem line for one just
+  // refused. Gating the calendar work on the toggle's ref alone is enough: a
+  // tick made in the gap always follows a toggle (the calendars are only on
+  // screen once Import is on), and the ticks' own seed guards itself.
+  const [importMeetings, setImportMeetings, importTouched] = useSeededState(
+    initialSettings,
+    (initial) => initial.stored.importMeetings,
     DEFAULT_SETTINGS.importMeetings,
   )
-  const [importCalendars, setImportCalendars] = useState<string[]>(
+  const [importCalendars, setImportCalendars] = useSeededState(
+    initialSettings,
+    (initial) => initial.stored.importCalendars,
     DEFAULT_SETTINGS.importCalendars,
   )
   const [calendars, setCalendars] = useState<CalendarInfo[]>([])
@@ -37,16 +49,18 @@ export default function MeetingImportSettings({
   // Nothing until there is something to say.
   const [calendarProblem, setCalendarProblem] = useState<string | null>(null)
 
+  // The calendars to read, and why they are not being read, answered by the
+  // read's snapshot of macOS. Skipped when the user already turned Import on
+  // in the gap: that toggle asked macOS itself and fetched the calendars over
+  // the answer, and the read's older snapshot must not take them away.
   useEffect(() => {
     if (initialSettings === null) return
 
     void initialSettings.then((initial) => {
       if (initial === null) return
+      if (importTouched.current) return
 
       const { stored, calendarAccess } = initial
-      setImportMeetings(stored.importMeetings)
-      setImportCalendars(stored.importCalendars)
-
       if (calendarAccess === 'granted') {
         void desktop.calendars().then(
           setCalendars,
@@ -68,7 +82,7 @@ export default function MeetingImportSettings({
         stored.importMeetings ? describeCalendarAccess(calendarAccess) : null,
       )
     })
-  }, [desktop, initialSettings])
+  }, [desktop, initialSettings, importTouched])
 
   // Import as the window shows it: the user's wish, less whatever macOS is
   // withholding. The stored wish outlives a lost permission — that is what
@@ -83,9 +97,11 @@ export default function MeetingImportSettings({
    */
   function toggleImport(next: boolean) {
     void (async () => {
+      // The rollback for whatever this press moved, if it moved anything.
+      let rollback: ((value: boolean) => void) | undefined
       try {
         if (!next) {
-          setImportMeetings(false)
+          rollback = setImportMeetings(false)
           await settings.saveImportMeetings(false)
           return
         }
@@ -99,19 +115,31 @@ export default function MeetingImportSettings({
           // The wish is kept, not discarded: the toggle reads off because the
           // reason underneath it says so, and a grant given in System Settings
           // later resumes Import without being asked for a second time.
-          setImportMeetings(true)
+          rollback = setImportMeetings(true)
           setCalendarProblem(describeCalendarAccess(access))
           await settings.saveImportMeetings(true)
           return
         }
 
-        setImportMeetings(true)
+        rollback = setImportMeetings(true)
         setCalendarProblem(null)
         setCalendars(await desktop.calendars())
         await settings.saveImportMeetings(true)
       } catch (error) {
         console.error('could not change how meetings are imported', error)
-        setImportMeetings(!next)
+        // A refusal from the permission check never moved the switch, so
+        // there is nothing to roll back — the arriving read may still seed
+        // it. Anything the press did move is rolled back to what the file
+        // holds now (the wish is written before the announcement is sent, so
+        // a refusal arrives after the change took). The rollback belongs to
+        // this change: a newer press that landed while it was in flight is
+        // not undone by it.
+        if (rollback === undefined) return
+        const rollbackThisChange = rollback
+        void settings.load().then(
+          (stored) => rollbackThisChange(stored.importMeetings),
+          () => rollbackThisChange(!next),
+        )
       }
     })()
   }
@@ -122,10 +150,19 @@ export default function MeetingImportSettings({
       ? [...importCalendars, id]
       : importCalendars.filter((each) => each !== id)
 
-    setImportCalendars(next)
+    const rollback = setImportCalendars(next)
     settings.saveImportCalendars(next).catch((error: unknown) => {
       console.error('could not change which calendars are imported', error)
-      setImportCalendars(importCalendars)
+      // Roll back to what the file holds now — the ticks are written before
+      // the announcement is sent, so a refusal arrives after the tick took.
+      // The rollback belongs to this change: a newer press that landed while
+      // the re-read was in flight is not undone by it. The re-read is newer
+      // than the initial snapshot, so it silences the arriving read; the
+      // ticks agree with the file.
+      void settings.load().then(
+        (stored) => rollback(stored.importCalendars),
+        () => rollback(importCalendars),
+      )
     })
   }
 

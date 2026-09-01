@@ -15,6 +15,7 @@ import type { Desktop } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 import type { SettingsInitialState } from './SettingsInitialState'
+import { useSeededState } from './useSeededState'
 import { SettingsGroup, SettingsRow } from './SettingsGroup'
 
 /** The start-at-login preference, including its first-run question. */
@@ -27,7 +28,15 @@ export default function StartAtLoginSettings({
   settings: AppSettings
   initialSettings: Promise<SettingsInitialState | null> | null
 }) {
-  const [startAtLogin, setStartAtLogin] = useState(DEFAULT_SETTINGS.startAtLogin)
+  // Whether the switch was answered while the read was still landing: the
+  // read must not put its older value back over that answer, and the question
+  // must not follow it — the switch is the same answer the question would
+  // collect.
+  const [startAtLogin, setStartAtLogin, touched] = useSeededState(
+    initialSettings,
+    (initial) => initial.startAtLogin,
+    DEFAULT_SETTINGS.startAtLogin,
+  )
   // The first-run question, asked once and never again — whichever way it is
   // answered. False until the store has been asked whether it was answered.
   const [asking, setAsking] = useState(false)
@@ -40,10 +49,10 @@ export default function StartAtLoginSettings({
 
     void initialSettings.then((initial) => {
       if (initial === null) return
-      setStartAtLogin(initial.startAtLogin)
+      if (touched.current) return
       setAsking(!initial.startAtLoginAnswered)
     })
-  }, [initialSettings])
+  }, [initialSettings, touched])
 
   useEffect(() => {
     if (!asking) return
@@ -66,10 +75,16 @@ export default function StartAtLoginSettings({
   }, [asking, desktop, settings])
 
   function toggleStartAtLogin(next: boolean) {
-    setStartAtLogin(next)
+    const rollback = setStartAtLogin(next)
     settings.saveStartAtLogin(next).catch((error: unknown) => {
       console.error('could not change the login item', error)
-      setStartAtLogin(!next)
+      // Roll back to what the OS says now — the login item is changed before
+      // the file is written, so a refusal leaves both holding the earlier
+      // wish. The rollback belongs to this change: a newer press that landed
+      // while the re-read was in flight is not undone by it. The re-read is
+      // newer than the initial snapshot, so it silences the arriving read;
+      // the switch agrees with the OS and the file.
+      void desktop.startsAtLogin().then(rollback, () => rollback(!next))
     })
   }
 

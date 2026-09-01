@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
+import {
+  deferredStore,
+  fakeDesktop,
+  type FakeDesktop,
+} from '@/platform/testing/desktop'
 import ThemeProvider from '@/components/ThemeProvider'
 import { createAppSettings } from '@/settings/app-settings'
 import type { Journal, JournalExport } from '@/journal/journal'
@@ -83,6 +87,268 @@ describe('the Import switch', () => {
 
     await expect.poll(() => desktop.stored.importMeetings).toBe(false)
     expect(isOn(importSwitch())).toBe(false)
+  })
+
+  it('survives a press made before the settings file opens', async () => {
+    // The settings file opens while this window is already on screen, and the
+    // switch is writable in that gap. A press made there is already in the
+    // file by the time the read lands; seeding the switch would flip it back
+    // to the value read before the press, leaving the switch and the file
+    // disagreeing with nothing to say so.
+    const stored: Record<string, unknown> = {
+      importMeetings: false,
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      access: 'granted',
+      openSettingsStore: deferred.openSettingsStore,
+    })
+
+    showSettings(desktop)
+
+    expect(isOn(importSwitch())).toBe(false)
+    importSwitch().click()
+
+    deferred.openTheStore()
+    await readLanded()
+
+    // The press survives, and the switch agrees with the file afterwards.
+    expect(isOn(importSwitch())).toBe(true)
+    await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+  })
+
+  it('keeps a calendar tick made before the settings file opens', async () => {
+    // Turning Import on is where the calendars are shown, and both can happen
+    // while the settings file is still opening: the tick is already in the
+    // file by the time the read lands, and seeding the ticks would untick it.
+    const stored: Record<string, unknown> = {
+      importMeetings: true,
+      importCalendars: [],
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+      openSettingsStore: deferred.openSettingsStore,
+    })
+
+    showSettings(desktop)
+
+    // The switch reads off until the read lands, so the user turns Import on
+    // and ticks a calendar while the file is still opening.
+    expect(isOn(importSwitch())).toBe(false)
+    importSwitch().click()
+    const work = await screen.findByRole('checkbox', { name: /Work/ })
+    work.click()
+
+    deferred.openTheStore()
+    await readLanded()
+
+    // The tick survives, and the file agrees.
+    expect(isOn(screen.getByRole('checkbox', { name: /Work/ }))).toBe(true)
+    await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
+  })
+
+  it('rolls a failed switch save back to what the file holds', async () => {
+    // The wish is written to the file before the announcement is sent, so a
+    // refusal arrives after the change took. The rollback re-reads what the
+    // file holds now — the wish, newer than the initial snapshot, so it
+    // wins over the arriving read — and the switch agrees with the file.
+    const stored: Record<string, unknown> = {
+      importMeetings: true,
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      access: 'granted',
+      openSettingsStore: deferred.openSettingsStore,
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    desktop.announceImportChanged = () =>
+      Promise.reject(new Error('the window is gone'))
+
+    showSettings(desktop)
+
+    expect(isOn(importSwitch())).toBe(false)
+    importSwitch().click()
+
+    deferred.openTheStore()
+    await readLanded()
+
+    // The write reached the file; the switch reads the same wish, not the
+    // default the failed press rolled back to.
+    expect(isOn(importSwitch())).toBe(true)
+    await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+  })
+
+  it('keeps a calendar tick after its save failed', async () => {
+    // The tick is written to the file before the announcement is sent, so a
+    // refusal arrives after the tick took. The rollback re-reads what the
+    // file holds now — the tick, newer than the initial snapshot, so it
+    // wins over the arriving read — and the tick agrees with the file.
+    const stored: Record<string, unknown> = {
+      importMeetings: true,
+      importCalendars: ['work'],
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+      openSettingsStore: deferred.openSettingsStore,
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    // The switch's own announcement lands; the tick's does not.
+    let announcements = 0
+    desktop.announceImportChanged = () => {
+      announcements += 1
+      return announcements === 1
+        ? Promise.resolve()
+        : Promise.reject(new Error('the window is gone'))
+    }
+
+    showSettings(desktop)
+
+    expect(isOn(importSwitch())).toBe(false)
+    importSwitch().click()
+    const work = await screen.findByRole('checkbox', { name: /Work/ })
+    work.click()
+
+    deferred.openTheStore()
+    await readLanded()
+
+    // The write reached the file; the tick reads the same choice, not the
+    // blank the failed save rolled it back to.
+    expect(isOn(screen.getByRole('checkbox', { name: /Work/ }))).toBe(true)
+    await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
+  })
+
+  it('keeps a grant won in the gap over the older read', async () => {
+    // The read's calendar access is answered while the window is still
+    // opening — before the toggle asked macOS and was granted. The arriving
+    // snapshot is therefore older than the permission the toggle just won,
+    // and must not take it away: the switch reads the granted state the
+    // toggle produced, and the calendars it fetched over the answer stay.
+    const stored: Record<string, unknown> = {
+      importMeetings: true,
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      // Not asked yet when the read is taken; the toggle asks in the gap and
+      // macOS grants.
+      access: 'undetermined',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+      openSettingsStore: deferred.openSettingsStore,
+    })
+
+    showSettings(desktop)
+
+    // The switch reads off at its default while the file is still opening,
+    // so the user turns Import on; macOS answers the grant.
+    expect(isOn(importSwitch())).toBe(false)
+    importSwitch().click()
+    await screen.findByRole('checkbox', { name: /Work/ })
+    expect(desktop.access).toBe('granted')
+
+    deferred.openTheStore()
+    await readLanded()
+
+    // The stale snapshot said "not asked"; the toggle's grant is newer, so
+    // the switch stays on, the calendars it fetched stay, and no reason is
+    // offered for a permission that was just granted.
+    expect(isOn(importSwitch())).toBe(true)
+    expect(screen.getByRole('checkbox', { name: /Work/ })).toBeTruthy()
+    expect(
+      screen.queryByText(/has not been asked about your calendars/),
+    ).toBeNull()
+  })
+
+  it('discards an older Import rollback still in flight when a newer press lands', async () => {
+    // Press A turns Import on: the wish reaches the file, then the
+    // announcement refuses, so the rollback re-reads the file. The read is
+    // serviced before press B turns it off again, and resolves after — the
+    // older rollback's captured true must not be put back over the newer
+    // change, or the switch would read on while the file held false.
+    const stored: Record<string, unknown> = {
+      importMeetings: false,
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    // The rollback's read of the wish: serviced now, delivered when the test
+    // says so. The initial read's own answer is immediate.
+    let releaseRead = () => {}
+    const readAnswered = new Promise<void>((resolve) => {
+      releaseRead = resolve
+    })
+    let importMeetingsReads = 0
+    let captured: unknown
+    const desktop = fakeDesktop({
+      stored,
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          if (key === 'importMeetings') {
+            importMeetingsReads += 1
+            // The second read is the rollback's; hold its answer.
+            if (importMeetingsReads === 2) {
+              captured = stored.importMeetings
+              return readAnswered.then(() => captured as T)
+            }
+          }
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          stored[key] = value
+        },
+      }),
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    // The switch's own announcement fails; a later one lands.
+    let announcements = 0
+    desktop.announceImportChanged = () => {
+      announcements += 1
+      return announcements === 1
+        ? Promise.reject(new Error('the window is gone'))
+        : Promise.resolve()
+    }
+
+    showSettings(desktop)
+
+    expect(isOn(importSwitch())).toBe(false)
+    // Press A: the wish reaches the file, the announcement refuses, and the
+    // rollback's read is now in flight.
+    importSwitch().click()
+    await expect.poll(() => importMeetingsReads).toBe(2)
+
+    // Press B: off, and this write reaches the file.
+    importSwitch().click()
+    await expect.poll(() => desktop.stored.importMeetings).toBe(false)
+
+    releaseRead()
+
+    // The rollback's delivery has had its chance by the time a macrotask
+    // runs — its state update is a microtask, and it is discarded, so the
+    // switch still agrees with the file.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(isOn(importSwitch())).toBe(false)
+    expect(desktop.stored.importMeetings).toBe(false)
   })
 })
 
@@ -166,6 +432,198 @@ describe('Start at login', () => {
 
     await expect.poll(() => desktop.stored.theme).toBe('dark')
   })
+
+  it('opens on the stored start-at-login choice', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: true } })
+    // The switch is seeded from the login item the OS reports, which an
+    // earlier run left there.
+    desktop.loginItem = true
+
+    showSettings(desktop)
+
+    const control = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    await expect.poll(() => isOn(control)).toBe(true)
+  })
+
+  it('keeps a switch change made before the settings file opens', async () => {
+    // The switch is writable before the settings file opens, and a change made
+    // there is already in the file by the time the read lands; seeding the
+    // switch would flip it back to the value read before the change.
+    const stored: Record<string, unknown> = {
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: deferred.openSettingsStore,
+    })
+
+    showSettings(desktop)
+
+    const control = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    expect(isOn(control)).toBe(false)
+    control.click()
+
+    deferred.openTheStore()
+    await readLanded()
+
+    expect(
+      isOn(screen.getByRole('switch', { name: 'Start at login' })),
+    ).toBe(true)
+    await expect.poll(() => desktop.stored.startAtLogin).toBe(true)
+  })
+
+  it('does not ask the first-run question after the switch was already answered', async () => {
+    // Never asked before, and answered by hand while the file is still
+    // opening: the arriving read must not follow that answer with the
+    // question.
+    const stored: Record<string, unknown> = {
+      model: 'gpt-stored',
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: deferred.openSettingsStore,
+    })
+
+    showSettings(desktop)
+
+    const control = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    control.click()
+
+    deferred.openTheStore()
+    await readLanded()
+
+    // The switch was the answer; the question must not follow it.
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    await expect.poll(() => desktop.stored.startAtLogin).toBe(true)
+  })
+
+  it('rolls a failed switch save back to what the OS still says', async () => {
+    // The login item is changed before the file is written, so a refusal
+    // leaves both holding the earlier wish. The rollback re-reads what the
+    // OS says now — newer than the initial snapshot, so it wins over the
+    // arriving read — and the switch agrees with the OS and the file.
+    const stored: Record<string, unknown> = {
+      startAtLogin: true,
+      model: 'gpt-stored',
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: deferred.openSettingsStore,
+    })
+    // An earlier run left the login item there.
+    desktop.loginItem = true
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    desktop.setStartAtLogin = () =>
+      Promise.reject(new Error('macOS refused'))
+
+    showSettings(desktop)
+
+    const control = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    // The switch reads off at its default while the file is still opening.
+    expect(isOn(control)).toBe(false)
+    control.click()
+
+    deferred.openTheStore()
+    await readLanded()
+
+    // The rollback re-read the OS and won over the arriving read: the
+    // switch agrees with the OS and the file.
+    expect(
+      isOn(screen.getByRole('switch', { name: 'Start at login' })),
+    ).toBe(true)
+    expect(desktop.stored.startAtLogin).toBe(true)
+  })
+
+  it('discards an older Start at Login rollback still in flight when a newer press lands', async () => {
+    // Press A turns the switch on: the OS accepts, then the file write
+    // refuses, so the rollback re-reads the OS. The read is serviced before
+    // press B turns it off again, and resolves after — the older rollback's
+    // captured true must not be put back over the newer change, or the
+    // switch would read on while the OS and the file held false.
+    const stored: Record<string, unknown> = {
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    // The file takes the first start-at-login write and refuses it.
+    let startAtLoginWrites = 0
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          if (key === 'startAtLogin') {
+            startAtLoginWrites += 1
+            if (startAtLoginWrites === 1) {
+              throw new Error('the file is read-only')
+            }
+          }
+          stored[key] = value
+        },
+      }),
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    // The OS read for press A's rollback: serviced now, delivered when the
+    // test says so. Any other read is answered immediately.
+    let releaseRead = () => {}
+    const readAnswered = new Promise<void>((resolve) => {
+      releaseRead = resolve
+    })
+    let gated = false
+    let captured: boolean | null = null
+    desktop.startsAtLogin = () => {
+      const value = desktop.loginItem
+      if (!gated) return Promise.resolve(value)
+      gated = false
+      captured = value
+      return readAnswered.then(() => value)
+    }
+
+    showSettings(desktop)
+
+    const control = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    expect(isOn(control)).toBe(false)
+
+    // Press A: the login item moves, the file write refuses, and the
+    // rollback's read is now in flight.
+    control.click()
+    gated = true
+    await expect.poll(() => captured).toBe(true)
+
+    // Press B: off, and this write reaches the file.
+    control.click()
+    await expect.poll(() => desktop.stored.startAtLogin).toBe(false)
+
+    releaseRead()
+
+    // The rollback's delivery has had its chance by the time a macrotask
+    // runs — its state update is a microtask, and it is discarded, so the
+    // switch still agrees with the OS and the file.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(desktop.loginItem).toBe(false)
+    expect(
+      isOn(screen.getByRole('switch', { name: 'Start at login' })),
+    ).toBe(false)
+    expect(desktop.stored.startAtLogin).toBe(false)
+  })
 })
 
 describe('the two Hotkeys', () => {
@@ -180,12 +638,8 @@ describe('the two Hotkeys', () => {
 
     showSettings(desktop)
 
-    const chips = await screen.findByRole('group', {
-      name: 'Current Note Hotkey',
-    })
-    expect(
-      [...chips.querySelectorAll('kbd')].map((key) => key.textContent),
-    ).toEqual(['Cmd', 'Shift', 'J'])
+    await screen.findByRole('group', { name: 'Current Note Hotkey' })
+    expect(chips('Current Note Hotkey')).toEqual(['Cmd', 'Shift', 'J'])
   })
 
   it('reports each Hotkey against its own action', async () => {
@@ -238,12 +692,8 @@ describe('the two Hotkeys', () => {
     )
 
     await expect.poll(() => asked).toEqual([['task', 'Ctrl+Cmd+K']])
-    const chips = await screen.findByRole('group', {
-      name: 'Current Task Hotkey',
-    })
-    expect(
-      [...chips.querySelectorAll('kbd')].map((key) => key.textContent),
-    ).toEqual(['Ctrl', 'Cmd', 'K'])
+    await screen.findByRole('group', { name: 'Current Task Hotkey' })
+    expect(chips('Current Task Hotkey')).toEqual(['Ctrl', 'Cmd', 'K'])
   })
 
   it('says so when a remap is refused, and against the right action', async () => {
@@ -275,6 +725,52 @@ describe('the two Hotkeys', () => {
     const problem = await screen.findByRole('alert')
     expect(problem.textContent).toContain('Task Hotkey')
     expect(problem.textContent).toContain('already the Note Hotkey')
+  })
+
+  it('keeps a remap completed before the settings file opens', async () => {
+    // The read's pair is captured while the file is still opening, so a remap
+    // completed in that gap is newer than it; seeding the pair would put the
+    // stale combination back over the completed one.
+    const stored: Record<string, unknown> = {
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: deferred.openSettingsStore,
+    })
+
+    showSettings(desktop)
+
+    const change = await screen.findByRole('button', {
+      name: 'Change Note Hotkey',
+    })
+    change.click()
+    const recorder = await screen.findByRole('button', {
+      name: 'Press a combination…',
+    })
+    recorder.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'K',
+        code: 'KeyK',
+        ctrlKey: true,
+        metaKey: true,
+        bubbles: true,
+      }),
+    )
+
+    // The remap is complete before the read lands.
+    await expect.poll(() => chips('Current Note Hotkey')).toEqual([
+      'Ctrl',
+      'Cmd',
+      'K',
+    ])
+
+    deferred.openTheStore()
+    await readLanded()
+
+    expect(chips('Current Note Hotkey')).toEqual(['Ctrl', 'Cmd', 'K'])
   })
 })
 
@@ -363,6 +859,36 @@ function escape(element: HTMLElement) {
   element.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
   )
+}
+
+/** The chips a Hotkey reads as, left to right. */
+function chips(name: string): Array<string | null> {
+  return [...screen.getByRole('group', { name }).querySelectorAll('kbd')].map(
+    (key) => key.textContent,
+  )
+}
+
+/**
+ * The settings read has landed: the Model field — seeded by the very same
+ * read every settings group shares — now holds the stored value. Waited on
+ * rather than on a clock, so a test that acted in the gap knows exactly when
+ * the arriving read has had its say.
+ *
+ * Two couplings ride along, both silent if they break:
+ *
+ * - It stands for "every group has seeded" only because Model Access is the
+ *   last group that seeds from the initial read in SettingsView.tsx: the
+ *   seed callbacks on the shared promise run in mount order, so by the time
+ *   the Model field has been set and rendered, every earlier group's seed
+ *   has run in the same pass. Reordering the groups (or adding a seeding
+ *   group after Model Access) makes this barrier assert too early, silently.
+ * - It waits on the Model field holding the stored value, so every race
+ *   test's store must hold `model: 'gpt-stored'` (or the value passed here).
+ */
+async function readLanded(model = 'gpt-stored'): Promise<void> {
+  await expect
+    .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
+    .toBe(model)
 }
 
 describe('Task Alerts', () => {
@@ -558,27 +1084,10 @@ describe('Model Access', () => {
       modelBaseUrl: 'https://stale.example/v1',
       model: 'gpt-stored',
     }
-    let openTheStore = () => {}
-    const opened = new Promise<void>((resolve) => {
-      openTheStore = resolve
-    })
-
+    const deferred = deferredStore(stored)
     const desktop = fakeDesktop({
       stored,
-      openSettingsStore: async () => {
-        await opened
-        return {
-          async get<T>(key: string) {
-            return stored[key] as T | undefined
-          },
-          async has(key: string) {
-            return key in stored
-          },
-          async set(key: string, value: unknown) {
-            stored[key] = value
-          },
-        }
-      },
+      openSettingsStore: deferred.openSettingsStore,
     })
 
     showSettings(desktop)
@@ -587,13 +1096,8 @@ describe('Model Access', () => {
     const baseUrl = screen.getByLabelText('Base URL') as HTMLInputElement
     fireEvent.change(baseUrl, { target: { value: 'http://localhost:11434/v1' } })
 
-    openTheStore()
-
-    // Model is seeded by the very same read, so its arrival is what says the
-    // read has landed — no waiting on a clock.
-    await expect
-      .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
-      .toBe('gpt-stored')
+    deferred.openTheStore()
+    await readLanded()
 
     expect(baseUrl.value).toBe('http://localhost:11434/v1')
     expect(stored.modelBaseUrl).toBe('http://localhost:11434/v1')

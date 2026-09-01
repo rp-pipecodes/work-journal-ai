@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import type { Desktop } from '@/platform/desktop'
@@ -9,9 +9,9 @@ import {
   keysOfHotkey,
   type HotkeyAction,
   type HotkeyStatus,
-  type HotkeyStatuses,
 } from '@/settings/hotkey'
 import type { SettingsInitialState } from './SettingsInitialState'
+import { useSeededState } from './useSeededState'
 import {
   SettingsAside,
   SettingsGroup,
@@ -27,7 +27,14 @@ export default function HotkeySettings({
   desktop: Desktop
   initialSettings: Promise<SettingsInitialState | null> | null
 }) {
-  const [hotkeys, setHotkeys] = useState<HotkeyStatuses | null>(null)
+  // The pair as the window opens with it, seeded by the read until a remap
+  // the user completed in the gap has set it — the read's pair is captured
+  // before that remap, and must not be put back over it.
+  const [hotkeys, setHotkeys] = useSeededState(
+    initialSettings,
+    (initial) => initial.hotkeys,
+    null,
+  )
   // The reason the last remap of each action was refused, if it was. Cleared by
   // the next one, and kept per action: a Task Hotkey the OS refused says
   // nothing about the Note Hotkey sitting above it.
@@ -37,14 +44,6 @@ export default function HotkeySettings({
   // Which recorder is listening, if either. One at a time: a keystroke can only
   // belong to one of them.
   const [recording, setRecording] = useState<HotkeyAction | null>(null)
-
-  useEffect(() => {
-    if (initialSettings === null) return
-
-    void initialSettings.then((initial) => {
-      if (initial !== null) setHotkeys(initial.hotkeys)
-    })
-  }, [initialSettings])
 
   const remap = useCallback(
     (action: HotkeyAction, next: string) => {
@@ -62,7 +61,7 @@ export default function HotkeySettings({
         },
       )
     },
-    [desktop],
+    [desktop, setHotkeys],
   )
 
   return (

@@ -410,6 +410,41 @@ export function fakeDesktop({
 /** What the fake model says, distinguishable from anything the user wrote. */
 const GENERATED_POST = 'The standup post the model wrote.'
 
+/**
+ * A settings store that does not open until the test says so — the fixture
+ * the settings-race tests are built on. Act on a control while the window's
+ * initial read is still landing, then open the store and let it arrive.
+ */
+export function deferredStore(stored: Record<string, unknown>): {
+  /** Lets the settings read land, once the test has acted. */
+  openTheStore: () => void
+  /** Handed to fakeDesktop: the settings file, opened on release. */
+  openSettingsStore: () => Promise<SettingsStore>
+} {
+  let openTheStore = () => {}
+  const opened = new Promise<void>((resolve) => {
+    openTheStore = resolve
+  })
+
+  return {
+    openTheStore,
+    openSettingsStore: async () => {
+      await opened
+      return {
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          stored[key] = value
+        },
+      }
+    },
+  }
+}
+
 /** What the Keychain says when it will not answer, in the words Rust returns. */
 function refuseALockedKeychain(desktop: FakeDesktop): void {
   if (desktop.keychainRefuses) {
