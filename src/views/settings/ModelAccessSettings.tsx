@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { Desktop } from '@/platform/desktop'
@@ -50,6 +50,13 @@ export default function ModelAccessSettings({
   // back: the field is text the user is still typing, and putting an older
   // value back under the cursor would throw away the keystrokes since.
   const [storeProblem, setStoreProblem] = useState<string | null>(null)
+  // Which of the two fields the user has already typed in. The settings file
+  // opens while this window is on screen, so a whole Base URL can be typed
+  // before the read lands — and a free-text field is where that gap shows in a
+  // way a switch never does. What the user typed is already in the file by
+  // then; seeding the field would put the older value back under the cursor
+  // and leave the two disagreeing with nothing to say so.
+  const typedIn = useRef({ modelBaseUrl: false, model: false })
 
   useEffect(() => {
     if (initialSettings === null) return
@@ -57,8 +64,9 @@ export default function ModelAccessSettings({
     void initialSettings.then((initial) => {
       if (initial === null) return
 
-      setModelBaseUrl(initial.stored.modelBaseUrl)
-      setModel(initial.stored.model)
+      // A field nobody has touched, and only that.
+      if (!typedIn.current.modelBaseUrl) setModelBaseUrl(initial.stored.modelBaseUrl)
+      if (!typedIn.current.model) setModel(initial.stored.model)
     })
   }, [initialSettings])
 
@@ -84,6 +92,7 @@ export default function ModelAccessSettings({
   }
 
   function changeBaseUrl(next: string) {
+    typedIn.current.modelBaseUrl = true
     setModelBaseUrl(next)
     settings.saveModelBaseUrl(next).then(
       () => setStoreProblem(null),
@@ -95,6 +104,7 @@ export default function ModelAccessSettings({
   }
 
   function changeModel(next: string) {
+    typedIn.current.model = true
     setModel(next)
     settings.saveModel(next).then(
       () => setStoreProblem(null),

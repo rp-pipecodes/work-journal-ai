@@ -547,6 +547,58 @@ describe('Model Access', () => {
     await expect.poll(() => desktop.stored.model).toBe('gpt-test')
   })
 
+  it('does not put the stored value back over what the user has typed', async () => {
+    // The settings file opens when this window is already on screen, and a
+    // free-text field is where that gap shows: the user can have typed a whole
+    // Base URL into it before the file answers. Seeding the field then would
+    // put the older value back under the cursor while the file already held
+    // the new one — the two would disagree, and nothing would say so.
+    const stored: Record<string, unknown> = {
+      startAtLogin: false,
+      modelBaseUrl: 'https://stale.example/v1',
+      model: 'gpt-stored',
+    }
+    let openTheStore = () => {}
+    const opened = new Promise<void>((resolve) => {
+      openTheStore = resolve
+    })
+
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => {
+        await opened
+        return {
+          async get<T>(key: string) {
+            return stored[key] as T | undefined
+          },
+          async has(key: string) {
+            return key in stored
+          },
+          async set(key: string, value: unknown) {
+            stored[key] = value
+          },
+        }
+      },
+    })
+
+    showSettings(desktop)
+
+    // The field is on screen at its default while the file is still opening.
+    const baseUrl = screen.getByLabelText('Base URL') as HTMLInputElement
+    fireEvent.change(baseUrl, { target: { value: 'http://localhost:11434/v1' } })
+
+    openTheStore()
+
+    // Model is seeded by the very same read, so its arrival is what says the
+    // read has landed — no waiting on a clock.
+    await expect
+      .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
+      .toBe('gpt-stored')
+
+    expect(baseUrl.value).toBe('http://localhost:11434/v1')
+    expect(stored.modelBaseUrl).toBe('http://localhost:11434/v1')
+  })
+
   it('keeps Clear after a Keychain call that failed on its own', async () => {
     // The key is known to be there: the mount read succeeded. A later call
     // failing says the Keychain is busy or locked right now, not that the key
