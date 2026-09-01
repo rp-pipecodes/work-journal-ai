@@ -5,6 +5,7 @@ import OnScreenContext from '@/components/on-screen-context'
 import type { AppSettings } from '@/settings/app-settings'
 import HistoryView from '@/views/history/HistoryView'
 import SettingsView from '@/views/settings/SettingsView'
+import StandupPostView from '@/views/standup-post/StandupPostView'
 import TasksView from '@/views/tasks/TasksView'
 import SectionSidebar from './SectionSidebar'
 import { SECTIONS } from './sections'
@@ -103,14 +104,21 @@ export default function MainWindow({
         current={section}
         onChoose={setSection}
       />
-      <Section on={section === 'history'} onScreen={showing}>
+      <Section section="history" on={section === 'history'} onScreen={showing}>
         <HistoryView desktop={desktop} journal={journal} />
       </Section>
-      <Section on={section === 'tasks'} onScreen={showing}>
+      <Section section="tasks" on={section === 'tasks'} onScreen={showing}>
         <TasksView desktop={desktop} journal={journal} clock={clock} />
       </Section>
-      <Section on={section === 'settings'} onScreen={showing}>
+      <Section section="settings" on={section === 'settings'} onScreen={showing}>
         <SettingsView desktop={desktop} settings={settings} journal={journal} />
+      </Section>
+      <Section
+        section="standup-post"
+        on={section === 'standup-post'}
+        onScreen={showing}
+      >
+        <StandupPostView desktop={desktop} journal={journal} clock={clock} />
       </Section>
     </div>
   )
@@ -133,10 +141,13 @@ export default function MainWindow({
  * would push its own right-hand edge off the window.
  */
 function Section({
+  section,
   on,
   onScreen,
   children,
 }: {
+  /** The shared section name, useful to the accessibility/test surface. */
+  section: MainSection
   /** Whether this is the section showing. */
   on: boolean
   /** Where the window keeps the section showing, to hand it the focus. */
@@ -145,7 +156,12 @@ function Section({
 }) {
   return (
     <OnScreenContext.Provider value={on}>
-      <div hidden={!on} ref={on ? onScreen : null} className="min-w-0 flex-1">
+      <div
+        hidden={!on}
+        ref={on ? onScreen : null}
+        data-main-section={section}
+        className="min-w-0 flex-1"
+      >
         {children}
       </div>
     </OnScreenContext.Provider>

@@ -132,7 +132,7 @@ The independently stored combination and registration status of either Note Hotk
 _Avoid_: Shortcut setting, key binding
 
 **Tray Menu**:
-The menu bar icon's menu. The Entry Point that always works, offering both New Note and New Task so it is the fallback when either configured combination is unavailable. The way into the Main Window as well, and the one Entry Point that names which section to land on — View Notes, View Tasks and Settings each open the Main Window on their section. Also the one place the journal is read back without opening a window: Yesterday's Digest is copied from here.
+The menu bar icon's menu. The Entry Point that always works, offering both New Note and New Task so it is the fallback when either configured combination is unavailable. The way into the Main Window as well, and the one Entry Point that names which section to land on — View Notes, View Tasks, Settings and Write Standup Post… each open the Main Window on their section. Write Standup Post… opens the Standup Post section without spending a call. Also the one place the journal is read back without opening a window: Yesterday's Digest is copied from here.
 _Avoid_: Menu bar, status item
 
 **Tray Count**:
@@ -167,7 +167,7 @@ _Avoid_: Updated at, modified, revision
 ## Reading back
 
 **Main Window**:
-The one window the journal is read and configured in: History, Tasks View and Settings as sections of a sidebar, exactly one of them showing. An Entry Point that names a section decides which; anything that names none lands on History. A section holds whatever the user did to it while another is showing — its Filter, its half-typed edits, its unanswered questions — but takes everything it put on the screen off with it, so nothing a hidden section drew stands over the section that is showing. The window itself is gone when closed, so the next one opens fresh. While it is open the app has a Dock icon and its app menu; when it closes the app is the menu bar glyph again.
+The one window the journal is read and configured in: History, Tasks View, Settings and Standup Post as sections of a sidebar, exactly one of them showing. An Entry Point that names a section decides which; anything that names none lands on History. A section holds whatever the user did to it while another is showing — its Filter, its half-typed edits, its unanswered questions — but takes everything it put on the screen off with it, so nothing a hidden section drew stands over the section that is showing. The window itself is gone when closed, so the next one opens fresh. While it is open the app has a Dock icon and its app menu; when it closes the app is the menu bar glyph again.
 _Avoid_: Main view, dashboard, home, shell
 
 **History**:

@@ -56,13 +56,13 @@ describe('the Main Window', () => {
       within(sidebar())
         .getAllByRole('button')
         .map((button) => button.textContent),
-    ).toEqual(['History', 'Tasks', 'Settings'])
+    ).toEqual(['History', 'Tasks', 'Settings', 'Standup Post'])
   })
 
   it('puts every section a Tab away, as an ordinary button', async () => {
     await showMainWindow({ captured: [MONDAY] })
 
-    for (const name of ['History', 'Tasks', 'Settings']) {
+    for (const name of ['History', 'Tasks', 'Settings', 'Standup Post']) {
       const section = within(sidebar()).getByRole('button', { name })
       // Nothing takes the section out of the tab order or rebinds a key to
       // reach it: the sidebar is a short list of named places.
@@ -96,6 +96,12 @@ describe('the section the Main Window opens on', () => {
     expect(
       within(sidebar()).getByRole('button', { name: 'Settings' }).getAttribute('aria-current'),
     ).toBe('page')
+  })
+
+  it('lands on Standup Post when the Entry Point names it', async () => {
+    await showMainWindow({ captured: [MONDAY], section: 'standup-post' })
+
+    await showsStandupPost()
   })
 
   it('is History when the Entry Point named none', async () => {
@@ -217,6 +223,27 @@ describe('switching sections', () => {
     expect(screen.getByText('Monday')).toBeTruthy()
   })
 
+  it('does not touch History’s Filter when Standup Post is opened', async () => {
+    const user = userEvent.setup()
+    await showMainWindow({
+      captured: [MONDAY, { at: '2026-03-11T10:00:00', body: 'Wednesday' }],
+    })
+
+    await user.click(days())
+    await user.click(await dayCell('2026-03-09'))
+    await user.click(await dayCell('2026-03-11'))
+    const narrowed = days().textContent
+
+    await user.click(
+      within(sidebar()).getByRole('button', { name: 'Standup Post' }),
+    )
+    await showsStandupPost()
+    await user.click(within(sidebar()).getByRole('button', { name: 'History' }))
+    await showsHistory()
+
+    expect(days().textContent).toBe(narrowed)
+  })
+
   it('leaves a Nudge waiting on History, with nothing on the sidebar', async () => {
     const user = userEvent.setup()
     const { desktop } = await showMainWindow({
@@ -231,7 +258,7 @@ describe('switching sections', () => {
     // Nothing on screen says so while Tasks View is showing: the sidebar is a
     // list of places, not a set of counters.
     expect(nudge()).toBeUndefined()
-    expect(sidebar().textContent).toBe('HistoryTasksSettings')
+    expect(sidebar().textContent).toBe('HistoryTasksSettingsStandup Post')
 
     await user.click(within(sidebar()).getByRole('button', { name: 'History' }))
     await expect.poll(() => nudge()?.textContent).toContain('A new Note on')
@@ -661,6 +688,8 @@ async function showMainWindow({
     await screen.findByRole('navigation', { name: 'Sections' })
   } else if (section === 'settings') {
     await screen.findByText('Note Hotkey')
+  } else if (section === 'standup-post') {
+    await screen.findByRole('heading', { name: 'Standup Post' })
   } else {
     await firstListShown(captured.length)
   }
@@ -703,6 +732,12 @@ async function showsSettings(): Promise<void> {
   await expect.poll(sectionOnScreen).toBe('settings')
 }
 
+/** Standup Post is ready once its date header is on screen. */
+async function showsStandupPost(): Promise<void> {
+  await screen.findByRole('heading', { name: 'Standup Post' })
+  await expect.poll(sectionOnScreen).toBe('standup-post')
+}
+
 /**
  * Which section is on screen, read the way a screen reader would: the section
  * that is not showing is hidden rather than unmounted, so exactly one of the
@@ -710,6 +745,11 @@ async function showsSettings(): Promise<void> {
  * fails if that is ever untrue.
  */
 function sectionOnScreen(): MainSection {
+  const visible = [...document.querySelectorAll<HTMLElement>('[data-main-section]')].find(
+    (section) => !section.hidden,
+  )
+  if (visible !== undefined) return visible.dataset.mainSection as MainSection
+
   const header = screen.queryByRole('banner')
   if (header === null) return 'settings'
 

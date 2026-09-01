@@ -32,20 +32,23 @@ export const MAIN_WINDOW = 'main'
 /**
  * The sections of the Main Window, named by whatever asked for one: the Tray
  * Menu and a clicked Task Alert both say which they mean. Constants rather than
- * three bare members of the union below, so that a section has a name of its
+ * four bare members of the union below, so that a section has a name of its
  * own on this side too and a drift is reported against it — must match
- * `HISTORY_SECTION`, `TASKS_SECTION` and `SETTINGS_SECTION` in
+ * `HISTORY_SECTION`, `TASKS_SECTION`, `STANDUP_POST_SECTION` and
+ * `SETTINGS_SECTION` in
  * `src-tauri/src/lib.rs`, as `src/platform/desktop-rust.test.ts` checks, and
  * the sidebar's own list in `src/views/main/sections.ts`.
  */
 export const HISTORY_SECTION = 'history'
 export const TASKS_SECTION = 'tasks'
+export const STANDUP_POST_SECTION = 'standup-post'
 export const SETTINGS_SECTION = 'settings'
 
-/** A section of the Main Window: one of the three above and nothing else. */
+/** A section of the Main Window: one of the four above and nothing else. */
 export type MainSection =
   | typeof HISTORY_SECTION
   | typeof TASKS_SECTION
+  | typeof STANDUP_POST_SECTION
   | typeof SETTINGS_SECTION
 
 /**
