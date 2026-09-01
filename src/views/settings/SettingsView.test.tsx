@@ -5,7 +5,6 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import {
   deferredStore,
   fakeDesktop,
-  readLanded,
   type FakeDesktop,
 } from '@/platform/testing/desktop'
 import ThemeProvider from '@/components/ThemeProvider'
@@ -716,6 +715,29 @@ function chips(name: string): Array<string | null> {
   return [...screen.getByRole('group', { name }).querySelectorAll('kbd')].map(
     (key) => key.textContent,
   )
+}
+
+/**
+ * The settings read has landed: the Model field — seeded by the very same
+ * read every settings group shares — now holds the stored value. Waited on
+ * rather than on a clock, so a test that acted in the gap knows exactly when
+ * the arriving read has had its say.
+ *
+ * Two couplings ride along, both silent if they break:
+ *
+ * - It stands for "every group has seeded" only because Model Access is the
+ *   last group that seeds from the initial read in SettingsView.tsx: the
+ *   seed callbacks on the shared promise run in mount order, so by the time
+ *   the Model field has been set and rendered, every earlier group's seed
+ *   has run in the same pass. Reordering the groups (or adding a seeding
+ *   group after Model Access) makes this barrier assert too early, silently.
+ * - It waits on the Model field holding the stored value, so every race
+ *   test's store must hold `model: 'gpt-stored'` (or the value passed here).
+ */
+async function readLanded(model = 'gpt-stored'): Promise<void> {
+  await expect
+    .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
+    .toBe(model)
 }
 
 describe('Task Alerts', () => {

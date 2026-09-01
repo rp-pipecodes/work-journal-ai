@@ -1,5 +1,3 @@
-import { screen } from '@testing-library/react'
-import { expect } from 'vitest'
 import type { CalendarEvent, SqlDriver, TaskAlert } from '../../journal/journal'
 import type { HotkeyStatuses } from '../../settings/hotkey'
 import type { SettingsStore } from '../../settings/settings'
@@ -445,18 +443,6 @@ export function deferredStore(stored: Record<string, unknown>): {
       }
     },
   }
-}
-
-/**
- * The settings read has landed: the Model field — seeded by the very same
- * read every settings group shares — now holds the stored value. Waited on
- * rather than on a clock, so a test that acted in the gap knows exactly when
- * the arriving read has had its say.
- */
-export async function readLanded(model = 'gpt-stored'): Promise<void> {
-  await expect
-    .poll(() => (screen.getByLabelText('Model') as HTMLInputElement).value)
-    .toBe(model)
 }
 
 /** What the Keychain says when it will not answer, in the words Rust returns. */
