@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useOnScreenToast } from '@/components/on-screen-toast'
 import type {
@@ -27,33 +27,50 @@ export default function UpdateSettings({ desktop }: { desktop: Desktop }) {
   // after the press, and the answer has to outlive it.
   const [said, setSaid] = useState<string | null>(null)
   const says = useOnScreenToast()
-  // The restart is asked for once. StrictMode runs an effect twice, and a
-  // second request would be made against a process already on its way out.
-  // Never put back: no stage leads to `installed` a second time.
-  const restarting = useRef(false)
 
   /**
-   * The restart, once the installed line is on screen and not before. It runs
-   * here rather than beside the install it follows because it takes this
+   * The restart, once the installed line has been on screen and not before. It
+   * runs here rather than beside the install it follows because it takes this
    * webview with it: a state set and a process ended in the same breath is a
    * line nobody ever reads, which is exactly what this group promised to say.
+   *
+   * A commit is not a paint, and an effect is not the end of the wait. React
+   * makes no promise that the browser has drawn anything by the time this
+   * runs — an effect caused by an interaction may run before the paint — so
+   * the restart waits two frames. The first callback runs before the next
+   * paint, and the second only after that paint has happened, which is the
+   * cheapest boundary that means "the user has had the chance to see it".
+   *
+   * Both frames are cancelled if this is torn down: the window can close in
+   * the moment between the install and the paint, and ending the process from
+   * under whoever opened one next is not this group's to do once nobody is
+   * reading it.
    */
   useEffect(() => {
-    if (stage.at !== 'installed' || restarting.current) return
+    if (stage.at !== 'installed') return
 
-    restarting.current = true
     const update = stage.update
-    desktop.restart().catch((error: unknown) => {
-      console.error('could not restart into the update', error)
-      // The install still took, so this is not a way back to the press that
-      // made it: offering the install again would write the same release over
-      // itself while the line says the opposite. What is left is a quit, and
-      // the app cannot make it on the user's behalf.
-      const answer = `Work Journal ${update.version} is installed. Quit and open it again to use it.`
-      setStage({ at: 'quit-needed', update })
-      setSaid(answer)
-      says.failure(answer)
+    let painted = 0
+    const committed = requestAnimationFrame(() => {
+      painted = requestAnimationFrame(() => {
+        desktop.restart().catch((error: unknown) => {
+          console.error('could not restart into the update', error)
+          // The install still took, so this is not a way back to the press
+          // that made it: offering the install again would write the same
+          // release over itself while the line says the opposite. What is
+          // left is a quit, and the app cannot make it on the user's behalf.
+          const answer = `Work Journal ${update.version} is installed. Quit and open it again to use it.`
+          setStage({ at: 'quit-needed', update })
+          setSaid(answer)
+          says.failure(answer)
+        })
+      })
     })
+
+    return () => {
+      cancelAnimationFrame(committed)
+      cancelAnimationFrame(painted)
+    }
   }, [desktop, says, stage])
 
   /** Looks once, and says either the version waiting or that there is none. */

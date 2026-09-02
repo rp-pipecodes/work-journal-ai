@@ -782,6 +782,15 @@ describe('Export', () => {
 })
 
 describe('Updates', () => {
+  /** Runs the one frame callback waiting, as a browser would at a paint. */
+  function runNextFrame(queued: FrameRequestCallback[]) {
+    const run = queued.shift()
+    if (run === undefined) {
+      throw new Error('The view asked for no frame before restarting.')
+    }
+    run(0)
+  }
+
   /** The line the Updates group keeps saying, found inside that group alone. */
   function updateStatus(): string | null | undefined {
     return screen
@@ -897,6 +906,97 @@ describe('Updates', () => {
     // Asked for once, and only after the install it follows.
     expect(desktop.restarts).toBe(1)
     expect(desktop.updatesInstalled).toBe(1)
+  })
+
+  it('lets a paint happen before restarting, not just a DOM write', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.availableUpdate = { version: '0.9.0' }
+
+    // The frames the view asks for, held rather than run. jsdom paints
+    // nothing, so what can be checked here is not the pixels but the boundary:
+    // that the restart waits for the moment a paint happens at, rather than
+    // going in the same breath as the write that put the line in the DOM.
+    const queued: FrameRequestCallback[] = []
+    const realFrames = window.requestAnimationFrame
+    window.requestAnimationFrame = ((run: FrameRequestCallback) => {
+      queued.push(run)
+      return queued.length
+    }) as typeof window.requestAnimationFrame
+
+    try {
+      showSettings(desktop)
+
+      ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+      ;(await screen.findByRole('button', { name: 'Install 0.9.0' })).click()
+
+      await expect
+        .poll(updateStatus)
+        .toBe('Work Journal 0.9.0 is installed. Restarting…')
+
+      // In the DOM is not yet on screen: nothing has been painted.
+      expect(desktop.restarts).toBe(0)
+
+      // A frame callback runs before the next paint, so the first one is
+      // still too early — what it can see, the user cannot.
+      runNextFrame(queued)
+      expect(desktop.restarts).toBe(0)
+
+      // The second runs after that paint. The line has been on screen, and
+      // the process may go.
+      runNextFrame(queued)
+      expect(desktop.restarts).toBe(1)
+    } finally {
+      window.requestAnimationFrame = realFrames
+    }
+  })
+
+  it('does not restart once Settings has gone away', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.availableUpdate = { version: '0.9.0' }
+
+    // Frames the view asks for and frames it takes back, both held here, so
+    // that a cancellation is something this test can actually observe.
+    const queued = new Map<number, FrameRequestCallback>()
+    let asked = 0
+    const realRequest = window.requestAnimationFrame
+    const realCancel = window.cancelAnimationFrame
+    window.requestAnimationFrame = ((run: FrameRequestCallback) => {
+      asked += 1
+      queued.set(asked, run)
+      return asked
+    }) as typeof window.requestAnimationFrame
+    window.cancelAnimationFrame = ((frame: number) => {
+      queued.delete(frame)
+    }) as typeof window.cancelAnimationFrame
+
+    try {
+      showSettings(desktop)
+
+      ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+      ;(await screen.findByRole('button', { name: 'Install 0.9.0' })).click()
+
+      await expect
+        .poll(updateStatus)
+        .toBe('Work Journal 0.9.0 is installed. Restarting…')
+
+      // The Main Window closes in the moment between the install and the
+      // paint. Ending the process from under whoever opened it next is not
+      // this group's to do once nobody is reading it.
+      cleanup()
+      // Drained rather than iterated: the second frame is asked for by the
+      // first, so a snapshot taken up front would never reach the callback
+      // that actually restarts — and this test would prove nothing.
+      for (let frame = 0; queued.size > 0 && frame < 10; frame += 1) {
+        const [asked, run] = [...queued.entries()][0]
+        queued.delete(asked)
+        run(0)
+      }
+
+      expect(desktop.restarts).toBe(0)
+    } finally {
+      window.requestAnimationFrame = realRequest
+      window.cancelAnimationFrame = realCancel
+    }
   })
 
   it('says to quit by hand when the restart itself will not happen', async () => {
