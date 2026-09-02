@@ -26,6 +26,21 @@ describe('the Theme', () => {
   it('follows the system until the user has chosen', async () => {
     expect(await createAppSettings(fakeDesktop()).loadTheme()).toBe('system')
   })
+
+  it('records a Theme whose announcement could not be sent', async () => {
+    // The emit is what keeps the other windows honest, not what saves — a
+    // failed one leaves every window repainted and the file written, and is
+    // logged rather than raised, or the saver would be told a Theme was
+    // refused that in truth took.
+    const desktop = fakeDesktop()
+    desktop.announceTheme = () => Promise.reject(new Error('the bus is gone'))
+    const settings = createAppSettings(desktop)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await settings.saveTheme('dark')
+
+    expect(await settings.loadTheme()).toBe('dark')
+  })
 })
 
 describe('start at login', () => {
@@ -81,6 +96,20 @@ describe('importing meetings', () => {
 
     expect(stored.importMeetings).toBe(false)
     expect(stored.importCalendars).toEqual([])
+  })
+
+  it('says a save took even when the announcement could not be sent', async () => {
+    // The window that sweeps catches up at its next read; the user who
+    // pressed is told what the file holds, not that an emit hiccuped.
+    const desktop = fakeDesktop()
+    desktop.announceImportChanged = () =>
+      Promise.reject(new Error('the window is gone'))
+    const settings = createAppSettings(desktop)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await settings.saveImportMeetings(true)
+
+    expect((await settings.load()).importMeetings).toBe(true)
   })
 })
 

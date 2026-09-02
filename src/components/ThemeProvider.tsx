@@ -106,9 +106,16 @@ export default function ThemeProvider({
       // A Theme the user asked for outranks one still being read off the disk,
       // so a toggle pressed in the first moments repaints rather than waiting.
       setKnown(true)
-      void settings.saveTheme(next).catch((error: unknown) => {
+      // The write is the caller's to describe, not this provider's — it hands
+      // the promise back, rejection and all. A caller that ignores it must
+      // still leave the rejection heard, so the log is attached beside the
+      // caller rather than in front of it: a catch here that swallowed the
+      // error would turn the failure into a success for whoever is listening.
+      const saving = settings.saveTheme(next)
+      saving.catch((error: unknown) => {
         console.error('could not remember the Theme', error)
       })
+      return saving
     },
     [settings],
   )

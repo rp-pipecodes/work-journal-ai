@@ -68,6 +68,20 @@ export interface AppSettings {
   saveStandupPrompt(standupPrompt: string): Promise<void>
 }
 
+/**
+ * An announcement that keeps the other windows honest, sent beside the write
+ * it speaks for rather than as part of it. It is best-effort: what the file
+ * holds is what was saved, and a failed emit — a window gone while it was
+ * sent, a bus that hiccuped — is logged rather than allowed to name a saved
+ * setting as refused. The window it was meant for catches up at its next
+ * read: later by moments, but agreeing with the file.
+ */
+function emitChange(announcing: Promise<void>): void {
+  void announcing.catch((error: unknown) => {
+    console.error('could not announce the change to the other windows', error)
+  })
+}
+
 export function createAppSettings(desktop: Desktop): AppSettings {
   // Opened once per window and shared: every setting is in the one file, and
   // the store is what makes a write reach the disk.
@@ -88,7 +102,7 @@ export function createAppSettings(desktop: Desktop): AppSettings {
 
     async saveTheme(theme) {
       await writeTheme(await store(), theme)
-      await desktop.announceTheme(theme)
+      emitChange(desktop.announceTheme(theme))
     },
 
     onThemeChanged: (handle) => desktop.onThemeChanged(handle),
@@ -104,12 +118,12 @@ export function createAppSettings(desktop: Desktop): AppSettings {
 
     async saveImportMeetings(importMeetings) {
       await writeImportMeetings(await store(), importMeetings)
-      await desktop.announceImportChanged()
+      emitChange(desktop.announceImportChanged())
     },
 
     async saveImportCalendars(importCalendars) {
       await writeImportCalendars(await store(), importCalendars)
-      await desktop.announceImportChanged()
+      emitChange(desktop.announceImportChanged())
     },
 
     async saveModelBaseUrl(modelBaseUrl) {

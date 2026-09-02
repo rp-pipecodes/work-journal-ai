@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useOnScreenToast } from '@/components/on-screen-toast'
 import type { Desktop } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 import type { SettingsInitialState } from './SettingsInitialState'
 import { useSeededState } from './useSeededState'
+import { saySettled } from './saySettled'
 import {
   SettingsAside,
   SettingsGroup,
@@ -64,6 +66,11 @@ export default function ModelAccessSettings({
   // back: the field is text the user is still typing, and putting an older
   // value back under the cursor would throw away the keystrokes since.
   const [unsaved, setUnsaved] = useState({ modelBaseUrl: false, model: false })
+  // A field saves on every keystroke into it, and the write is otherwise
+  // silent; the toast with the field's name is where each save is heard. The
+  // toast replaces itself rather than stacking — one per field, not one per
+  // keystroke.
+  const says = useOnScreenToast()
 
   // Asked on its own rather than with the settings the store holds: a locked
   // Keychain is an ordinary answer here, and it must not take the rest of the
@@ -75,15 +82,15 @@ export default function ModelAccessSettings({
         setKeychainProblem(null)
       },
       (error: unknown) => {
-        refuse('could not ask the Keychain about the API Key', error)
+        console.error('could not ask the Keychain about the API Key', error)
+        refuseKeychain(error)
       },
     )
   }, [desktop])
 
   /** The Keychain would not answer, and Settings says which one of it did. */
-  function refuse(what: string, error: unknown): void {
-    console.error(what, error)
-    setKeychainProblem(`${KEYCHAIN_REFUSED} macOS said: ${saidBy(error)}`)
+  function refuseKeychain(error: unknown): void {
+    setKeychainProblem(keychainRefusedLine(error))
   }
 
   /** How the last write to one field went, and only that field. */
@@ -95,24 +102,26 @@ export default function ModelAccessSettings({
 
   function changeBaseUrl(next: string) {
     setModelBaseUrl(next)
-    settings.saveModelBaseUrl(next).then(
-      () => record('modelBaseUrl', false),
-      (error: unknown) => {
-        console.error('could not change where the model is', error)
-        record('modelBaseUrl', true)
-      },
-    )
+    saySettled(says, settings.saveModelBaseUrl(next), {
+      id: 'model-base-url',
+      saved: 'Base URL saved.',
+      couldNot: 'Could not save the Base URL.',
+      what: 'could not change where the model is',
+      onSaved: () => record('modelBaseUrl', false),
+      onRefused: () => record('modelBaseUrl', true),
+    })
   }
 
   function changeModel(next: string) {
     setModel(next)
-    settings.saveModel(next).then(
-      () => record('model', false),
-      (error: unknown) => {
-        console.error('could not change which model is asked', error)
-        record('model', true)
-      },
-    )
+    saySettled(says, settings.saveModel(next), {
+      id: 'model',
+      saved: 'Model saved.',
+      couldNot: 'Could not save the Model.',
+      what: 'could not change which model is asked',
+      onSaved: () => record('model', false),
+      onRefused: () => record('model', true),
+    })
   }
 
   /** Hands the key to the Keychain, and forgets it here the moment it lands. */
@@ -120,16 +129,18 @@ export default function ModelAccessSettings({
     const key = typedKey.trim()
     if (key === '') return
 
-    desktop.saveApiKey(key).then(
-      () => {
+    saySettled(says, desktop.saveApiKey(key), {
+      id: 'api-key',
+      saved: 'API Key saved.',
+      couldNot: 'Could not save the API Key.',
+      what: 'could not put the API Key in the Keychain',
+      onSaved: () => {
         setTypedKey('')
         setKeySet(true)
         setKeychainProblem(null)
       },
-      (error: unknown) => {
-        refuse('could not put the API Key in the Keychain', error)
-      },
-    )
+      onRefused: refuseKeychain,
+    })
   }
 
   /**
@@ -137,15 +148,17 @@ export default function ModelAccessSettings({
    * so this is the only way out of one.
    */
   function clearKey() {
-    desktop.clearApiKey().then(
-      () => {
+    saySettled(says, desktop.clearApiKey(), {
+      id: 'api-key',
+      saved: 'API Key removed.',
+      couldNot: 'Could not remove the API Key.',
+      what: 'could not take the API Key out of the Keychain',
+      onSaved: () => {
         setKeySet(false)
         setKeychainProblem(null)
       },
-      (error: unknown) => {
-        refuse('could not take the API Key out of the Keychain', error)
-      },
-    )
+      onRefused: refuseKeychain,
+    })
   }
 
   return (
@@ -245,10 +258,12 @@ function keyStatus(keySet: boolean): string {
 /**
  * A locked Keychain, or a prompt the user denied. Routine rather than broken —
  * the same treatment Meeting Import gives a refused calendar grant — and every
- * other setting in this window carries on working.
+ * other setting in this window carries on working. Said with what macOS said,
+ * so a locked keychain and a denied prompt do not read the same.
  */
-const KEYCHAIN_REFUSED =
-  'macOS is not letting Work Journal reach your Keychain, so the API Key cannot be read or changed. Unlock your login keychain in Keychain Access, or allow Work Journal when macOS asks, and open Settings again.'
+function keychainRefusedLine(error: unknown): string {
+  return `macOS is not letting Work Journal reach your Keychain, so the API Key cannot be read or changed. Unlock your login keychain in Keychain Access, or allow Work Journal when macOS asks, and open Settings again. macOS said: ${saidBy(error)}`
+}
 
 /**
  * What the far side said, whichever side that was: a Tauri command rejects

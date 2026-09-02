@@ -1,8 +1,10 @@
 import { useCallback, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
+import { useOnScreenToast } from '@/components/on-screen-toast'
 import type { Desktop } from '@/platform/desktop'
 import {
+  describeHotkeyAction,
   describeUnavailableHotkey,
   hotkeyForKeystroke,
   HOTKEY_ACTIONS,
@@ -12,6 +14,7 @@ import {
 } from '@/settings/hotkey'
 import type { SettingsInitialState } from './SettingsInitialState'
 import { useSeededState } from './useSeededState'
+import { saySettled } from './saySettled'
 import {
   SettingsAside,
   SettingsGroup,
@@ -44,24 +47,34 @@ export default function HotkeySettings({
   // Which recorder is listening, if either. One at a time: a keystroke can only
   // belong to one of them.
   const [recording, setRecording] = useState<HotkeyAction | null>(null)
+  // A remap is a save with no other feedback than the chips changing: the
+  // toast is where the user hears that the combination was taken, or why it
+  // was refused.
+  const says = useOnScreenToast()
 
   const remap = useCallback(
     (action: HotkeyAction, next: string) => {
       setRecording(null)
-      desktop.setHotkey(action, next).then(
-        (status) => {
+      // The setting's own name — `Note Hotkey`, not the bare action — the
+      // same name a refusal below is said against.
+      const { label } = describeHotkeyAction(action)
+      saySettled(says, desktop.setHotkey(action, next), {
+        id: `hotkey-${action}`,
+        saved: `${label} saved.`,
+        couldNot: `Could not save the ${label}.`,
+        onSaved: (status) => {
           setHotkeys(status)
           setHotkeyProblem((problems) => ({ ...problems, [action]: undefined }))
         },
-        (reason: unknown) => {
+        onRefused: (reason: unknown) => {
           setHotkeyProblem((problems) => ({
             ...problems,
             [action]: describeUnavailableHotkey(action, next, String(reason)),
           }))
         },
-      )
+      })
     },
-    [desktop, setHotkeys],
+    [desktop, says, setHotkeys],
   )
 
   return (
