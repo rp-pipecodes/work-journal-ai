@@ -953,7 +953,7 @@ describe('save confirmations', () => {
       .toBe('Could not save the Theme.')
   })
 
-  it('confirms a Hotkey remap', async () => {
+  it('confirms a Hotkey remap, and a refused one, by the setting’s own name', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
 
     showSettings(desktop)
@@ -977,7 +977,30 @@ describe('save confirmations', () => {
 
     await expect
       .poll(() => toasts().join(' | '))
-      .toBe('note Hotkey saved.')
+      .toBe('Note Hotkey saved.')
+
+    // The refusal names it the same way, against the right action. The
+    // completed remap re-rendered the row, so the Change button is found
+    // again rather than pressed where it used to be.
+    desktop.setHotkey = () =>
+      Promise.reject(new Error('it is already the Task Hotkey'))
+    screen.getByRole('button', { name: 'Change Note Hotkey' }).click()
+    const listening = await screen.findByRole('button', {
+      name: 'Press a combination…',
+    })
+    listening.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'L',
+        code: 'KeyL',
+        ctrlKey: true,
+        metaKey: true,
+        bubbles: true,
+      }),
+    )
+
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Could not save the Note Hotkey.')
   })
 
   it('confirms an API Key put in the Keychain, and one taken out', async () => {

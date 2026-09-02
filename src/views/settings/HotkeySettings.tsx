@@ -4,6 +4,7 @@ import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import { useOnScreenToast } from '@/components/on-screen-toast'
 import type { Desktop } from '@/platform/desktop'
 import {
+  describeHotkeyAction,
   describeUnavailableHotkey,
   hotkeyForKeystroke,
   HOTKEY_ACTIONS,
@@ -53,18 +54,21 @@ export default function HotkeySettings({
   const remap = useCallback(
     (action: HotkeyAction, next: string) => {
       setRecording(null)
+      // The setting's own name — `Note Hotkey`, not the bare action — the
+      // same name a refusal below is said against.
+      const { label } = describeHotkeyAction(action)
       desktop.setHotkey(action, next).then(
         (status) => {
           setHotkeys(status)
           setHotkeyProblem((problems) => ({ ...problems, [action]: undefined }))
-          says.success(`${action} Hotkey saved.`, action)
+          says.success(`${label} saved.`, action)
         },
         (reason: unknown) => {
           setHotkeyProblem((problems) => ({
             ...problems,
             [action]: describeUnavailableHotkey(action, next, String(reason)),
           }))
-          says.failure(`Could not save the ${action} Hotkey.`, action)
+          says.failure(`Could not save the ${label}.`, action)
         },
       )
     },
