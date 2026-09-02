@@ -13,8 +13,10 @@ import { LogicalSize } from '@tauri-apps/api/dpi'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
+import { relaunch } from '@tauri-apps/plugin-process'
 import Database from '@tauri-apps/plugin-sql'
 import { load } from '@tauri-apps/plugin-store'
+import { check, type Update } from '@tauri-apps/plugin-updater'
 import type { CalendarEvent, TaskAlert } from '@/journal/journal'
 import type { HotkeyAction, HotkeyStatuses } from '@/settings/hotkey'
 import type { Theme } from '@/settings/theme'
@@ -36,6 +38,7 @@ import {
   taskCreationWindowHeight,
   TASKS_CHANGED_EVENT,
   THEME_CHANGED_EVENT,
+  type AvailableUpdate,
   type CalendarAccess,
   type CalendarInfo,
   type Desktop,
@@ -47,6 +50,12 @@ import {
 } from './desktop'
 
 export function createTauriDesktop(): Desktop {
+  // What the last check found, kept until it is installed or a later check
+  // replaces it. The plugin answers with the update itself rather than with a
+  // version, and installing means installing that one — the release the user
+  // was shown and pressed for, not whatever is newest by the time they press.
+  let found: Update | null = null
+
   return {
     // Outside Tauri — a bare `vite dev` — there is no current window to ask.
     windowLabel() {
@@ -237,6 +246,37 @@ export function createTauriDesktop(): Desktop {
     // to Rust, and the answer comes back as one shape, success or failure.
     generateStandupPost: (request: StandupPostRequest) =>
       invoke<StandupPostResponse>('generate_standup_post', { request }),
+
+    async checkForUpdate(): Promise<AvailableUpdate | null> {
+      found = await check()
+
+      return found === null ? null : { version: found.version }
+    },
+
+    async installUpdate(report) {
+      if (found === null) {
+        throw new Error('Nothing has been found to install.')
+      }
+
+      // The plugin reports a length once and then a chunk at a time; what the
+      // user is waiting on is the running total, so it is kept here.
+      let downloaded = 0
+      let total: number | null = null
+
+      await found.downloadAndInstall((event) => {
+        if (event.event === 'Started') {
+          total = event.data.contentLength ?? null
+        } else if (event.event === 'Progress') {
+          downloaded += event.data.chunkLength
+        }
+        report({ downloaded, total })
+      })
+    },
+
+    // macOS leaves the old binary running: the installed version is only on
+    // screen once the app has been restarted into it. Asked for separately,
+    // and last — this takes the webview that asked.
+    restart: () => relaunch(),
 
     showTrayCount: (title) => invoke('show_tray_count', { title }),
   }

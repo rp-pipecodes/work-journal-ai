@@ -13,6 +13,7 @@ import { createAppSettings } from '@/settings/app-settings'
 import type { Journal, JournalExport } from '@/journal/journal'
 import { DEFAULT_STANDUP_PROMPT } from '@/settings/settings'
 import SettingsView from './SettingsView'
+import { holdFrames } from './testing/frames'
 
 // Settings as the user meets it. The one seam that cannot be driven from Node:
 // what a control reads, and what pressing it means, are decided in the view, so
@@ -778,6 +779,241 @@ describe('Export', () => {
     const announced = document.querySelector('p[role="status"]')
     expect(announced?.getAttribute('aria-live')).toBe('polite')
     expect(announced?.textContent).toMatch(/Exported 1 Note to/)
+  })
+})
+
+describe('Updates', () => {
+  /** The line the Updates group keeps saying, found inside that group alone. */
+  function updateStatus(): string | null | undefined {
+    return screen
+      .getByRole('heading', { name: 'Updates' })
+      .closest('section')
+      ?.querySelector('p[role="status"]')?.textContent
+  }
+
+  it('says the build is current when nothing newer has been released', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+
+    showSettings(desktop)
+
+    const button = await screen.findByRole('button', {
+      name: 'Check for updates',
+    })
+    button.click()
+
+    await expect.poll(updateStatus).toBe('Work Journal is up to date.')
+    // Nothing to install, so the control stays the one that looks again.
+    expect(
+      screen.getByRole('button', { name: 'Check for updates' }),
+    ).toBeTruthy()
+    expect(desktop.updatesInstalled).toBe(0)
+  })
+
+  it('names the release found and installs that one when pressed', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.availableUpdate = { version: '0.9.0' }
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+
+    // The version is named before anything is downloaded: what is about to
+    // replace the running build is worth reading first.
+    await expect
+      .poll(updateStatus)
+      .toBe('Work Journal 0.9.0 is available.')
+    const install = await screen.findByRole('button', {
+      name: 'Install 0.9.0',
+    })
+
+    install.click()
+
+    await expect
+      .poll(() => desktop.updatesInstalled)
+      .toBe(1)
+    await expect
+      .poll(updateStatus)
+      .toBe('Work Journal 0.9.0 is installed. Restarting…')
+    await expect.poll(() => desktop.restarts).toBe(1)
+    // The toast says it too, in its own layer.
+    expect(
+      document.querySelector('[data-sonner-toaster]')?.textContent,
+    ).toMatch(/0\.9\.0 is installed/)
+  })
+
+  it('says so when nothing could be reached, and offers to look again', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.updateCheckFails = true
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+
+    await expect.poll(updateStatus).toBe('Could not check for updates.')
+    expect(
+      screen.getByRole('button', { name: 'Check for updates' }),
+    ).toBeTruthy()
+  })
+
+  it('names the version that could not be installed, and keeps it installable', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.availableUpdate = { version: '0.9.0' }
+    desktop.updateInstallFails = true
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+    ;(await screen.findByRole('button', { name: 'Install 0.9.0' })).click()
+
+    await expect
+      .poll(updateStatus)
+      .toBe('Could not install Work Journal 0.9.0.')
+    // A failed install leaves the release found: the way to try again is the
+    // same press, not another look.
+    expect(screen.getByRole('button', { name: 'Install 0.9.0' })).toBeTruthy()
+  })
+
+  it('has said the update is installed before the app is restarted', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.availableUpdate = { version: '0.9.0' }
+    // What the user could read at the moment the restart was asked for. The
+    // real restart takes this webview with it, so a line that is not on screen
+    // by then is a line nobody ever sees.
+    let onScreenAtRestart: string | null | undefined
+    desktop.restart = async () => {
+      desktop.restarts += 1
+      onScreenAtRestart = updateStatus()
+      // The process goes here: nothing after this ever settles.
+      return new Promise<void>(() => {})
+    }
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+    ;(await screen.findByRole('button', { name: 'Install 0.9.0' })).click()
+
+    await expect
+      .poll(() => onScreenAtRestart)
+      .toBe('Work Journal 0.9.0 is installed. Restarting…')
+    // Asked for once, and only after the install it follows.
+    expect(desktop.restarts).toBe(1)
+    expect(desktop.updatesInstalled).toBe(1)
+  })
+
+  it('lets a paint happen before restarting, not just a DOM write', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.availableUpdate = { version: '0.9.0' }
+
+    // jsdom paints nothing, so what can be checked here is not the pixels but
+    // the boundary: that the restart waits for the moment a paint happens at,
+    // rather than going in the same breath as the write that put the line in
+    // the DOM.
+    const frames = holdFrames()
+
+    try {
+      showSettings(desktop)
+
+      ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+      ;(await screen.findByRole('button', { name: 'Install 0.9.0' })).click()
+
+      await expect
+        .poll(updateStatus)
+        .toBe('Work Journal 0.9.0 is installed. Restarting…')
+
+      // In the DOM is not yet on screen: nothing has been painted.
+      expect(desktop.restarts).toBe(0)
+
+      // A frame callback runs before the next paint, so the first one is
+      // still too early — what it can see, the user cannot.
+      frames.next()
+      expect(desktop.restarts).toBe(0)
+
+      // The second runs after that paint. The line has been on screen, and
+      // the process may go.
+      frames.next()
+      expect(desktop.restarts).toBe(1)
+    } finally {
+      frames.restore()
+    }
+  })
+
+  it('does not restart once Settings has gone away', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.availableUpdate = { version: '0.9.0' }
+
+    // Frames asked for and frames taken back, both held, so that a
+    // cancellation is something this test can actually observe.
+    const frames = holdFrames()
+
+    try {
+      showSettings(desktop)
+
+      ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+      ;(await screen.findByRole('button', { name: 'Install 0.9.0' })).click()
+
+      await expect
+        .poll(updateStatus)
+        .toBe('Work Journal 0.9.0 is installed. Restarting…')
+
+      // The Main Window closes in the moment between the install and the
+      // paint. Ending the process from under whoever opened it next is not
+      // this group's to do once nobody is reading it.
+      cleanup()
+      frames.drain()
+
+      expect(desktop.restarts).toBe(0)
+    } finally {
+      frames.restore()
+    }
+  })
+
+  it('says to quit by hand when the restart itself will not happen', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.availableUpdate = { version: '0.9.0' }
+    desktop.restart = async () => {
+      desktop.restarts += 1
+      throw new Error('The process would not go.')
+    }
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+    ;(await screen.findByRole('button', { name: 'Install 0.9.0' })).click()
+
+    // The install took; only the restart did not, and the user is told the
+    // one thing left for them to do.
+    await expect
+      .poll(updateStatus)
+      .toBe(
+        'Work Journal 0.9.0 is installed. Quit and open it again to use it.',
+      )
+    expect(desktop.updatesInstalled).toBe(1)
+
+    // The control must not go back to offering the install: it already
+    // happened, and pressing it again would download and write the same
+    // release over itself while the line says the opposite.
+    expect(screen.queryByRole('button', { name: 'Install 0.9.0' })).toBeNull()
+    // What it says instead is what is true — and it offers nothing, because
+    // the one thing left is a quit the app cannot make on the user's behalf.
+    const control = screen.getByRole('button', { name: 'Installed' })
+    expect(control.hasAttribute('disabled')).toBe(true)
+  })
+
+  it('shows how much of the download has arrived while it is arriving', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.availableUpdate = { version: '0.9.0' }
+    // A download that never finishes, so the wait itself can be read.
+    desktop.installUpdate = async (report) => {
+      report({ downloaded: 5_000_000, total: 20_000_000 })
+      return new Promise<void>(() => {})
+    }
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+    ;(await screen.findByRole('button', { name: 'Install 0.9.0' })).click()
+
+    await screen.findByRole('button', { name: 'Downloading… 25%' })
   })
 })
 

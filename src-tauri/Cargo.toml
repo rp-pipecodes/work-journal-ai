@@ -92,3 +92,8 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
 tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
+# The newer release, fetched and installed by the app itself — see
+# docs/adr/0030-the-app-updates-itself-from-its-own-releases.md. `process` is
+# what puts the user back into the version they just installed.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"

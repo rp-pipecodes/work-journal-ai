@@ -85,6 +85,16 @@ git tag v0.1.0 && git push origin v0.1.0
 
 The workflow refuses to build if the tag and `tauri.conf.json` disagree, and runs the tests before the build, so a red suite produces no release at all. It builds for Apple Silicon only, and the DMG is unsigned — the release notes carry the `xattr` instruction below.
 
+Every release also publishes a signed `.app.tar.gz` and a `latest.json`, which is what installed copies update themselves from.
+
+### Updating an installed copy
+
+Settings › Updates › **Check for updates** finds the latest release, names the version, and installs and restarts into it when pressed again. Nothing is downloaded until it is; the app never looks on its own. See [ADR 0030](docs/adr/0030-the-app-updates-itself-from-its-own-releases.md).
+
+The update bundle is signed with a minisign key whose public half is compiled into the app, and refused if it does not verify. The private half lives in the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` repository secrets and nowhere else — **lose it and no installed copy can ever be updated again**; every user would have to reinstall from a DMG once.
+
+This is Tauri's own signature over the update payload, not Apple code signing: builds remain unsigned and unnotarized, and the `xattr` step below still applies to a DMG. It does not apply to an update, which the app unpacks itself.
+
 ### Gatekeeper and the quarantine attribute
 
 Builds are unsigned and unnotarized by design. macOS attaches a quarantine attribute to anything that arrives from another machine — via AirDrop, a download, or a shared drive — and Gatekeeper then refuses to open the app, usually with "the app is damaged and can't be opened".

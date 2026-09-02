@@ -8,6 +8,9 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+# pnpm's content-addressable store, when it lands in the repo rather than in
+# the user's home: generated, mutable, and rebuilt from the lockfile.
+.pnpm-store
 dist
 dist-ssr
 *.local

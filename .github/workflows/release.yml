@@ -57,17 +57,26 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # The `app` bundle is what the updater installs: `createUpdaterArtifacts`
+      # turns it into a signed `.app.tar.gz`, and the action publishes it with
+      # a `latest.json` beside the DMG. Without the signing key in the
+      # environment the build fails rather than shipping an update nobody's
+      # installed copy will accept.
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseDraft: false
           prerelease: false
-          args: --target aarch64-apple-darwin --bundles dmg
+          args: --target aarch64-apple-darwin --bundles app,dmg
           releaseBody: |
-            Download the DMG, drag **Work Journal** to Applications, then clear the quarantine attribute macOS attached to it:
+            Already running a Work Journal with **Settings › Updates**? Check for updates there — no download and no terminal.
+
+            Installing for the first time: download the DMG, drag **Work Journal** to Applications, then clear the quarantine attribute macOS attached to it:
 
             ```
             xattr -dr com.apple.quarantine "/Applications/Work Journal.app"

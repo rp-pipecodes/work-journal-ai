@@ -6,7 +6,15 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', 'src-tauri/target']),
+  // Agent tooling checks whole copies of this repo out under these two, each
+  // with its own tsconfig. Left in, typescript-eslint finds several candidate
+  // roots and then refuses to parse anything at all, including the real `src`.
+  globalIgnores([
+    'dist',
+    'src-tauri/target',
+    '.freebuff',
+    '.claude',
+  ]),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

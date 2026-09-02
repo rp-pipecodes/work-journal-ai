@@ -17,6 +17,7 @@ import {
   installMeasurementStubs,
   journalHolding,
 } from '@/views/history/testing/history-view'
+import { holdFrames } from '@/views/settings/testing/frames'
 import MainWindow from './MainWindow'
 
 // The Main Window as the user meets it: a sidebar naming the section on
@@ -159,6 +160,57 @@ describe('the section the Main Window opens on', () => {
     // mounted by this integration seam.
     await screen.findByText('test')
     expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+})
+
+describe('an update installing while the user goes elsewhere', () => {
+  it('defers the restart until Settings is being looked at again', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({ captured: [MONDAY] })
+    desktop.availableUpdate = { version: '0.9.0' }
+
+    // The frames the restart waits for, held so the moment between the install
+    // and the paint can be widened to whatever this test needs.
+    const frames = holdFrames()
+
+    try {
+      await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
+      await showsSettings()
+
+      await user.click(
+        await screen.findByRole('button', { name: 'Check for updates' }),
+      )
+      await user.click(
+        await screen.findByRole('button', { name: 'Install 0.9.0' }),
+      )
+      await expect.poll(() => frames.pending()).toBeGreaterThan(0)
+
+      // The download is done and the restart is a frame away when the user
+      // goes back to their journal. Settings is hidden, not unmounted — the
+      // section they left is the one they will come back to.
+      await user.click(within(sidebar()).getByRole('button', { name: 'History' }))
+      await showsHistory()
+
+      frames.drain()
+
+      // Quitting out from under a section that never said a word about it is
+      // the app disappearing for no reason the user can see.
+      expect(desktop.restarts).toBe(0)
+
+      // Deferred, not abandoned: the release is installed and the line under
+      // the button still says so, so coming back is where the restart lands.
+      await user.click(
+        within(sidebar()).getByRole('button', { name: 'Settings' }),
+      )
+      await showsSettings()
+      await expect.poll(() => frames.pending()).toBeGreaterThan(0)
+
+      frames.drain()
+
+      expect(desktop.restarts).toBe(1)
+    } finally {
+      frames.restore()
+    }
   })
 })
 

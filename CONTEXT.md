@@ -213,7 +213,11 @@ Confirmed permanent removal of a Note or Task. There is no trash, no archive, no
 ## Settings
 
 **Settings**:
-What the user gets to decide about the app: the Note and Task Hotkeys, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars, and how to recover unavailable Task Alert Permission — plus Export as its one action rather than a setting. A Main Window section, reached from the sidebar or named directly from the Tray Menu.
+What the user gets to decide about the app: the Note and Task Hotkeys, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars, and how to recover unavailable Task Alert Permission — plus Export and Update as its two actions rather than settings. A Main Window section, reached from the sidebar or named directly from the Tray Menu.
+
+**Update**:
+Moving from the version running to a newer released one, without leaving the app: Settings looks for it, names the version found, and installs and restarts into it when the user presses again. Only when asked — the app never looks on its own schedule. The release it finds is the project's own latest, and the bundle is refused unless it is signed by the key this build was compiled to trust. First-time installation is still the DMG, and still needs the quarantine attribute cleared; an update does not, because the app unpacks it itself.
+_Avoid_: Upgrade, auto-update, patch
 
 **Model Access**:
 Whether the app can reach a language model at all: a Base URL, a Model name and an API Key, together and useless apart. Absent until the user supplies all three, and the only thing the app stores that is a secret — which is why the Key lives in the operating system's keychain rather than beside the other settings, and why the request is made outside the webview. Any OpenAI-compatible endpoint, so the Base URL is a field rather than a list of vendors and the Model is free text: a model name baked into the app is a name that outlives the model. Nothing but a Standup Post uses it, and everything else in the app works exactly as before while it is missing.
