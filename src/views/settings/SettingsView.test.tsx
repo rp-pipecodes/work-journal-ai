@@ -938,9 +938,9 @@ describe('save confirmations', () => {
     // The other Hotkey has a toast of its own: the two are independent
     // settings and never share one.
     desktop.setHotkey = async (action, next) => ({
-      ...desktop.hotkeyStatus(),
-      [action]: { state: 'registered', hotkey: next },
-    }) as never
+      ...(await desktop.hotkeyStatus()),
+      [action]: { state: 'registered' as const, hotkey: next },
+    })
     screen.getByRole('button', { name: 'Change Task Hotkey' }).click()
     const taskRecording = await screen.findByRole('button', {
       name: 'Press a combination…',
