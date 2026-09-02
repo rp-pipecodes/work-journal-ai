@@ -14,8 +14,9 @@ The endpoint is a static `latest.json` on the repository's own latest GitHub rel
 
 ## Consequences
 
-- **The seam is two methods, `checkForUpdate` and `installUpdate`.** The Tauri implementation keeps the update the last check found and installs that one, because the plugin hands back an object rather than a version and because the release the user was shown is the release they pressed for. `installUpdate` rejects when no check has found one.
-- **`installUpdate` normally does not resolve.** It restarts the app, which takes the webview with it. The success line exists for the moment before that, and for anyone whose restart did not happen.
+- **The seam is three methods: `checkForUpdate`, `installUpdate` and `restart`.** The Tauri implementation keeps the update the last check found and installs that one, because the plugin hands back an object rather than a version and because the release the user was shown is the release they pressed for. `installUpdate` rejects when no check has found one.
+- **The restart is its own ask, and the group makes it from an effect.** Installing and restarting are one gesture to the user but two moments to the app: the restart ends the process, so everything the app promised to say about the install has to be committed to the screen first. A `setState` followed by a restart in the same continuation is a line nobody ever reads — React has not rendered it yet. The restart therefore runs after the installed stage is on screen, and `SettingsView.test.tsx` asserts that ordering by looking at the page from inside the restart itself.
+- **A restart that will not happen is said, not swallowed.** The install still took; what is left is a quit the user has to make, and the line says so.
 - **The release workflow builds `app,dmg` rather than `dmg`.** The `app` bundle is what `createUpdaterArtifacts` turns into the signed archive; the DMG remains the first-time install and keeps its instructions.
 - **Losing the private key ends updates for every installed copy.** The public half is compiled in, so a key rotation only reaches builds installed after it. Every existing user would have to reinstall by DMG once.
 - **Updates skip the quarantine step.** The app extracts the new bundle itself, so macOS attaches no quarantine attribute — the `xattr` command belongs to the DMG path only.

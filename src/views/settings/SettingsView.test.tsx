@@ -833,6 +833,7 @@ describe('Updates', () => {
     await expect
       .poll(updateStatus)
       .toBe('Work Journal 0.9.0 is installed. Restarting…')
+    await expect.poll(() => desktop.restarts).toBe(1)
     // The toast says it too, in its own layer.
     expect(
       document.querySelector('[data-sonner-toaster]')?.textContent,
@@ -869,6 +870,56 @@ describe('Updates', () => {
     // A failed install leaves the release found: the way to try again is the
     // same press, not another look.
     expect(screen.getByRole('button', { name: 'Install 0.9.0' })).toBeTruthy()
+  })
+
+  it('has said the update is installed before the app is restarted', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.availableUpdate = { version: '0.9.0' }
+    // What the user could read at the moment the restart was asked for. The
+    // real restart takes this webview with it, so a line that is not on screen
+    // by then is a line nobody ever sees.
+    let onScreenAtRestart: string | null | undefined
+    desktop.restart = async () => {
+      desktop.restarts += 1
+      onScreenAtRestart = updateStatus()
+      // The process goes here: nothing after this ever settles.
+      return new Promise<void>(() => {})
+    }
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+    ;(await screen.findByRole('button', { name: 'Install 0.9.0' })).click()
+
+    await expect
+      .poll(() => onScreenAtRestart)
+      .toBe('Work Journal 0.9.0 is installed. Restarting…')
+    // Asked for once, and only after the install it follows.
+    expect(desktop.restarts).toBe(1)
+    expect(desktop.updatesInstalled).toBe(1)
+  })
+
+  it('says to quit by hand when the restart itself will not happen', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.availableUpdate = { version: '0.9.0' }
+    desktop.restart = async () => {
+      desktop.restarts += 1
+      throw new Error('The process would not go.')
+    }
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+    ;(await screen.findByRole('button', { name: 'Install 0.9.0' })).click()
+
+    // The install took; only the restart did not, and the user is told the
+    // one thing left for them to do.
+    await expect
+      .poll(updateStatus)
+      .toBe(
+        'Work Journal 0.9.0 is installed. Quit and open it again to use it.',
+      )
+    expect(desktop.updatesInstalled).toBe(1)
   })
 
   it('shows how much of the download has arrived while it is arriving', async () => {

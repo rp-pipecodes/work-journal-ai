@@ -122,8 +122,10 @@ export interface FakeDesktop extends Desktop {
   updateSize: number
   /** How many times an update was looked for. */
   updateChecks: number
-  /** How many times the found update was installed and restarted into. */
+  /** How many times the found update was installed. */
   updatesInstalled: number
+  /** How many times the app was asked to restart into what it installed. */
+  restarts: number
   /** Whether looking fails, as it does with nothing to reach. */
   updateCheckFails: boolean
   /** Whether installing fails, as it does when the bundle cannot be written. */
@@ -223,6 +225,7 @@ export function fakeDesktop({
     updateSize: UPDATE_SIZE,
     updateChecks: 0,
     updatesInstalled: 0,
+    restarts: 0,
     updateCheckFails: false,
     updateInstallFails: false,
     standupRequests: [],
@@ -442,6 +445,12 @@ export function fakeDesktop({
       }
       report({ downloaded: desktop.updateSize, total: desktop.updateSize })
       desktop.updatesInstalled += 1
+    },
+
+    // The real one ends the process here. A test that wants to know what the
+    // user could still read counts on being able to look at this moment.
+    restart: async () => {
+      desktop.restarts += 1
     },
 
     showTrayCount: async (title) => {

@@ -628,16 +628,25 @@ export interface Desktop {
    */
   checkForUpdate(): Promise<AvailableUpdate | null>
   /**
-   * Installs the update the last check found and restarts into it. The update
+   * Installs the update the last check found, and stops there. The update
    * installed is the one that was found rather than whatever is latest at this
    * moment, so what the user pressed for is what they get; a check has to have
    * found one, and rejects when none has.
    *
-   * Resolves only if the restart does not happen, because a restart takes this
-   * webview with it. `report` is called as the download moves, so a wait of
-   * twenty megabytes is a wait the user can see.
+   * `report` is called as the download moves, so a wait of twenty megabytes is
+   * a wait the user can see.
+   *
+   * Deliberately not the restart: the two are one gesture to the user but two
+   * moments to the app, and everything the app wants to say about the install
+   * has to be on screen before the restart takes the webview away.
    */
   installUpdate(report: (progress: UpdateProgress) => void): Promise<void>
+  /**
+   * Quits and comes back in the version just installed — the running process
+   * is still the old one until it does. Normally does not resolve, because it
+   * ends the process it was called from.
+   */
+  restart(): Promise<void>
 
   /**
    * Asks the model to write a Standup Post. The command takes only what the

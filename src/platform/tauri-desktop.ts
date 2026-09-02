@@ -271,11 +271,12 @@ export function createTauriDesktop(): Desktop {
         }
         report({ downloaded, total })
       })
-
-      // macOS leaves the old binary running: the installed version is only on
-      // screen once the app has been restarted into it.
-      await relaunch()
     },
+
+    // macOS leaves the old binary running: the installed version is only on
+    // screen once the app has been restarted into it. Asked for separately,
+    // and last — this takes the webview that asked.
+    restart: () => relaunch(),
 
     showTrayCount: (title) => invoke('show_tray_count', { title }),
   }
