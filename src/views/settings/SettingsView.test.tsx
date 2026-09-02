@@ -781,6 +781,114 @@ describe('Export', () => {
   })
 })
 
+describe('Updates', () => {
+  /** The line the Updates group keeps saying, found inside that group alone. */
+  function updateStatus(): string | null | undefined {
+    return screen
+      .getByRole('heading', { name: 'Updates' })
+      .closest('section')
+      ?.querySelector('p[role="status"]')?.textContent
+  }
+
+  it('says the build is current when nothing newer has been released', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+
+    showSettings(desktop)
+
+    const button = await screen.findByRole('button', {
+      name: 'Check for updates',
+    })
+    button.click()
+
+    await expect.poll(updateStatus).toBe('Work Journal is up to date.')
+    // Nothing to install, so the control stays the one that looks again.
+    expect(
+      screen.getByRole('button', { name: 'Check for updates' }),
+    ).toBeTruthy()
+    expect(desktop.updatesInstalled).toBe(0)
+  })
+
+  it('names the release found and installs that one when pressed', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.availableUpdate = { version: '0.9.0' }
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+
+    // The version is named before anything is downloaded: what is about to
+    // replace the running build is worth reading first.
+    await expect
+      .poll(updateStatus)
+      .toBe('Work Journal 0.9.0 is available.')
+    const install = await screen.findByRole('button', {
+      name: 'Install 0.9.0',
+    })
+
+    install.click()
+
+    await expect
+      .poll(() => desktop.updatesInstalled)
+      .toBe(1)
+    await expect
+      .poll(updateStatus)
+      .toBe('Work Journal 0.9.0 is installed. Restarting…')
+    // The toast says it too, in its own layer.
+    expect(
+      document.querySelector('[data-sonner-toaster]')?.textContent,
+    ).toMatch(/0\.9\.0 is installed/)
+  })
+
+  it('says so when nothing could be reached, and offers to look again', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.updateCheckFails = true
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+
+    await expect.poll(updateStatus).toBe('Could not check for updates.')
+    expect(
+      screen.getByRole('button', { name: 'Check for updates' }),
+    ).toBeTruthy()
+  })
+
+  it('names the version that could not be installed, and keeps it installable', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.availableUpdate = { version: '0.9.0' }
+    desktop.updateInstallFails = true
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+    ;(await screen.findByRole('button', { name: 'Install 0.9.0' })).click()
+
+    await expect
+      .poll(updateStatus)
+      .toBe('Could not install Work Journal 0.9.0.')
+    // A failed install leaves the release found: the way to try again is the
+    // same press, not another look.
+    expect(screen.getByRole('button', { name: 'Install 0.9.0' })).toBeTruthy()
+  })
+
+  it('shows how much of the download has arrived while it is arriving', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.availableUpdate = { version: '0.9.0' }
+    // A download that never finishes, so the wait itself can be read.
+    desktop.installUpdate = async (report) => {
+      report({ downloaded: 5_000_000, total: 20_000_000 })
+      return new Promise<void>(() => {})
+    }
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+    ;(await screen.findByRole('button', { name: 'Install 0.9.0' })).click()
+
+    await screen.findByRole('button', { name: 'Downloading… 25%' })
+  })
+})
+
 describe('save confirmations', () => {
   it('says what a Start at Login press did', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })

@@ -18,6 +18,7 @@ import {
 } from './SettingsInitialState'
 import TaskAlertSettings from './TaskAlertSettings'
 import ThemeSettings from './ThemeSettings'
+import UpdateSettings from './UpdateSettings'
 
 /**
  * The settings section of the Main Window: a shell that composes one group per
@@ -135,6 +136,11 @@ export default function SettingsView({
         <Separator />
 
         <ExportSettings desktop={desktop} journal={journal} />
+        <Separator />
+
+        {/* Last, beside the version in the footer: both are about the build
+            rather than about the journal it holds. */}
+        <UpdateSettings desktop={desktop} />
 
         {appIdentity !== null && (
           <>

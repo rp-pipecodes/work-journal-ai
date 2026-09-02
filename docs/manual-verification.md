@@ -315,6 +315,19 @@ Daylight saving is macOS's to resolve, not the app's: the app registers the civi
 - [ ] Exporting twice leaves two files rather than overwriting the first.
 - [ ] Exporting an empty journal writes a file and says so, rather than failing.
 
+## Updates
+
+Needs two builds: the one installed, and a release tagged after it.
+
+- [ ] **Check for updates** on a build that is the latest says Work Journal is up to date, and offers to look again.
+- [ ] With a newer release published, the same press names that version, and the control becomes **Install X.Y.Z**.
+- [ ] Pressing it reports the share of the download that has arrived, then the app restarts on its own.
+- [ ] The version in the footer, and in the About item, is the new one after the restart.
+- [ ] `xattr -p com.apple.quarantine "/Applications/Work Journal.app"` reports no such attribute after an update — the terminal step belongs to the DMG only.
+- [ ] The journal, the settings, the Hotkeys and the API Key are all exactly as they were before the update.
+- [ ] With no network, the check says it could not be made rather than failing silently, and the rest of Settings keeps working.
+- [ ] A release whose `.app.tar.gz` was signed by a different key is refused, and the running app is untouched.
+
 ## Walkthroughs
 
 One line per end-to-end walk: the date, the build, and what it turned up. "Nothing" is a result.

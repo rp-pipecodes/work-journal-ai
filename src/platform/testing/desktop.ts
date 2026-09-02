@@ -4,6 +4,7 @@ import type { SettingsStore } from '../../settings/settings'
 import type { Theme } from '../../settings/theme'
 import type {
   AppIdentity,
+  AvailableUpdate,
   CalendarAccess,
   CalendarInfo,
   CaptureFit,
@@ -112,6 +113,21 @@ export interface FakeDesktop extends Desktop {
    * moment ago can be shut.
    */
   keychainRefuses: boolean
+  /**
+   * The release a check finds, or null when this build is the latest.
+   * Writable: a check made after one was installed finds nothing.
+   */
+  availableUpdate: AvailableUpdate | null
+  /** How big the found release is, as the download reports it. */
+  updateSize: number
+  /** How many times an update was looked for. */
+  updateChecks: number
+  /** How many times the found update was installed and restarted into. */
+  updatesInstalled: number
+  /** Whether looking fails, as it does with nothing to reach. */
+  updateCheckFails: boolean
+  /** Whether installing fails, as it does when the bundle cannot be written. */
+  updateInstallFails: boolean
   /** Every Standup Post call asked for, most recent last. */
   standupRequests: StandupPostRequest[]
   /**
@@ -203,6 +219,12 @@ export function fakeDesktop({
     pendingTaskAlert: null,
     apiKey,
     keychainRefuses,
+    availableUpdate: null,
+    updateSize: UPDATE_SIZE,
+    updateChecks: 0,
+    updatesInstalled: 0,
+    updateCheckFails: false,
+    updateInstallFails: false,
     standupRequests: [],
     standupPostResponse: { state: 'generated', markdown: GENERATED_POST },
 
@@ -399,6 +421,29 @@ export function fakeDesktop({
       return desktop.standupPostResponse
     },
 
+    checkForUpdate: async (): Promise<AvailableUpdate | null> => {
+      desktop.updateChecks += 1
+      if (desktop.updateCheckFails) {
+        throw new Error('Nothing answered.')
+      }
+      return desktop.availableUpdate
+    },
+
+    installUpdate: async (report) => {
+      if (desktop.availableUpdate === null) {
+        throw new Error('Nothing has been found to install.')
+      }
+      // The length first and the bytes after, which is the order the real one
+      // reports them in — so a view that shows a share of the download is
+      // driven here exactly as it is in the app.
+      report({ downloaded: 0, total: desktop.updateSize })
+      if (desktop.updateInstallFails) {
+        throw new Error('The bundle could not be written.')
+      }
+      report({ downloaded: desktop.updateSize, total: desktop.updateSize })
+      desktop.updatesInstalled += 1
+    },
+
     showTrayCount: async (title) => {
       desktop.trayTitle = title
     },
@@ -406,6 +451,9 @@ export function fakeDesktop({
 
   return desktop
 }
+
+/** How big a fake release is: enough bytes that a share of it is a round number. */
+const UPDATE_SIZE = 20_000_000
 
 /** What the fake model says, distinguishable from anything the user wrote. */
 const GENERATED_POST = 'The standup post the model wrote.'

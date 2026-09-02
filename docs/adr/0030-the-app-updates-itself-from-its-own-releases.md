@@ -1,0 +1,23 @@
+# The app updates itself from its own releases
+
+Every version until now reached the user the same way: notice a release somehow, download the DMG, drag the app over the one in Applications, and run `xattr -dr com.apple.quarantine` in a terminal because the build is unsigned. That is a reinstall, not an update, and the terminal step is the part that decides whether it happens at all. Work Journal now looks for a newer release, downloads it and restarts into it from Settings, through `tauri-plugin-updater`.
+
+The endpoint is a static `latest.json` on the repository's own latest GitHub release — the same release the DMG is published to, generated and uploaded by the release workflow that already builds it. There is no server. The update bundle is a `.app.tar.gz` signed with a minisign key whose public half is compiled into the app; a bundle that key does not verify is refused before anything is replaced. That key is Tauri's own and has nothing to do with Apple code signing: the app stays unsigned and unnotarized, and Gatekeeper is no more and no less satisfied than before.
+
+## Considered options
+
+- **Keep telling people to download the DMG.** Rejected: the instruction has four steps, one of which is a terminal command, and it is the only way a fix reaches anyone. A journal the user has to reinstall by hand is a journal that stays on the version it was installed at.
+- **Check on launch, or on a timer.** Rejected: the app makes exactly one network call today, for a Standup Post, and only when asked. A background check would make every launch reach out whether or not the user cares, and would need a decision about how often, what to do about failures nobody asked to see, and where to store when it last looked. Settings asks, once, when pressed.
+- **Download and install in one press.** Rejected: the version about to replace the running build is worth naming first. Looking is cheap and reversible; installing is neither.
+- **Show the release's own notes.** Rejected: this project's release bodies are install instructions for the DMG, which is exactly what the reader is no longer doing. The version number is what the user is deciding about.
+- **Sign and notarize with Apple, so an update is a normal macOS update.** Not rejected, but not this: it costs a paid developer account and a signing pipeline, and it is orthogonal — the updater works without it, and adopting it later changes nothing here.
+
+## Consequences
+
+- **The seam is two methods, `checkForUpdate` and `installUpdate`.** The Tauri implementation keeps the update the last check found and installs that one, because the plugin hands back an object rather than a version and because the release the user was shown is the release they pressed for. `installUpdate` rejects when no check has found one.
+- **`installUpdate` normally does not resolve.** It restarts the app, which takes the webview with it. The success line exists for the moment before that, and for anyone whose restart did not happen.
+- **The release workflow builds `app,dmg` rather than `dmg`.** The `app` bundle is what `createUpdaterArtifacts` turns into the signed archive; the DMG remains the first-time install and keeps its instructions.
+- **Losing the private key ends updates for every installed copy.** The public half is compiled in, so a key rotation only reaches builds installed after it. Every existing user would have to reinstall by DMG once.
+- **Updates skip the quarantine step.** The app extracts the new bundle itself, so macOS attaches no quarantine attribute — the `xattr` command belongs to the DMG path only.
+- **An update needs write access to the installed bundle.** A standard user cannot write to `/Applications`, and that failure is said in Settings rather than swallowed.
+- **Users on 0.8.2 and earlier are not reachable.** The updater only exists in builds that ship it; the release that adds it is installed by DMG one last time.

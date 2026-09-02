@@ -19,6 +19,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -28,6 +29,14 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERCNzkxQzI1QUUwN0Q3MzYKUldRMjF3ZXVKUng1MndNK3lZVnR1N0k5ZElaalhPNHYwUFBkY1JURDZhY1FCVk5ubXlhd2s3N08K",
+      "endpoints": [
+        "https://github.com/rp-pipecodes/work-journal-ai/releases/latest/download/latest.json"
+      ]
     }
   }
 }

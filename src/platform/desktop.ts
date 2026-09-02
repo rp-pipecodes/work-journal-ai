@@ -288,6 +288,27 @@ export const TASK_ALERT_OPENED_EVENT = 'task-alert://opened'
  */
 export const TASK_ALERTS_RECONCILED_EVENT = 'task-alert://reconciled'
 
+/**
+ * A release newer than the running build, as the updater found it. Only what
+ * Settings has to say out loud: the version it would move to. The release's own
+ * notes are deliberately not here — this project's release bodies are install
+ * instructions for the DMG, which is exactly what the reader of this line is
+ * no longer doing.
+ */
+export interface AvailableUpdate {
+  version: string
+}
+
+/**
+ * How far the download has got. `total` is what the server said it would be,
+ * and null when it said nothing — a length nobody promised is not a percentage
+ * anyone should be shown.
+ */
+export interface UpdateProgress {
+  downloaded: number
+  total: number | null
+}
+
 /** Where an export ended up — the Rust side's `ExportedFile`. */
 export interface ExportedFile {
   path: string
@@ -598,6 +619,25 @@ export interface Desktop {
 
   /** Writes a rendered export to a file, and says where it went. */
   exportJournal(markdown: string, fileName: string): Promise<ExportedFile>
+
+  /**
+   * The release newer than this build, or null when this build is already the
+   * latest. Asked for, never on a timer: an app that reaches out on its own
+   * schedule is one the user did not ask to be reached out for — see
+   * docs/adr/0030-the-app-updates-itself-from-its-own-releases.md.
+   */
+  checkForUpdate(): Promise<AvailableUpdate | null>
+  /**
+   * Installs the update the last check found and restarts into it. The update
+   * installed is the one that was found rather than whatever is latest at this
+   * moment, so what the user pressed for is what they get; a check has to have
+   * found one, and rejects when none has.
+   *
+   * Resolves only if the restart does not happen, because a restart takes this
+   * webview with it. `report` is called as the download moves, so a wait of
+   * twenty megabytes is a wait the user can see.
+   */
+  installUpdate(report: (progress: UpdateProgress) => void): Promise<void>
 
   /**
    * Asks the model to write a Standup Post. The command takes only what the
