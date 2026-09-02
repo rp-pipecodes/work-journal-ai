@@ -29,6 +29,7 @@ export default function UpdateSettings({ desktop }: { desktop: Desktop }) {
   const says = useOnScreenToast()
   // The restart is asked for once. StrictMode runs an effect twice, and a
   // second request would be made against a process already on its way out.
+  // Never put back: no stage leads to `installed` a second time.
   const restarting = useRef(false)
 
   /**
@@ -41,13 +42,15 @@ export default function UpdateSettings({ desktop }: { desktop: Desktop }) {
     if (stage.at !== 'installed' || restarting.current) return
 
     restarting.current = true
-    const version = stage.update.version
+    const update = stage.update
     desktop.restart().catch((error: unknown) => {
       console.error('could not restart into the update', error)
-      restarting.current = false
-      // The install still took. What is left is a quit the user has to make.
-      const answer = `Work Journal ${version} is installed. Quit and open it again to use it.`
-      setStage({ at: 'found', update: stage.update })
+      // The install still took, so this is not a way back to the press that
+      // made it: offering the install again would write the same release over
+      // itself while the line says the opposite. What is left is a quit, and
+      // the app cannot make it on the user's behalf.
+      const answer = `Work Journal ${update.version} is installed. Quit and open it again to use it.`
+      setStage({ at: 'quit-needed', update })
       setSaid(answer)
       says.failure(answer)
     })
@@ -143,6 +146,11 @@ export default function UpdateSettings({ desktop }: { desktop: Desktop }) {
  * Where the group has got to. `idle` covers both "nothing has been looked for"
  * and "this build is the latest": the press is the same one either way, and
  * which of the two it is, is what the line underneath says.
+ *
+ * `installed` and `quit-needed` are both "the release is on disk"; they differ
+ * in whether the app is on its way into it. Only the first is a stage anything
+ * is still happening in, which is why the restart runs from the one and never
+ * from the other.
  */
 type Stage =
   | { at: 'idle' }
@@ -150,6 +158,7 @@ type Stage =
   | { at: 'found'; update: AvailableUpdate }
   | { at: 'installing'; update: AvailableUpdate; progress: UpdateProgress | null }
   | { at: 'installed'; update: AvailableUpdate }
+  | { at: 'quit-needed'; update: AvailableUpdate }
 
 /** What the one control says it will do, or is doing, at each stage. */
 function label(stage: Stage): string {
@@ -164,6 +173,8 @@ function label(stage: Stage): string {
       return downloading(stage.progress)
     case 'installed':
       return 'Restarting…'
+    case 'quit-needed':
+      return 'Installed'
   }
 }
 

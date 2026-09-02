@@ -920,6 +920,15 @@ describe('Updates', () => {
         'Work Journal 0.9.0 is installed. Quit and open it again to use it.',
       )
     expect(desktop.updatesInstalled).toBe(1)
+
+    // The control must not go back to offering the install: it already
+    // happened, and pressing it again would download and write the same
+    // release over itself while the line says the opposite.
+    expect(screen.queryByRole('button', { name: 'Install 0.9.0' })).toBeNull()
+    // What it says instead is what is true — and it offers nothing, because
+    // the one thing left is a quit the app cannot make on the user's behalf.
+    const control = screen.getByRole('button', { name: 'Installed' })
+    expect(control.hasAttribute('disabled')).toBe(true)
   })
 
   it('shows how much of the download has arrived while it is arriving', async () => {
