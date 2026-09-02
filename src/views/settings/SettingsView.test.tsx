@@ -1048,6 +1048,70 @@ describe('save confirmations', () => {
     await expect.poll(() => toasts().join(' | ')).toBe('API Key saved.')
   })
 
+  it('says what pressing the Import switch did, both ways', async () => {
+    const desktop = fakeDesktop({
+      stored: { importMeetings: false, startAtLogin: false },
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+    })
+
+    showSettings(desktop)
+
+    // On, over a permission already granted: no ask, just the wish.
+    importSwitch().click()
+    await expect.poll(() => toasts().join(' | ')).toBe('Meetings will be imported.')
+    await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+
+    // Off again: the same toast says the opposite, not a second one — the
+    // switch has one id, and its press replaces what the last press said.
+    importSwitch().click()
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Meetings will no longer be imported.')
+    await expect.poll(() => desktop.stored.importMeetings).toBe(false)
+  })
+
+  it('says the wish is kept when macOS refuses the calendars', async () => {
+    const desktop = fakeDesktop({
+      stored: { importMeetings: false, startAtLogin: false },
+      access: 'denied',
+    })
+
+    showSettings(desktop)
+
+    // Pressed against a refusal: the wish is stored anyway, and the toast
+    // says what the press did — that Import starts the moment macOS allows
+    // calendars, not that the press did nothing.
+    importSwitch().click()
+
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Meetings will be imported once macOS allows calendars.')
+    await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+    // The toast and the line underneath agree: the switch reads off while
+    // the reason for it stays on screen.
+    expect(screen.getByText(/not allowing Work Journal to read/)).toBeTruthy()
+    expect(isOn(importSwitch())).toBe(false)
+  })
+
+  it('says so when the Import save itself refuses', async () => {
+    const desktop = fakeDesktop({
+      stored: { importMeetings: false, startAtLogin: false },
+      access: 'granted',
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    desktop.announceImportChanged = () =>
+      Promise.reject(new Error('the window is gone'))
+
+    showSettings(desktop)
+
+    importSwitch().click()
+
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Could not change how meetings are imported.')
+  })
+
   it('confirms a calendar tick', async () => {
     const desktop = fakeDesktop({
       stored: { importMeetings: true, importCalendars: [], startAtLogin: false },
