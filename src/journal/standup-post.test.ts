@@ -57,6 +57,36 @@ describe('selectStandupPost', () => {
     expect(selected.completedOccurrences).toEqual([])
   })
 
+  it('files a completion just after local midnight under the same yesterday as an ordinary Task completed at the same instant', async () => {
+    // July: Europe/Lisbon is at UTC+1, so 00:30 local on the 2nd is stored
+    // 2026-07-01T23:30Z. The two records completed at that one instant must
+    // land in the same half of the Standup Post — the local Journal Day both
+    // were kept on — whichever query read them.
+    const { journal, clock } = await journalAt('2026-07-01T23:05:00')
+    const daily = await journal.createTask(
+      'water the plants',
+      { date: '2026-07-01', time: '23:00' },
+      { unit: 'day', interval: 1, weekdays: [] },
+    )
+    const ordinary = await journal.createTask('the ordinary one')
+
+    clock.set(new Date('2026-07-02T00:30:00'))
+    await journal.completeTask(daily.id)
+    await journal.completeTask(ordinary.id)
+    clock.set(new Date('2026-07-03T09:00:00'))
+
+    const selected = await selectStandupPost({ journal, clock })
+
+    expect(selected.yesterday).toBe('2026-07-02')
+    expect(selected.completedTasks.map((task) => task.description)).toEqual([
+      'the ordinary one',
+    ])
+    expect(selected.completedOccurrences).toHaveLength(1)
+    expect(
+      formatSlot(slotOf(selected.completedOccurrences[0].occurrence)),
+    ).toBe('2026-07-01 23:00')
+  })
+
   it('selects Overdue and today Open Tasks, not Upcoming or Unscheduled', async () => {
     const { journal, clock } = await journalAt('2026-03-12T09:00:00')
 

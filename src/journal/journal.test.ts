@@ -2237,6 +2237,64 @@ describe('completedOccurrences', () => {
       }),
     ).toEqual([])
   })
+
+  it('bounds the range at local midnight, not UTC midnight', async () => {
+    // July: the suite's pinned Europe/Lisbon is at UTC+1, so an occurrence
+    // completed at 00:30 local on the 2nd is stored 2026-07-01T23:30Z — a
+    // string comparison against UTC day bounds would file it under the 1st.
+    const { journal, clock } = await journalAt('2026-07-01T22:00:00')
+    const daily = await journal.createTask(
+      'water the plants',
+      { date: '2026-07-01', time: '23:00' },
+      { unit: 'day', interval: 1, weekdays: [] },
+    )
+
+    clock.set(local('2026-07-02T00:30:00'))
+    await journal.completeTask(daily.id)
+
+    const onTheSecond = await journal.completedOccurrences({
+      from: '2026-07-02',
+      to: '2026-07-02',
+    })
+    expect(kept(onTheSecond)).toEqual(['water the plants (2026-07-01 23:00)'])
+
+    const onTheFirst = await journal.completedOccurrences({
+      from: '2026-07-01',
+      to: '2026-07-01',
+    })
+    expect(onTheFirst).toEqual([])
+  })
+
+  it('bounds the range at local midnight across the DST fallback', async () => {
+    // Late October: Europe/Lisbon falls back on the 25th, so the night
+    // before is still UTC+1 and a completion at 00:30 local on the 25th is
+    // stored 2026-10-24T23:30Z — a different UTC day from the local one it
+    // belongs to, on the very weekend the offset moves.
+    const { journal, clock } = await journalAt('2026-10-24T22:00:00')
+    const daily = await journal.createTask(
+      'water the plants',
+      { date: '2026-10-24', time: '23:00' },
+      { unit: 'day', interval: 1, weekdays: [] },
+    )
+
+    clock.set(local('2026-10-25T00:30:00'))
+    await journal.completeTask(daily.id)
+
+    expect(
+      kept(
+        await journal.completedOccurrences({
+          from: '2026-10-25',
+          to: '2026-10-25',
+        }),
+      ),
+    ).toEqual(['water the plants (2026-10-24 23:00)'])
+    expect(
+      await journal.completedOccurrences({
+        from: '2026-10-24',
+        to: '2026-10-24',
+      }),
+    ).toEqual([])
+  })
 })
 
 describe('completeTask and reopenTask', () => {

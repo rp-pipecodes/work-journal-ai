@@ -831,9 +831,11 @@ const SELECT_COMPLETED_OCCURRENCES_FOR_EXPORT = `
  * The completed occurrences of a day range, newest completion first — the
  * order a reader of what was kept yesterday wants. The predicate is on
  * `completed_at`, the same one `completedTasks()` asks; the range is a range
- * of Journal Days, so the bounds are the range's own days at local midnight.
- * The parent Task rides along on the join, aliased throughout because the two
- * tables name their columns alike.
+ * of Journal Days, so the bounds are the UTC instants of the range's own
+ * local midnights — bound by the caller, below, because a Journal Day's
+ * midnight is the local calendar's, not UTC's. The parent Task rides along
+ * on the join, aliased throughout because the two tables name their columns
+ * alike.
  */
 const SELECT_COMPLETED_OCCURRENCES_IN_RANGE = `
   SELECT
@@ -854,8 +856,8 @@ const SELECT_COMPLETED_OCCURRENCES_IN_RANGE = `
   FROM task_occurrences o
   JOIN tasks t ON t.id = o.task_id
   WHERE o.completed_at IS NOT NULL
-    AND o.completed_at >= ? || 'T00:00:00'
-    AND o.completed_at < ? || 'T00:00:00'
+    AND o.completed_at >= ?
+    AND o.completed_at < ?
   ORDER BY o.completed_at DESC, o.id DESC
 `
 
@@ -1358,11 +1360,18 @@ export function createJournal({
     },
 
     async completedOccurrences(range) {
-      // The range's ends are Journal Days, so each bounds its own day at
-      // local midnight, and the day after `to` opens the exclusive upper one.
+      // The range's ends are Journal Days — local calendar days — so the
+      // bounds must be the UTC instants of their local midnights. Building
+      // the instants from local calendar parts rather than concatenating
+      // day strings is the whole point: a string bound would be a UTC
+      // midnight, and west of UTC every evening completion would fall on the
+      // next UTC day and out of "yesterday" entirely — while an ordinary
+      // Task completed at the same instant, narrowed locally, stayed in it.
+      const from = localMidnightUtc(range.from)
+      const to = localMidnightUtc(shiftDay(range.to, 1))
       const rows = await driver.select<CompletedOccurrenceRow>(
         SELECT_COMPLETED_OCCURRENCES_IN_RANGE,
-        [range.from, shiftDay(range.to, 1)],
+        [from, to],
       )
 
       return rows.map((row) => ({
@@ -1905,6 +1914,26 @@ export function journalDayFor(instant: Date): string {
     String(instant.getMonth() + 1).padStart(2, '0'),
     String(instant.getDate()).padStart(2, '0'),
   ].join('-')
+}
+
+/**
+ * The inverse of `journalDayFor`: the UTC instant that begins a Journal Day
+ * in the machine's own calendar. Built from local calendar parts — never by
+ * parsing the day label, which JavaScript reads as UTC — so a range of
+ * Journal Days bounds the same days a reader means wherever they keep their
+ * records. A nonexistent local midnight (a DST spring-forward at 00:00)
+ * resolves to the first valid instant of that day, exactly as a Task Alert
+ * does.
+ */
+function localMidnightUtc(journalDay: string): string {
+  const [year, month, day] = parts(journalDay)
+  const midnight = new Date(year, month - 1, day)
+  if (midnight.getHours() !== 0) {
+    // The wall clock skipped past midnight on its way into this day: the
+    // first valid instant of the day is where the hour hand landed.
+    return new Date(year, month - 1, day, midnight.getHours()).toISOString()
+  }
+  return midnight.toISOString()
 }
 
 /**
