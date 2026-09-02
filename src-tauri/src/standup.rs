@@ -98,16 +98,7 @@ pub async fn generate(request: StandupPostRequest, api_key: &str) -> StandupPost
         "{}/chat/completions",
         request.base_url.trim_end_matches('/')
     );
-    let body = serde_json::json!({
-        "model": request.model,
-        "messages": [
-            { "role": "system", "content": request.system_prompt },
-            { "role": "user", "content": request.user_content },
-        ],
-        // Waiting, not streaming: nothing can be acted on until the post is
-        // complete, so the answer is asked for whole.
-        "stream": false,
-    });
+    let body = completion_body(&request);
 
     let response = match client
         .post(url)
@@ -153,6 +144,24 @@ pub async fn generate(request: StandupPostRequest, api_key: &str) -> StandupPost
     }
 }
 
+/// The one request shape sent to the model. A Standup Post is a bounded
+/// rewrite of already-structured material, so low reasoning keeps enough
+/// room to reconcile Notes and Tasks without paying the latency and token
+/// cost of GPT-5.6's medium default.
+fn completion_body(request: &StandupPostRequest) -> serde_json::Value {
+    serde_json::json!({
+        "model": request.model,
+        "messages": [
+            { "role": "system", "content": request.system_prompt },
+            { "role": "user", "content": request.user_content },
+        ],
+        "reasoning_effort": "low",
+        // Waiting, not streaming: nothing can be acted on until the post is
+        // complete, so the answer is asked for whole.
+        "stream": false,
+    })
+}
+
 fn failed(failure: StandupFailure) -> StandupPostResponse {
     StandupPostResponse::Failed { failure }
 }
@@ -178,6 +187,18 @@ fn classify(error: reqwest::Error) -> StandupFailure {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_model_is_asked_with_low_reasoning_effort() {
+        let body = completion_body(&StandupPostRequest {
+            base_url: "https://api.openai.com/v1".to_string(),
+            model: "gpt-5.6-luna".to_string(),
+            system_prompt: "Write a standup post.".to_string(),
+            user_content: "## Still to do\n- [ ] Ship it".to_string(),
+        });
+
+        assert_eq!(body["reasoning_effort"], "low");
+    }
 
     /// The wire tags, pinned as serde actually writes them. This is what the
     /// webview matches on — a rename here that TypeScript does not hear about
