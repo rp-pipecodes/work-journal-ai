@@ -2,6 +2,7 @@
 
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { toast } from 'sonner'
 import {
   deferredStore,
   fakeDesktop,
@@ -17,7 +18,12 @@ import SettingsView from './SettingsView'
 // what a control reads, and what pressing it means, are decided in the view, so
 // the view is where it has to be pressed.
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  // Sonner keeps its messages outside React, so unmounting the window leaves
+  // them standing for the next one to draw.
+  toast.dismiss()
+})
 
 // jsdom has no media queries, and the Theme provider asks the OS which palette
 // it prefers. A window that is never asked follows light, which is what an
@@ -830,6 +836,196 @@ describe('Export', () => {
     const announced = document.querySelector('p[role="status"]')
     expect(announced?.getAttribute('aria-live')).toBe('polite')
     expect(announced?.textContent).toMatch(/Exported 1 Note to/)
+  })
+})
+
+describe('save confirmations', () => {
+  /**
+   * What the toasts on screen say. A save's confirmation is a toast, and the
+   * Toaster is mounted once for the whole view, so what it draws is what the
+   * user has been told.
+   */
+  function toasts(): string[] {
+    return [...document.querySelectorAll('[data-sonner-toast]')].map(
+      (toast) => toast.textContent ?? '',
+    )
+  }
+
+  it('says what a Start at Login press did', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+
+    showSettings(desktop)
+
+    const control = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    control.click()
+
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Work Journal will start at login.')
+  })
+
+  it('replaces one field’s toast rather than stacking one per keystroke', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+
+    showSettings(desktop)
+
+    const model = await screen.findByLabelText('Model')
+    fireEvent.change(model, { target: { value: 'llama3' } })
+    fireEvent.change(model, { target: { value: 'llama3.1' } })
+    fireEvent.change(model, { target: { value: 'llama3.2' } })
+
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Model saved.')
+    expect((model as HTMLInputElement).value).toBe('llama3.2')
+    expect(desktop.stored.model).toBe('llama3.2')
+  })
+
+  it('says which field refused, beside the line that stays', async () => {
+    const stored: Record<string, unknown> = { startAtLogin: false }
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          if (key === 'modelBaseUrl') throw new Error('the file is read-only')
+          stored[key] = value
+        },
+      }),
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    showSettings(desktop)
+
+    fireEvent.change(await screen.findByLabelText('Base URL'), {
+      target: { value: 'http://localhost:11434/v1' },
+    })
+
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Could not save the Base URL.')
+    // The toast fades; this is where the answer stays for whoever comes back.
+    expect(screen.queryAllByRole('alert').map((line) => line.textContent)).toContain(
+      'Base URL could not be saved to the settings file, so it will be gone at the next launch.',
+    )
+  })
+
+  it('confirms the Theme and says so when the store refuses it', async () => {
+    const stored: Record<string, unknown> = { startAtLogin: false }
+    // The store takes the first Theme and refuses the second, so the test
+    // sees both outcomes through one window.
+    let refusingTheme = false
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          if (key === 'theme' && refusingTheme) {
+            throw new Error('the file is read-only')
+          }
+          stored[key] = value
+        },
+      }),
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    showSettings(desktop)
+
+    screen.getByRole('button', { name: 'Dark' }).click()
+    await expect.poll(() => toasts().join(' | ')).toBe('Theme saved.')
+
+    refusingTheme = true
+    screen.getByRole('button', { name: 'Light' }).click()
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Could not save the Theme.')
+  })
+
+  it('confirms a Hotkey remap', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+
+    showSettings(desktop)
+
+    const change = await screen.findByRole('button', {
+      name: 'Change Note Hotkey',
+    })
+    change.click()
+    const recorder = await screen.findByRole('button', {
+      name: 'Press a combination…',
+    })
+    recorder.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'K',
+        code: 'KeyK',
+        ctrlKey: true,
+        metaKey: true,
+        bubbles: true,
+      }),
+    )
+
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('note Hotkey saved.')
+  })
+
+  it('confirms an API Key put in the Keychain, and one taken out', async () => {
+    const desktop = fakeDesktop({
+      stored: { startAtLogin: false },
+      apiKey: 'sk-from-an-earlier-run',
+    })
+
+    showSettings(desktop)
+
+    await screen.findByText(/A key is saved/)
+    screen.getByRole('button', { name: 'Clear' }).click()
+    await expect.poll(() => toasts().join(' | ')).toBe('API Key removed.')
+
+    fireEvent.change(screen.getByLabelText('API Key'), {
+      target: { value: 'sk-a-new-key' },
+    })
+    screen.getByRole('button', { name: 'Save' }).click()
+    await expect.poll(() => toasts().join(' | ')).toBe('API Key saved.')
+  })
+
+  it('confirms a calendar tick', async () => {
+    const desktop = fakeDesktop({
+      stored: { importMeetings: true, importCalendars: [], startAtLogin: false },
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+    })
+
+    showSettings(desktop)
+
+    const work = await screen.findByRole('checkbox', { name: /Work/ })
+    work.click()
+
+    await expect.poll(() => toasts().join(' | ')).toBe('Calendars saved.')
+  })
+
+  it('confirms a Standup Prompt keystroke', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+
+    showSettings(desktop)
+
+    fireEvent.change(await screen.findByLabelText('Standup Prompt'), {
+      target: { value: 'Write it in pirate speak.' },
+    })
+
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Standup Prompt saved.')
   })
 })
 

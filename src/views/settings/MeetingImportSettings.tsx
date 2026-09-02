@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Switch } from '@/components/ui/switch'
+import { useOnScreenToast } from '@/components/on-screen-toast'
 import type {
   CalendarAccess,
   CalendarInfo,
@@ -48,6 +49,9 @@ export default function MeetingImportSettings({
   // Why Import is not on, when the reason is the OS rather than the user.
   // Nothing until there is something to say.
   const [calendarProblem, setCalendarProblem] = useState<string | null>(null)
+  // A save here ends in a login item, a permission, or a file write the user
+  // cannot see; the toast is where each of those is confirmed.
+  const says = useOnScreenToast()
 
   // The calendars to read, and why they are not being read, answered by the
   // read's snapshot of macOS. Skipped when the user already turned Import on
@@ -103,6 +107,7 @@ export default function MeetingImportSettings({
         if (!next) {
           rollback = setImportMeetings(false)
           await settings.saveImportMeetings(false)
+          says.success('Meetings will no longer be imported.', 'import-meetings')
           return
         }
 
@@ -118,6 +123,10 @@ export default function MeetingImportSettings({
           rollback = setImportMeetings(true)
           setCalendarProblem(describeCalendarAccess(access))
           await settings.saveImportMeetings(true)
+          says.success(
+            'Meetings will be imported once macOS allows calendars.',
+            'import-meetings',
+          )
           return
         }
 
@@ -125,8 +134,10 @@ export default function MeetingImportSettings({
         setCalendarProblem(null)
         setCalendars(await desktop.calendars())
         await settings.saveImportMeetings(true)
+        says.success('Meetings will be imported.', 'import-meetings')
       } catch (error) {
         console.error('could not change how meetings are imported', error)
+        says.failure('Could not change how meetings are imported.', 'import-meetings')
         // A refusal from the permission check never moved the switch, so
         // there is nothing to roll back — the arriving read may still seed
         // it. Anything the press did move is rolled back to what the file
@@ -151,8 +162,11 @@ export default function MeetingImportSettings({
       : importCalendars.filter((each) => each !== id)
 
     const rollback = setImportCalendars(next)
-    settings.saveImportCalendars(next).catch((error: unknown) => {
-      console.error('could not change which calendars are imported', error)
+    settings.saveImportCalendars(next).then(
+      () => says.success('Calendars saved.', 'import-calendars'),
+      (error: unknown) => {
+        console.error('could not change which calendars are imported', error)
+        says.failure('Could not save which calendars to import.', 'import-calendars')
       // Roll back to what the file holds now — the ticks are written before
       // the announcement is sent, so a refusal arrives after the tick took.
       // The rollback belongs to this change: a newer press that landed while

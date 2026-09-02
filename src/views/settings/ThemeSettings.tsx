@@ -1,4 +1,5 @@
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { useOnScreenToast } from '@/components/on-screen-toast'
 import { useTheme } from '@/components/theme-context'
 import { isTheme, type Theme } from '@/settings/theme'
 import { SettingsAside, SettingsGroup, SettingsRow } from './SettingsGroup'
@@ -20,6 +21,17 @@ export default function ThemeSettings() {
   // Read from the provider rather than loaded here: the Hotkey and every other
   // window can change the Theme too, and a second copy would drift from it.
   const { theme, resolved, setTheme } = useTheme()
+  // The write is the only thing this control can be wrong about — the chip
+  // has already repainted — so what the store made of it is said, and only
+  // from here: the Theme Toggle owns its silence.
+  const says = useOnScreenToast()
+
+  function remember(choice: Theme) {
+    void setTheme(choice).then(
+      () => says.success('Theme saved.', 'theme'),
+      () => says.failure('Could not save the Theme.', 'theme'),
+    )
+  }
 
   return (
     <SettingsGroup>
@@ -40,7 +52,7 @@ export default function ThemeSettings() {
             // there is nothing to record.
             const chosen = next[0]
             if (isTheme(chosen)) {
-              setTheme(chosen)
+              remember(chosen)
             }
           }}
         >

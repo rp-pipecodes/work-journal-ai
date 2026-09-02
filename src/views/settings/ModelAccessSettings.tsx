@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useOnScreenToast } from '@/components/on-screen-toast'
 import type { Desktop } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
@@ -64,6 +65,11 @@ export default function ModelAccessSettings({
   // back: the field is text the user is still typing, and putting an older
   // value back under the cursor would throw away the keystrokes since.
   const [unsaved, setUnsaved] = useState({ modelBaseUrl: false, model: false })
+  // A field saves on every keystroke into it, and the write is otherwise
+  // silent; the toast with the field's name is where each save is heard. The
+  // toast replaces itself rather than stacking — one per field, not one per
+  // keystroke.
+  const says = useOnScreenToast()
 
   // Asked on its own rather than with the settings the store holds: a locked
   // Keychain is an ordinary answer here, and it must not take the rest of the
@@ -96,10 +102,14 @@ export default function ModelAccessSettings({
   function changeBaseUrl(next: string) {
     setModelBaseUrl(next)
     settings.saveModelBaseUrl(next).then(
-      () => record('modelBaseUrl', false),
+      () => {
+        record('modelBaseUrl', false)
+        says.success('Base URL saved.', 'model-base-url')
+      },
       (error: unknown) => {
         console.error('could not change where the model is', error)
         record('modelBaseUrl', true)
+        says.failure('Could not save the Base URL.', 'model-base-url')
       },
     )
   }
@@ -107,10 +117,14 @@ export default function ModelAccessSettings({
   function changeModel(next: string) {
     setModel(next)
     settings.saveModel(next).then(
-      () => record('model', false),
+      () => {
+        record('model', false)
+        says.success('Model saved.', 'model')
+      },
       (error: unknown) => {
         console.error('could not change which model is asked', error)
         record('model', true)
+        says.failure('Could not save the Model.', 'model')
       },
     )
   }
@@ -125,9 +139,11 @@ export default function ModelAccessSettings({
         setTypedKey('')
         setKeySet(true)
         setKeychainProblem(null)
+        says.success('API Key saved.', 'api-key')
       },
       (error: unknown) => {
         refuse('could not put the API Key in the Keychain', error)
+        says.failure('Could not save the API Key.', 'api-key')
       },
     )
   }
@@ -141,9 +157,11 @@ export default function ModelAccessSettings({
       () => {
         setKeySet(false)
         setKeychainProblem(null)
+        says.success('API Key removed.', 'api-key')
       },
       (error: unknown) => {
         refuse('could not take the API Key out of the Keychain', error)
+        says.failure('Could not remove the API Key.', 'api-key')
       },
     )
   }

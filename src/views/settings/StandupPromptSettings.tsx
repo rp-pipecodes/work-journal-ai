@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { useOnScreenToast } from '@/components/on-screen-toast'
 import { DEFAULT_STANDUP_PROMPT } from '@/settings/settings'
 import type { AppSettings } from '@/settings/app-settings'
 import type { SettingsInitialState } from './SettingsInitialState'
@@ -33,6 +34,9 @@ export default function StandupPromptSettings({
   // value back under the cursor would throw away the keystrokes since.
   const [unsaved, setUnsaved] = useState(false)
   const typedIn = useRef(false)
+  // A keystroke is a save here, and the field cannot say so; the toast with
+  // the prompt's name replaces itself rather than stacking one per keystroke.
+  const says = useOnScreenToast()
 
   useEffect(() => {
     if (initialSettings === null) return
@@ -49,10 +53,14 @@ export default function StandupPromptSettings({
     typedIn.current = true
     setStandupPrompt(next)
     settings.saveStandupPrompt(next).then(
-      () => setUnsaved(false),
+      () => {
+        setUnsaved(false)
+        says.success('Standup Prompt saved.', 'standup-prompt')
+      },
       (error: unknown) => {
         console.error('could not change the Standup Prompt', error)
         setUnsaved(true)
+        says.failure('Could not save the Standup Prompt.', 'standup-prompt')
       },
     )
   }

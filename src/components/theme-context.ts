@@ -11,8 +11,16 @@ export interface ThemeControl {
   theme: Theme
   /** What is actually painted, once the OS has been asked. */
   resolved: ResolvedTheme
-  /** Asks for a Theme. Remembered, and announced to every other window. */
-  setTheme: (theme: Theme) => void
+  /**
+   * Asks for a Theme. Remembered, and announced to every other window.
+   *
+   * The repaint and the announcement are not waited for — a window that
+   * cannot be written still repaints — but the promise the write settles with
+   * is handed back, so the caller that asked can say what became of it. Every
+   * caller may ignore it: the provider has already attached what keeps the
+   * rejection from going unheard.
+   */
+  setTheme: (theme: Theme) => Promise<void>
 }
 
 /**
@@ -23,7 +31,7 @@ export interface ThemeControl {
 export const ThemeContext = createContext<ThemeControl>({
   theme: DEFAULT_THEME,
   resolved: 'light',
-  setTheme: () => {},
+  setTheme: () => Promise.resolve(),
 })
 
 export function useTheme(): ThemeControl {

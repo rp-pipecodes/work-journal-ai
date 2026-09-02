@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
+import { useOnScreenToast } from '@/components/on-screen-toast'
 import type { Desktop } from '@/platform/desktop'
 import {
   describeUnavailableHotkey,
@@ -44,6 +45,10 @@ export default function HotkeySettings({
   // Which recorder is listening, if either. One at a time: a keystroke can only
   // belong to one of them.
   const [recording, setRecording] = useState<HotkeyAction | null>(null)
+  // A remap is a save with no other feedback than the chips changing: the
+  // toast is where the user hears that the combination was taken, or why it
+  // was refused.
+  const says = useOnScreenToast()
 
   const remap = useCallback(
     (action: HotkeyAction, next: string) => {
@@ -52,16 +57,18 @@ export default function HotkeySettings({
         (status) => {
           setHotkeys(status)
           setHotkeyProblem((problems) => ({ ...problems, [action]: undefined }))
+          says.success(`${action} Hotkey saved.`, action)
         },
         (reason: unknown) => {
           setHotkeyProblem((problems) => ({
             ...problems,
             [action]: describeUnavailableHotkey(action, next, String(reason)),
           }))
+          says.failure(`Could not save the ${action} Hotkey.`, action)
         },
       )
     },
-    [desktop, setHotkeys],
+    [desktop, says, setHotkeys],
   )
 
   return (
