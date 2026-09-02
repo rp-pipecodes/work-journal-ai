@@ -57,7 +57,7 @@ export async function selectStandupPost({
     await Promise.all([
       journal.notesForFilter({ from: yesterday, to: yesterday }),
       journal.completedTasks(),
-      journal.completedOccurrences({ from: yesterday, to: yesterday }),
+      journal.occurrencesKeptIn({ from: yesterday, to: yesterday }),
       journal.openTasks(),
     ])
 

@@ -486,7 +486,7 @@ export interface Journal {
    * occurrence's record, and the Task carries on asking for the next slot —
    * so a range read here never decides anything about the parent.
    */
-  completedOccurrences(range: DayRange): Promise<CompletedOccurrence[]>
+  occurrencesKeptIn(range: DayRange): Promise<CompletedOccurrence[]>
   /**
    * Changes a Task: what it says, and when it is meant to be done. One
    * operation and one write, because the Task Editor commits both at once and
@@ -1359,7 +1359,7 @@ export function createJournal({
       return rows.map(toTask)
     },
 
-    async completedOccurrences(range) {
+    async occurrencesKeptIn(range) {
       // The range's ends are Journal Days — local calendar days — so the
       // bounds must be the UTC instants of their local midnights. A string
       // bound would be a UTC midnight, and west of UTC every evening

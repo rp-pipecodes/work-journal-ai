@@ -2118,7 +2118,7 @@ describe('completedTasks', () => {
   })
 })
 
-describe('completedOccurrences', () => {
+describe('occurrencesKeptIn', () => {
   /** The kept occurrences, as plain `description (slot)` lines, newest first. */
   function kept(
     pairs: Array<{ task: Task; occurrence: TaskOccurrence }>,
@@ -2146,7 +2146,7 @@ describe('completedOccurrences', () => {
     clock.set(local('2026-03-11T17:00:00'))
     await journal.capture('a note on the day')
 
-    const selected = await journal.completedOccurrences({
+    const selected = await journal.occurrencesKeptIn({
       from: '2026-03-11',
       to: '2026-03-11',
     })
@@ -2180,7 +2180,7 @@ describe('completedOccurrences', () => {
 
     expect(
       kept(
-        await journal.completedOccurrences({
+        await journal.occurrencesKeptIn({
           from: '2026-03-11',
           to: '2026-03-11',
         }),
@@ -2188,7 +2188,7 @@ describe('completedOccurrences', () => {
     ).toEqual(['water the plants (2026-03-11 09:00)'])
     expect(
       kept(
-        await journal.completedOccurrences({
+        await journal.occurrencesKeptIn({
           from: '2026-03-10',
           to: '2026-03-11',
         }),
@@ -2214,7 +2214,7 @@ describe('completedOccurrences', () => {
 
     expect(
       kept(
-        await journal.completedOccurrences({
+        await journal.occurrencesKeptIn({
           from: '2026-03-10',
           to: '2026-03-11',
         }),
@@ -2231,7 +2231,7 @@ describe('completedOccurrences', () => {
     )
 
     expect(
-      await journal.completedOccurrences({
+      await journal.occurrencesKeptIn({
         from: '2026-03-11',
         to: '2026-03-11',
       }),
@@ -2252,13 +2252,13 @@ describe('completedOccurrences', () => {
     clock.set(local('2026-07-02T00:30:00'))
     await journal.completeTask(daily.id)
 
-    const onTheSecond = await journal.completedOccurrences({
+    const onTheSecond = await journal.occurrencesKeptIn({
       from: '2026-07-02',
       to: '2026-07-02',
     })
     expect(kept(onTheSecond)).toEqual(['water the plants (2026-07-01 23:00)'])
 
-    const onTheFirst = await journal.completedOccurrences({
+    const onTheFirst = await journal.occurrencesKeptIn({
       from: '2026-07-01',
       to: '2026-07-01',
     })
@@ -2282,14 +2282,14 @@ describe('completedOccurrences', () => {
 
     expect(
       kept(
-        await journal.completedOccurrences({
+        await journal.occurrencesKeptIn({
           from: '2026-10-25',
           to: '2026-10-25',
         }),
       ),
     ).toEqual(['water the plants (2026-10-24 23:00)'])
     expect(
-      await journal.completedOccurrences({
+      await journal.occurrencesKeptIn({
         from: '2026-10-24',
         to: '2026-10-24',
       }),
