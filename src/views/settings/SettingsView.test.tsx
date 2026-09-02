@@ -979,9 +979,11 @@ describe('save confirmations', () => {
       .poll(() => toasts().join(' | '))
       .toBe('Note Hotkey saved.')
 
-    // The refusal names it the same way, against the right action. The
-    // completed remap re-rendered the row, so the Change button is found
-    // again rather than pressed where it used to be.
+    // The refusal names it the same way, against the right action, and
+    // replaces the confirmation rather than stacking beside it — one toast
+    // per Hotkey, not one per remap. The completed remap re-rendered the
+    // row, so the Change button is found again rather than pressed where
+    // it used to be.
     desktop.setHotkey = () =>
       Promise.reject(new Error('it is already the Task Hotkey'))
     screen.getByRole('button', { name: 'Change Note Hotkey' }).click()
@@ -1001,6 +1003,30 @@ describe('save confirmations', () => {
     await expect
       .poll(() => toasts().join(' | '))
       .toBe('Could not save the Note Hotkey.')
+
+    // The other Hotkey has a toast of its own: the two are independent
+    // settings and never share one.
+    desktop.setHotkey = async (action, next) => ({
+      ...desktop.hotkeyStatus(),
+      [action]: { state: 'registered', hotkey: next },
+    }) as never
+    screen.getByRole('button', { name: 'Change Task Hotkey' }).click()
+    const taskRecording = await screen.findByRole('button', {
+      name: 'Press a combination…',
+    })
+    taskRecording.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'T',
+        code: 'KeyT',
+        ctrlKey: true,
+        metaKey: true,
+        bubbles: true,
+      }),
+    )
+
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Task Hotkey saved. | Could not save the Note Hotkey.')
   })
 
   it('confirms an API Key put in the Keychain, and one taken out', async () => {

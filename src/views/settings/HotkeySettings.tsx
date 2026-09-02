@@ -61,14 +61,14 @@ export default function HotkeySettings({
         (status) => {
           setHotkeys(status)
           setHotkeyProblem((problems) => ({ ...problems, [action]: undefined }))
-          says.success(`${label} saved.`, action)
+          says.success(`${label} saved.`, `hotkey-${action}`)
         },
         (reason: unknown) => {
           setHotkeyProblem((problems) => ({
             ...problems,
             [action]: describeUnavailableHotkey(action, next, String(reason)),
           }))
-          says.failure(`Could not save the ${label}.`, action)
+          says.failure(`Could not save the ${label}.`, `hotkey-${action}`)
         },
       )
     },
