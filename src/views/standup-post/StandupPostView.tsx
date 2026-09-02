@@ -240,6 +240,11 @@ export default function StandupPostView({
  * halves. Always on screen, so the user sees what a call would spend before
  * spending it — and a day with neither half says so here, which is what makes
  * the Generate button's refusal read as an explanation rather than a mystery.
+ *
+ * Task Occurrences completed yesterday are counted on their own line rather
+ * than folded into Completed Tasks: a Task Occurrence is not a Completed Task
+ * and never joins them, so two record types that behave differently are two
+ * counts.
  */
 function MaterialSummary({ selection }: { selection: StandupPostSelection }) {
   return (
@@ -257,6 +262,9 @@ function MaterialSummary({ selection }: { selection: StandupPostSelection }) {
         </p>
         <p className="type-meta text-muted-foreground">
           {count(selection.completedTasks.length, 'Completed Task')}
+        </p>
+        <p className="type-meta text-muted-foreground">
+          {count(selection.completedOccurrences.length, 'recurring completion')}
         </p>
       </section>
 

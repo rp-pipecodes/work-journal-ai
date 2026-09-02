@@ -14,7 +14,9 @@ import {
   journalDayFor,
   rangeForPreset,
   scheduleOf,
+  slotOf,
   type Clock,
+  type CompletedOccurrence,
   type Journal,
   type Note,
   type Task,
@@ -27,6 +29,12 @@ export interface StandupPostSelection {
   notes: Note[]
   /** Ordinary Tasks completed yesterday, newest completion first. */
   completedTasks: Task[]
+  /**
+   * Task Occurrences completed yesterday, newest completion first, each with
+   * the Recurring Task it belongs to. The parent is never completed by this —
+   * it continues, and appears among today's Open Tasks.
+   */
+  completedOccurrences: CompletedOccurrence[]
   /** Open Tasks that are Overdue or scheduled for today. */
   openTasks: Task[]
 }
@@ -45,11 +53,13 @@ export async function selectStandupPost({
 }): Promise<StandupPostSelection> {
   const now = clock.now()
   const yesterday = rangeForPreset('yesterday', journalDayFor(now)).from
-  const [notes, completedTasks, openTasks] = await Promise.all([
-    journal.notesForFilter({ from: yesterday, to: yesterday }),
-    journal.completedTasks(),
-    journal.openTasks(),
-  ])
+  const [notes, completedTasks, completedOccurrences, openTasks] =
+    await Promise.all([
+      journal.notesForFilter({ from: yesterday, to: yesterday }),
+      journal.completedTasks(),
+      journal.completedOccurrences({ from: yesterday, to: yesterday }),
+      journal.openTasks(),
+    ])
 
   const completedYesterday = completedTasks.filter(
     (task) =>
@@ -64,19 +74,25 @@ export async function selectStandupPost({
     yesterday,
     notes,
     completedTasks: completedYesterday,
+    completedOccurrences,
     openTasks: openTodayOrOverdue,
   }
 }
 
 /**
  * Whether a Generate would refuse without spending a call. The two halves are
- * yesterday — Notes and Tasks completed yesterday — and today's Open Tasks
- * that stand on their own; only a day with neither half is nothing to say.
+ * yesterday — Notes, Tasks completed yesterday, and Task Occurrences kept
+ * yesterday — and today's Open Tasks that stand on their own; only a day
+ * with neither half is nothing to say. A kept recurring commitment is real
+ * work, so a day whose only content is a completed occurrence is not refused:
+ * which unblocks a billable Generate on days that are refused for free
+ * without it.
  */
 export function standupPostRefuses(selection: StandupPostSelection): boolean {
   return (
     selection.notes.length === 0 &&
     selection.completedTasks.length === 0 &&
+    selection.completedOccurrences.length === 0 &&
     selection.openTasks.length === 0
   )
 }
@@ -107,12 +123,15 @@ export async function buildStandupPostInput({
 
   const parts: string[] = []
   if (digest.markdown !== '') parts.push(digest.markdown)
-  if (selection.completedTasks.length > 0) {
-    parts.push(
-      `## Completed yesterday\n${selection.completedTasks
-        .map((task) => taskBullet(task))
-        .join('\n')}`,
-    )
+  if (
+    selection.completedTasks.length > 0 ||
+    selection.completedOccurrences.length > 0
+  ) {
+    const bullets = [
+      ...selection.completedOccurrences.map(occurrenceBullet),
+      ...selection.completedTasks.map((task) => taskBullet(task)),
+    ]
+    parts.push(`## Completed yesterday\n${bullets.join('\n')}`)
   }
   if (selection.openTasks.length > 0) {
     parts.push(
@@ -138,3 +157,16 @@ function taskBullet(task: Task): string {
   return `- [${box}] ${task.description}${said}`
 }
 
+/**
+ * One kept Task Occurrence as the model hears it: always checked, because
+ * the record is a completion — the checkbox is the occurrence's, never the
+ * parent Task's, which carries on and is rendered only under Still to do.
+ * The Task Description comes from the parent riding along in the selection,
+ * and the slot is spelled the one way the app spells one, the word
+ * `occurrence` matching Export and the glossary.
+ */
+function occurrenceBullet(completed: CompletedOccurrence): string {
+  return `- [x] ${completed.task.description} (occurrence ${formatSlot(
+    slotOf(completed.occurrence),
+  )})`
+}

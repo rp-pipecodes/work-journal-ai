@@ -71,6 +71,35 @@ async function journalWithBothHalves(
   await journal.createTask('upcoming', { date: '2026-03-13', time: null })
 }
 
+/**
+ * A Recurring Task one of whose occurrences was completed yesterday: the
+ * series was created on the 10th for the 11th at 09:00, opened on yesterday's
+ * slot, and was completed at 10:00 that morning. The parent continues, and a
+ * reanchoring edit moves its Open slot out of the Standup Post's Open half —
+ * which a schedule edit does without touching the kept history — so the tests
+ * that use this see the occurrence and its count on their own.
+ */
+async function journalWithCompletedOccurrence(
+  journal: Journal,
+  clock: ReturnType<typeof fixedClock>,
+): Promise<void> {
+  clock.set(new Date('2026-03-11T08:00:00'))
+  const daily = await journal.createTask(
+    'water the plants',
+    { date: '2026-03-11', time: '09:00' },
+    { unit: 'day', interval: 1, weekdays: [] },
+  )
+
+  clock.set(new Date('2026-03-11T10:00:00'))
+  await journal.completeTask(daily.id)
+
+  clock.set(new Date('2026-03-12T09:00:00'))
+  await journal.editTask(daily.id, {
+    description: 'water the plants',
+    schedule: { date: '2026-03-16', time: '09:00' },
+  })
+}
+
 describe('Standup Post section', () => {
   it('shows yesterday’s date and the counts for both halves', async () => {
     const { journal, clock, desktop, settings } = await standupPostAt()
@@ -85,8 +114,38 @@ describe('Standup Post section', () => {
     ).toBeTruthy()
     expect(await screen.findByText('2 Notes')).toBeTruthy()
     expect(await screen.findByText('1 Completed Task')).toBeTruthy()
+    expect(await screen.findByText('0 recurring completions')).toBeTruthy()
     expect(await screen.findByText('2 Open Tasks')).toBeTruthy()
     expect(await screen.findByRole('button', { name: 'Generate' })).toBeTruthy()
+  })
+
+  it('counts recurring completions separately from Completed Tasks', async () => {
+    const { journal, clock, desktop, settings } = await standupPostAt()
+    await journalWithCompletedOccurrence(journal, clock)
+
+    renderStandupPost({ journal, clock, desktop, settings })
+
+    // The occurrence is not a Completed Task, so the summary never folds it
+    // into that count: the user sees what a billable call is about to spend
+    // itself on, and a Task Occurrence is a different record.
+    expect(await screen.findByText('0 Completed Tasks')).toBeTruthy()
+    expect(await screen.findByText('1 recurring completion')).toBeTruthy()
+  })
+
+  it('sends the completed occurrence in the material a call is written from', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await standupPostAt()
+    await journalWithCompletedOccurrence(journal, clock)
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    await screen.findByRole('button', { name: 'Generate' })
+
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+
+    await screen.findByText('The standup post the model wrote.')
+    expect(desktop.standupRequests[0].userContent).toContain(
+      '- [x] water the plants (occurrence 2026-03-11 09:00)',
+    )
   })
 
   it('says Nothing to say when both halves are empty, and refuses Generate without spending a call', async () => {
