@@ -11,6 +11,7 @@ import type { AppSettings } from '@/settings/app-settings'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 import type { SettingsInitialState } from './SettingsInitialState'
 import { useSeededState } from './useSeededState'
+import { saySettled } from './saySettled'
 import {
   SettingsAside,
   SettingsGroup,
@@ -162,21 +163,23 @@ export default function MeetingImportSettings({
       : importCalendars.filter((each) => each !== id)
 
     const rollback = setImportCalendars(next)
-    settings.saveImportCalendars(next).then(
-      () => says.success('Calendars saved.', 'import-calendars'),
-      (error: unknown) => {
-        console.error('could not change which calendars are imported', error)
-        says.failure('Could not save which calendars to import.', 'import-calendars')
+    saySettled(says, settings.saveImportCalendars(next), {
+      id: 'import-calendars',
+      saved: 'Calendars saved.',
+      couldNot: 'Could not save which calendars to import.',
+      what: 'could not change which calendars are imported',
       // Roll back to what the file holds now — the ticks are written before
       // the announcement is sent, so a refusal arrives after the tick took.
       // The rollback belongs to this change: a newer press that landed while
       // the re-read was in flight is not undone by it. The re-read is newer
       // than the initial snapshot, so it silences the arriving read; the
       // ticks agree with the file.
-      void settings.load().then(
-        (stored) => rollback(stored.importCalendars),
-        () => rollback(importCalendars),
-      )
+      onRefused: () => {
+        void settings.load().then(
+          (stored) => rollback(stored.importCalendars),
+          () => rollback(importCalendars),
+        )
+      },
     })
   }
 

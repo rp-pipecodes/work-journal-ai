@@ -6,6 +6,7 @@ import { DEFAULT_STANDUP_PROMPT } from '@/settings/settings'
 import type { AppSettings } from '@/settings/app-settings'
 import type { SettingsInitialState } from './SettingsInitialState'
 import { SettingsGroup, SettingsProblem, SettingsRow, notStored } from './SettingsGroup'
+import { saySettled } from './saySettled'
 
 /**
  * The system prompt a Standup Post is written under, as the user's — plain
@@ -52,17 +53,14 @@ export default function StandupPromptSettings({
   function change(next: string) {
     typedIn.current = true
     setStandupPrompt(next)
-    settings.saveStandupPrompt(next).then(
-      () => {
-        setUnsaved(false)
-        says.success('Standup Prompt saved.', 'standup-prompt')
-      },
-      (error: unknown) => {
-        console.error('could not change the Standup Prompt', error)
-        setUnsaved(true)
-        says.failure('Could not save the Standup Prompt.', 'standup-prompt')
-      },
-    )
+    saySettled(says, settings.saveStandupPrompt(next), {
+      id: 'standup-prompt',
+      saved: 'Standup Prompt saved.',
+      couldNot: 'Could not save the Standup Prompt.',
+      what: 'could not change the Standup Prompt',
+      onSaved: () => setUnsaved(false),
+      onRefused: () => setUnsaved(true),
+    })
   }
 
   /**

@@ -14,6 +14,7 @@ import {
 } from '@/settings/hotkey'
 import type { SettingsInitialState } from './SettingsInitialState'
 import { useSeededState } from './useSeededState'
+import { saySettled } from './saySettled'
 import {
   SettingsAside,
   SettingsGroup,
@@ -57,20 +58,21 @@ export default function HotkeySettings({
       // The setting's own name — `Note Hotkey`, not the bare action — the
       // same name a refusal below is said against.
       const { label } = describeHotkeyAction(action)
-      desktop.setHotkey(action, next).then(
-        (status) => {
+      saySettled(says, desktop.setHotkey(action, next), {
+        id: `hotkey-${action}`,
+        saved: `${label} saved.`,
+        couldNot: `Could not save the ${label}.`,
+        onSaved: (status) => {
           setHotkeys(status)
           setHotkeyProblem((problems) => ({ ...problems, [action]: undefined }))
-          says.success(`${label} saved.`, `hotkey-${action}`)
         },
-        (reason: unknown) => {
+        onRefused: (reason: unknown) => {
           setHotkeyProblem((problems) => ({
             ...problems,
             [action]: describeUnavailableHotkey(action, next, String(reason)),
           }))
-          says.failure(`Could not save the ${label}.`, `hotkey-${action}`)
         },
-      )
+      })
     },
     [desktop, says, setHotkeys],
   )

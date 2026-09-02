@@ -17,6 +17,7 @@ import type { AppSettings } from '@/settings/app-settings'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 import type { SettingsInitialState } from './SettingsInitialState'
 import { useSeededState } from './useSeededState'
+import { saySettled } from './saySettled'
 import { SettingsGroup, SettingsRow } from './SettingsGroup'
 
 /** The start-at-login preference, including its first-run question. */
@@ -81,33 +82,26 @@ export default function StartAtLoginSettings({
 
   function toggleStartAtLogin(next: boolean) {
     const rollback = setStartAtLogin(next)
-    settings.saveStartAtLogin(next).then(
-      () => {
-        // The outcome, not the toggle state: an answer already on with the
-        // file rewritten beneath it is worth saying, because the user cannot
-        // see the file.
-        says.success(
-          next
-            ? 'Work Journal will start at login.'
-            : 'Work Journal will not start at login.',
-          'start-at-login',
-        )
-      },
-      (error: unknown) => {
-        console.error('could not change the login item', error)
-        says.failure(
-          'Could not change whether Work Journal starts at login.',
-          'start-at-login',
-        )
-        // Roll back to what the OS says now — the login item is changed before
-        // the file is written, so a refusal leaves both holding the earlier
-        // wish. The rollback belongs to this change: a newer press that landed
-        // while the re-read was in flight is not undone by it. The re-read is
-        // newer than the initial snapshot, so it silences the arriving read;
-        // the switch agrees with the OS and the file.
+    saySettled(says, settings.saveStartAtLogin(next), {
+      id: 'start-at-login',
+      // The outcome, not the toggle state: an answer already on with the
+      // file rewritten beneath it is worth saying, because the user cannot
+      // see the file.
+      saved: next
+        ? 'Work Journal will start at login.'
+        : 'Work Journal will not start at login.',
+      couldNot: 'Could not change whether Work Journal starts at login.',
+      what: 'could not change the login item',
+      // Roll back to what the OS says now — the login item is changed before
+      // the file is written, so a refusal leaves both holding the earlier
+      // wish. The rollback belongs to this change: a newer press that landed
+      // while the re-read was in flight is not undone by it. The re-read is
+      // newer than the initial snapshot, so it silences the arriving read;
+      // the switch agrees with the OS and the file.
+      onRefused: () => {
         void desktop.startsAtLogin().then(rollback, () => rollback(!next))
       },
-    )
+    })
   }
 
   /** The first-run answer, which is an answer either way. */

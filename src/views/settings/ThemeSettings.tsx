@@ -3,6 +3,7 @@ import { useOnScreenToast } from '@/components/on-screen-toast'
 import { useTheme } from '@/components/theme-context'
 import { isTheme, type Theme } from '@/settings/theme'
 import { SettingsAside, SettingsGroup, SettingsRow } from './SettingsGroup'
+import { saySettled } from './saySettled'
 
 /**
  * The Themes as a segmented control offers them: the two palettes first,
@@ -27,10 +28,11 @@ export default function ThemeSettings() {
   const says = useOnScreenToast()
 
   function remember(choice: Theme) {
-    void setTheme(choice).then(
-      () => says.success('Theme saved.', 'theme'),
-      () => says.failure('Could not save the Theme.', 'theme'),
-    )
+    saySettled(says, setTheme(choice), {
+      id: 'theme',
+      saved: 'Theme saved.',
+      couldNot: 'Could not save the Theme.',
+    })
   }
 
   return (
