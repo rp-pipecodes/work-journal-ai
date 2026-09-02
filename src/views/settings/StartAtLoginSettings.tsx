@@ -94,10 +94,8 @@ export default function StartAtLoginSettings({
       what: 'could not change the login item',
       // Roll back to what the OS says now — the login item is changed before
       // the file is written, so a refusal leaves both holding the earlier
-      // wish. The rollback belongs to this change: a newer press that landed
-      // while the re-read was in flight is not undone by it. The re-read is
-      // newer than the initial snapshot, so it silences the arriving read;
-      // the switch agrees with the OS and the file.
+      // wish. The re-read is newer than the initial snapshot, so it silences
+      // the arriving read; the switch agrees with the OS and the file.
       onRefused: () => {
         void desktop.startsAtLogin().then(rollback, () => rollback(!next))
       },

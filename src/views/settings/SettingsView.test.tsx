@@ -74,6 +74,17 @@ function isOn(control: HTMLElement): boolean {
   return control.getAttribute('aria-checked') === 'true'
 }
 
+/**
+ * What the toasts on screen say. A save's confirmation is a toast, and the
+ * Toaster is mounted once for the whole view, so what it draws is what the
+ * user has been told.
+ */
+function toasts(): string[] {
+  return [...document.querySelectorAll('[data-sonner-toast]')].map(
+    (toast) => toast.textContent ?? '',
+  )
+}
+
 describe('the Import switch', () => {
   it('withdraws the wish when pressed with the calendar permission gone', async () => {
     // The wish outlives a lost permission, which is what makes the reason
@@ -162,11 +173,11 @@ describe('the Import switch', () => {
     await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
   })
 
-  it('rolls a failed switch save back to what the file holds', async () => {
-    // The wish is written to the file before the announcement is sent, so a
-    // refusal arrives after the change took. The rollback re-reads what the
-    // file holds now — the wish, newer than the initial snapshot, so it
-    // wins over the arriving read — and the switch agrees with the file.
+  it('says a switch press as saved even when its announcement could not be sent', async () => {
+    // The emit that keeps the other windows honest is not what saves: a
+    // failed one leaves the file written and the wish standing, and the
+    // window that sweeps catches up at its next read. Told as refused, the
+    // toast would contradict the switch it sits beside.
     const stored: Record<string, unknown> = {
       importMeetings: true,
       startAtLogin: false,
@@ -190,54 +201,59 @@ describe('the Import switch', () => {
     deferred.openTheStore()
     await readLanded()
 
-    // The write reached the file; the switch reads the same wish, not the
-    // default the failed press rolled back to.
+    // The wish is in the file, and the switch agrees with it — said as saved,
+    // not rolled back.
     expect(isOn(importSwitch())).toBe(true)
     await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Meetings will be imported.')
   })
 
   it('keeps a calendar tick after its save failed', async () => {
-    // The tick is written to the file before the announcement is sent, so a
-    // refusal arrives after the tick took. The rollback re-reads what the
-    // file holds now — the tick, newer than the initial snapshot, so it
-    // wins over the arriving read — and the tick agrees with the file.
+    // A tick the file refused is said as refused, and the ticks read what
+    // the file holds: the rollback re-reads it, so the tick the user sees
+    // agrees with the file even when the file said no.
     const stored: Record<string, unknown> = {
       importMeetings: true,
       importCalendars: ['work'],
       startAtLogin: false,
       model: 'gpt-stored',
     }
-    const deferred = deferredStore(stored)
     const desktop = fakeDesktop({
       stored,
       access: 'granted',
       calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
-      openSettingsStore: deferred.openSettingsStore,
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          // The one write the settings file will not take.
+          if (key === 'importCalendars') {
+            throw new Error('the file is read-only')
+          }
+          stored[key] = value
+        },
+      }),
     })
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    // The switch's own announcement lands; the tick's does not.
-    let announcements = 0
-    desktop.announceImportChanged = () => {
-      announcements += 1
-      return announcements === 1
-        ? Promise.resolve()
-        : Promise.reject(new Error('the window is gone'))
-    }
 
     showSettings(desktop)
 
-    expect(isOn(importSwitch())).toBe(false)
-    importSwitch().click()
     const work = await screen.findByRole('checkbox', { name: /Work/ })
     work.click()
 
-    deferred.openTheStore()
-    await readLanded()
-
-    // The write reached the file; the tick reads the same choice, not the
-    // blank the failed save rolled it back to.
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Could not save which calendars to import.')
+    // The rollback re-read what the file holds — the tick as an earlier run
+    // left it — and the ticks agree with the file, not with the refused press.
     expect(isOn(screen.getByRole('checkbox', { name: /Work/ }))).toBe(true)
-    await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
+    expect(desktop.stored.importCalendars).toEqual(['work'])
   })
 
   it('keeps a grant won in the gap over the older read', async () => {
@@ -283,80 +299,6 @@ describe('the Import switch', () => {
     ).toBeNull()
   })
 
-  it('discards an older Import rollback still in flight when a newer press lands', async () => {
-    // Press A turns Import on: the wish reaches the file, then the
-    // announcement refuses, so the rollback re-reads the file. The read is
-    // serviced before press B turns it off again, and resolves after — the
-    // older rollback's captured true must not be put back over the newer
-    // change, or the switch would read on while the file held false.
-    const stored: Record<string, unknown> = {
-      importMeetings: false,
-      startAtLogin: false,
-      model: 'gpt-stored',
-    }
-    // The rollback's read of the wish: serviced now, delivered when the test
-    // says so. The initial read's own answer is immediate.
-    let releaseRead = () => {}
-    const readAnswered = new Promise<void>((resolve) => {
-      releaseRead = resolve
-    })
-    let importMeetingsReads = 0
-    let captured: unknown
-    const desktop = fakeDesktop({
-      stored,
-      access: 'granted',
-      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
-      openSettingsStore: async () => ({
-        async get<T>(key: string) {
-          if (key === 'importMeetings') {
-            importMeetingsReads += 1
-            // The second read is the rollback's; hold its answer.
-            if (importMeetingsReads === 2) {
-              captured = stored.importMeetings
-              return readAnswered.then(() => captured as T)
-            }
-          }
-          return stored[key] as T | undefined
-        },
-        async has(key: string) {
-          return key in stored
-        },
-        async set(key: string, value: unknown) {
-          stored[key] = value
-        },
-      }),
-    })
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-    // The switch's own announcement fails; a later one lands.
-    let announcements = 0
-    desktop.announceImportChanged = () => {
-      announcements += 1
-      return announcements === 1
-        ? Promise.reject(new Error('the window is gone'))
-        : Promise.resolve()
-    }
-
-    showSettings(desktop)
-
-    expect(isOn(importSwitch())).toBe(false)
-    // Press A: the wish reaches the file, the announcement refuses, and the
-    // rollback's read is now in flight.
-    importSwitch().click()
-    await expect.poll(() => importMeetingsReads).toBe(2)
-
-    // Press B: off, and this write reaches the file.
-    importSwitch().click()
-    await expect.poll(() => desktop.stored.importMeetings).toBe(false)
-
-    releaseRead()
-
-    // The rollback's delivery has had its chance by the time a macrotask
-    // runs — its state update is a microtask, and it is discarded, so the
-    // switch still agrees with the file.
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(isOn(importSwitch())).toBe(false)
-    expect(desktop.stored.importMeetings).toBe(false)
-  })
 })
 
 describe('the Theme control', () => {
@@ -840,17 +782,6 @@ describe('Export', () => {
 })
 
 describe('save confirmations', () => {
-  /**
-   * What the toasts on screen say. A save's confirmation is a toast, and the
-   * Toaster is mounted once for the whole view, so what it draws is what the
-   * user has been told.
-   */
-  function toasts(): string[] {
-    return [...document.querySelectorAll('[data-sonner-toast]')].map(
-      (toast) => toast.textContent ?? '',
-    )
-  }
-
   it('says what a Start at Login press did', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
 
@@ -1095,13 +1026,33 @@ describe('save confirmations', () => {
   })
 
   it('says so when the Import save itself refuses', async () => {
+    // A write the file refuses is a save that did not happen: the toast says
+    // so, and the rollback leaves the switch agreeing with the file.
+    const stored: Record<string, unknown> = {
+      importMeetings: false,
+      startAtLogin: false,
+      model: 'gpt-stored',
+    }
     const desktop = fakeDesktop({
-      stored: { importMeetings: false, startAtLogin: false },
+      stored,
       access: 'granted',
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          // The one write the settings file will not take.
+          if (key === 'importMeetings') {
+            throw new Error('the file is read-only')
+          }
+          stored[key] = value
+        },
+      }),
     })
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    desktop.announceImportChanged = () =>
-      Promise.reject(new Error('the window is gone'))
 
     showSettings(desktop)
 
@@ -1110,6 +1061,9 @@ describe('save confirmations', () => {
     await expect
       .poll(() => toasts().join(' | '))
       .toBe('Could not change how meetings are imported.')
+    // Nothing took: the switch reads the file, not the refused press.
+    await expect.poll(() => isOn(importSwitch())).toBe(false)
+    expect(desktop.stored.importMeetings).toBe(false)
   })
 
   it('confirms a calendar tick', async () => {

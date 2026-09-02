@@ -142,10 +142,9 @@ export default function MeetingImportSettings({
         // A refusal from the permission check never moved the switch, so
         // there is nothing to roll back — the arriving read may still seed
         // it. Anything the press did move is rolled back to what the file
-        // holds now (the wish is written before the announcement is sent, so
-        // a refusal arrives after the change took). The rollback belongs to
-        // this change: a newer press that landed while it was in flight is
-        // not undone by it.
+        // holds now: the file is what a save is, so only its refusal can
+        // arrive after a change took. The rollback belongs to this change: a
+        // newer press that landed while it was in flight is not undone by it.
         if (rollback === undefined) return
         const rollbackThisChange = rollback
         void settings.load().then(
@@ -168,8 +167,8 @@ export default function MeetingImportSettings({
       saved: 'Calendars saved.',
       couldNot: 'Could not save which calendars to import.',
       what: 'could not change which calendars are imported',
-      // Roll back to what the file holds now — the ticks are written before
-      // the announcement is sent, so a refusal arrives after the tick took.
+      // Roll back to what the file holds now: the file is what a save is,
+      // so the ticks agree with it whatever the refused press moved.
       // The rollback belongs to this change: a newer press that landed while
       // the re-read was in flight is not undone by it. The re-read is newer
       // than the initial snapshot, so it silences the arriving read; the
