@@ -162,6 +162,77 @@ describe('the section the Main Window opens on', () => {
   })
 })
 
+describe('an update installing while the user goes elsewhere', () => {
+  it('defers the restart until Settings is being looked at again', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({ captured: [MONDAY] })
+    desktop.availableUpdate = { version: '0.9.0' }
+
+    // The frames the restart waits for, held here so the moment between the
+    // install and the paint can be widened to whatever this test needs.
+    const queued = new Map<number, FrameRequestCallback>()
+    let asked = 0
+    const realRequest = window.requestAnimationFrame
+    const realCancel = window.cancelAnimationFrame
+    window.requestAnimationFrame = ((run: FrameRequestCallback) => {
+      asked += 1
+      queued.set(asked, run)
+      return asked
+    }) as typeof window.requestAnimationFrame
+    window.cancelAnimationFrame = ((frame: number) => {
+      queued.delete(frame)
+    }) as typeof window.cancelAnimationFrame
+
+    try {
+      await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
+      await showsSettings()
+
+      await user.click(
+        await screen.findByRole('button', { name: 'Check for updates' }),
+      )
+      await user.click(
+        await screen.findByRole('button', { name: 'Install 0.9.0' }),
+      )
+      await expect.poll(() => queued.size).toBeGreaterThan(0)
+
+      // The download is done and the restart is a frame away when the user
+      // goes back to their journal. Settings is hidden, not unmounted — the
+      // section they left is the one they will come back to.
+      await user.click(within(sidebar()).getByRole('button', { name: 'History' }))
+      await showsHistory()
+
+      for (let frame = 0; queued.size > 0 && frame < 10; frame += 1) {
+        const [held, run] = [...queued.entries()][0]
+        queued.delete(held)
+        run(0)
+      }
+
+      // Quitting out from under a section that never said a word about it is
+      // the app disappearing for no reason the user can see.
+      expect(desktop.restarts).toBe(0)
+
+      // Deferred, not abandoned: the release is installed and the line under
+      // the button still says so, so coming back is where the restart lands.
+      await user.click(
+        within(sidebar()).getByRole('button', { name: 'Settings' }),
+      )
+      await showsSettings()
+      await expect.poll(() => queued.size).toBeGreaterThan(0)
+
+      for (let frame = 0; queued.size > 0 && frame < 10; frame += 1) {
+        const [held, run] = [...queued.entries()][0]
+        queued.delete(held)
+        run(0)
+      }
+
+      expect(desktop.restarts).toBe(1)
+    } finally {
+      window.requestAnimationFrame = realRequest
+      window.cancelAnimationFrame = realCancel
+    }
+  })
+})
+
 describe('switching sections', () => {
   it('shows the one the sidebar names, and only that one', async () => {
     const user = userEvent.setup()

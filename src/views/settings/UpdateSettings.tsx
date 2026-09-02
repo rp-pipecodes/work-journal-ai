@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { useOnScreen } from '@/components/on-screen-context'
 import { useOnScreenToast } from '@/components/on-screen-toast'
 import type {
   AvailableUpdate,
@@ -27,6 +28,10 @@ export default function UpdateSettings({ desktop }: { desktop: Desktop }) {
   // after the press, and the answer has to outlive it.
   const [said, setSaid] = useState<string | null>(null)
   const says = useOnScreenToast()
+  // Settings is a section of a window that keeps every section mounted and
+  // shows one — so being rendered is not being read. See
+  // docs/adr/0024-a-view-is-told-whether-it-is-on-screen.md.
+  const onScreen = useOnScreen()
 
   /**
    * The restart, once the installed line has been on screen and not before. It
@@ -41,13 +46,19 @@ export default function UpdateSettings({ desktop }: { desktop: Desktop }) {
    * paint, and the second only after that paint has happened, which is the
    * cheapest boundary that means "the user has had the chance to see it".
    *
-   * Both frames are cancelled if this is torn down: the window can close in
-   * the moment between the install and the paint, and ending the process from
-   * under whoever opened one next is not this group's to do once nobody is
-   * reading it.
+   * Both frames are cancelled if this is torn down or goes off screen: the
+   * window can close, or the user can go back to their journal while the
+   * download finishes, and quitting out from under a section that never said a
+   * word about it is the app disappearing for no reason anyone can see. The
+   * line saying so is painted into a hidden subtree, and the toast beside it
+   * is already suppressed for the same reason.
+   *
+   * Coming back to Settings runs this again — the stage is still `installed`
+   * and the line is still under the button — so the restart is deferred while
+   * nobody is looking rather than abandoned.
    */
   useEffect(() => {
-    if (stage.at !== 'installed') return
+    if (!onScreen || stage.at !== 'installed') return
 
     const update = stage.update
     let painted = 0
@@ -71,7 +82,7 @@ export default function UpdateSettings({ desktop }: { desktop: Desktop }) {
       cancelAnimationFrame(committed)
       cancelAnimationFrame(painted)
     }
-  }, [desktop, says, stage])
+  }, [desktop, onScreen, says, stage])
 
   /** Looks once, and says either the version waiting or that there is none. */
   function checkForUpdate() {
