@@ -9,7 +9,7 @@ import type { MainSection } from '@/platform/desktop'
 
 /**
  * The sections of the Main Window, in the order the sidebar lists them.
- * History, Tasks View, Settings and Standup Post are the four sections of the Main Window;
+ * History, Tasks View, Standup Post and Settings are the four sections of the Main Window;
  * see docs/adr/0022-one-main-window-for-reading-and-settings.md.
  *
  * The names themselves live in `Desktop`, because an Entry Point on the Rust
@@ -33,6 +33,6 @@ export interface SectionEntry {
 export const SECTIONS: SectionEntry[] = [
   { id: 'history', label: 'History', icon: NotebookTextIcon },
   { id: 'tasks', label: 'Tasks', icon: ListTodoIcon },
-  { id: 'settings', label: 'Settings', icon: SettingsIcon },
   { id: 'standup-post', label: 'Standup Post', icon: MessageSquareTextIcon },
+  { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ]

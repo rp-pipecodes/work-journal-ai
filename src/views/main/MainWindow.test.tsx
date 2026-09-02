@@ -56,13 +56,13 @@ describe('the Main Window', () => {
       within(sidebar())
         .getAllByRole('button')
         .map((button) => button.textContent),
-    ).toEqual(['History', 'Tasks', 'Settings', 'Standup Post'])
+    ).toEqual(['History', 'Tasks', 'Standup Post', 'Settings'])
   })
 
   it('puts every section a Tab away, as an ordinary button', async () => {
     await showMainWindow({ captured: [MONDAY] })
 
-    for (const name of ['History', 'Tasks', 'Settings', 'Standup Post']) {
+    for (const name of ['History', 'Tasks', 'Standup Post', 'Settings']) {
       const section = within(sidebar()).getByRole('button', { name })
       // Nothing takes the section out of the tab order or rebinds a key to
       // reach it: the sidebar is a short list of named places.
@@ -324,7 +324,7 @@ describe('switching sections', () => {
     // Nothing on screen says so while Tasks View is showing: the sidebar is a
     // list of places, not a set of counters.
     expect(nudge()).toBeUndefined()
-    expect(sidebar().textContent).toBe('HistoryTasksSettingsStandup Post')
+    expect(sidebar().textContent).toBe('HistoryTasksStandup PostSettings')
 
     await user.click(within(sidebar()).getByRole('button', { name: 'History' }))
     await expect.poll(() => nudge()?.textContent).toContain('A new Note on')
