@@ -1361,14 +1361,21 @@ export function createJournal({
 
     async completedOccurrences(range) {
       // The range's ends are Journal Days — local calendar days — so the
-      // bounds must be the UTC instants of their local midnights. Building
-      // the instants from local calendar parts rather than concatenating
-      // day strings is the whole point: a string bound would be a UTC
-      // midnight, and west of UTC every evening completion would fall on the
-      // next UTC day and out of "yesterday" entirely — while an ordinary
-      // Task completed at the same instant, narrowed locally, stayed in it.
-      const from = localMidnightUtc(range.from)
-      const to = localMidnightUtc(shiftDay(range.to, 1))
+      // bounds must be the UTC instants of their local midnights. A string
+      // bound would be a UTC midnight, and west of UTC every evening
+      // completion would fall on the next UTC day and out of "yesterday"
+      // entirely — while an ordinary Task completed at the same instant,
+      // narrowed locally, stayed in it. The start of a day is the instant a
+      // date-only Scheduled For stands for, so `scheduledInstant` is the one
+      // place the awkward midnights are decided in.
+      const from = scheduledInstant({
+        date: range.from,
+        time: null,
+      }).toISOString()
+      const to = scheduledInstant({
+        date: shiftDay(range.to, 1),
+        time: null,
+      }).toISOString()
       const rows = await driver.select<CompletedOccurrenceRow>(
         SELECT_COMPLETED_OCCURRENCES_IN_RANGE,
         [from, to],
@@ -1914,26 +1921,6 @@ export function journalDayFor(instant: Date): string {
     String(instant.getMonth() + 1).padStart(2, '0'),
     String(instant.getDate()).padStart(2, '0'),
   ].join('-')
-}
-
-/**
- * The inverse of `journalDayFor`: the UTC instant that begins a Journal Day
- * in the machine's own calendar. Built from local calendar parts — never by
- * parsing the day label, which JavaScript reads as UTC — so a range of
- * Journal Days bounds the same days a reader means wherever they keep their
- * records. A nonexistent local midnight (a DST spring-forward at 00:00)
- * resolves to the first valid instant of that day, exactly as a Task Alert
- * does.
- */
-function localMidnightUtc(journalDay: string): string {
-  const [year, month, day] = parts(journalDay)
-  const midnight = new Date(year, month - 1, day)
-  if (midnight.getHours() !== 0) {
-    // The wall clock skipped past midnight on its way into this day: the
-    // first valid instant of the day is where the hour hand landed.
-    return new Date(year, month - 1, day, midnight.getHours()).toISOString()
-  }
-  return midnight.toISOString()
 }
 
 /**
