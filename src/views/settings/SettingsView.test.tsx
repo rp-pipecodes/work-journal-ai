@@ -13,6 +13,7 @@ import { createAppSettings } from '@/settings/app-settings'
 import type { Journal, JournalExport } from '@/journal/journal'
 import { DEFAULT_STANDUP_PROMPT } from '@/settings/settings'
 import SettingsView from './SettingsView'
+import { holdFrames } from './testing/frames'
 
 // Settings as the user meets it. The one seam that cannot be driven from Node:
 // what a control reads, and what pressing it means, are decided in the view, so
@@ -782,15 +783,6 @@ describe('Export', () => {
 })
 
 describe('Updates', () => {
-  /** Runs the one frame callback waiting, as a browser would at a paint. */
-  function runNextFrame(queued: FrameRequestCallback[]) {
-    const run = queued.shift()
-    if (run === undefined) {
-      throw new Error('The view asked for no frame before restarting.')
-    }
-    run(0)
-  }
-
   /** The line the Updates group keeps saying, found inside that group alone. */
   function updateStatus(): string | null | undefined {
     return screen
@@ -912,16 +904,11 @@ describe('Updates', () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
     desktop.availableUpdate = { version: '0.9.0' }
 
-    // The frames the view asks for, held rather than run. jsdom paints
-    // nothing, so what can be checked here is not the pixels but the boundary:
-    // that the restart waits for the moment a paint happens at, rather than
-    // going in the same breath as the write that put the line in the DOM.
-    const queued: FrameRequestCallback[] = []
-    const realFrames = window.requestAnimationFrame
-    window.requestAnimationFrame = ((run: FrameRequestCallback) => {
-      queued.push(run)
-      return queued.length
-    }) as typeof window.requestAnimationFrame
+    // jsdom paints nothing, so what can be checked here is not the pixels but
+    // the boundary: that the restart waits for the moment a paint happens at,
+    // rather than going in the same breath as the write that put the line in
+    // the DOM.
+    const frames = holdFrames()
 
     try {
       showSettings(desktop)
@@ -938,15 +925,15 @@ describe('Updates', () => {
 
       // A frame callback runs before the next paint, so the first one is
       // still too early — what it can see, the user cannot.
-      runNextFrame(queued)
+      frames.next()
       expect(desktop.restarts).toBe(0)
 
       // The second runs after that paint. The line has been on screen, and
       // the process may go.
-      runNextFrame(queued)
+      frames.next()
       expect(desktop.restarts).toBe(1)
     } finally {
-      window.requestAnimationFrame = realFrames
+      frames.restore()
     }
   })
 
@@ -954,20 +941,9 @@ describe('Updates', () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
     desktop.availableUpdate = { version: '0.9.0' }
 
-    // Frames the view asks for and frames it takes back, both held here, so
-    // that a cancellation is something this test can actually observe.
-    const queued = new Map<number, FrameRequestCallback>()
-    let asked = 0
-    const realRequest = window.requestAnimationFrame
-    const realCancel = window.cancelAnimationFrame
-    window.requestAnimationFrame = ((run: FrameRequestCallback) => {
-      asked += 1
-      queued.set(asked, run)
-      return asked
-    }) as typeof window.requestAnimationFrame
-    window.cancelAnimationFrame = ((frame: number) => {
-      queued.delete(frame)
-    }) as typeof window.cancelAnimationFrame
+    // Frames asked for and frames taken back, both held, so that a
+    // cancellation is something this test can actually observe.
+    const frames = holdFrames()
 
     try {
       showSettings(desktop)
@@ -983,19 +959,11 @@ describe('Updates', () => {
       // paint. Ending the process from under whoever opened it next is not
       // this group's to do once nobody is reading it.
       cleanup()
-      // Drained rather than iterated: the second frame is asked for by the
-      // first, so a snapshot taken up front would never reach the callback
-      // that actually restarts — and this test would prove nothing.
-      for (let frame = 0; queued.size > 0 && frame < 10; frame += 1) {
-        const [asked, run] = [...queued.entries()][0]
-        queued.delete(asked)
-        run(0)
-      }
+      frames.drain()
 
       expect(desktop.restarts).toBe(0)
     } finally {
-      window.requestAnimationFrame = realRequest
-      window.cancelAnimationFrame = realCancel
+      frames.restore()
     }
   })
 

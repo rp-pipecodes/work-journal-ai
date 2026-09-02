@@ -17,6 +17,7 @@ import {
   installMeasurementStubs,
   journalHolding,
 } from '@/views/history/testing/history-view'
+import { holdFrames } from '@/views/settings/testing/frames'
 import MainWindow from './MainWindow'
 
 // The Main Window as the user meets it: a sidebar naming the section on
@@ -168,20 +169,9 @@ describe('an update installing while the user goes elsewhere', () => {
     const { desktop } = await showMainWindow({ captured: [MONDAY] })
     desktop.availableUpdate = { version: '0.9.0' }
 
-    // The frames the restart waits for, held here so the moment between the
-    // install and the paint can be widened to whatever this test needs.
-    const queued = new Map<number, FrameRequestCallback>()
-    let asked = 0
-    const realRequest = window.requestAnimationFrame
-    const realCancel = window.cancelAnimationFrame
-    window.requestAnimationFrame = ((run: FrameRequestCallback) => {
-      asked += 1
-      queued.set(asked, run)
-      return asked
-    }) as typeof window.requestAnimationFrame
-    window.cancelAnimationFrame = ((frame: number) => {
-      queued.delete(frame)
-    }) as typeof window.cancelAnimationFrame
+    // The frames the restart waits for, held so the moment between the install
+    // and the paint can be widened to whatever this test needs.
+    const frames = holdFrames()
 
     try {
       await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
@@ -193,7 +183,7 @@ describe('an update installing while the user goes elsewhere', () => {
       await user.click(
         await screen.findByRole('button', { name: 'Install 0.9.0' }),
       )
-      await expect.poll(() => queued.size).toBeGreaterThan(0)
+      await expect.poll(() => frames.pending()).toBeGreaterThan(0)
 
       // The download is done and the restart is a frame away when the user
       // goes back to their journal. Settings is hidden, not unmounted — the
@@ -201,11 +191,7 @@ describe('an update installing while the user goes elsewhere', () => {
       await user.click(within(sidebar()).getByRole('button', { name: 'History' }))
       await showsHistory()
 
-      for (let frame = 0; queued.size > 0 && frame < 10; frame += 1) {
-        const [held, run] = [...queued.entries()][0]
-        queued.delete(held)
-        run(0)
-      }
+      frames.drain()
 
       // Quitting out from under a section that never said a word about it is
       // the app disappearing for no reason the user can see.
@@ -217,18 +203,13 @@ describe('an update installing while the user goes elsewhere', () => {
         within(sidebar()).getByRole('button', { name: 'Settings' }),
       )
       await showsSettings()
-      await expect.poll(() => queued.size).toBeGreaterThan(0)
+      await expect.poll(() => frames.pending()).toBeGreaterThan(0)
 
-      for (let frame = 0; queued.size > 0 && frame < 10; frame += 1) {
-        const [held, run] = [...queued.entries()][0]
-        queued.delete(held)
-        run(0)
-      }
+      frames.drain()
 
       expect(desktop.restarts).toBe(1)
     } finally {
-      window.requestAnimationFrame = realRequest
-      window.cancelAnimationFrame = realCancel
+      frames.restore()
     }
   })
 })

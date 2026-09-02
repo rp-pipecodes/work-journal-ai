@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useOnScreen } from '@/components/on-screen-context'
 import { useOnScreenToast } from '@/components/on-screen-toast'
@@ -56,8 +56,17 @@ export default function UpdateSettings({ desktop }: { desktop: Desktop }) {
    * Coming back to Settings runs this again — the stage is still `installed`
    * and the line is still under the button — so the restart is deferred while
    * nobody is looking rather than abandoned.
+   *
+   * A layout effect rather than a passive one, which is the whole of why this
+   * cancellation can be relied on. React runs a layout effect's cleanup inside
+   * the commit, before the browser is given the frame back; a passive one is
+   * scheduled behind the commit and lands a macrotask later. That macrotask is
+   * long enough for a frame to come due against a Settings the DOM has already
+   * hidden — measured, not supposed, in `UpdateSettings.test.tsx`. Nothing
+   * here reads layout or blocks on anything, so the cost is a cancel and two
+   * `requestAnimationFrame` calls in the commit that was happening anyway.
    */
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!onScreen || stage.at !== 'installed') return
 
     const update = stage.update
