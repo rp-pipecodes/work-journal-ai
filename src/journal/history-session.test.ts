@@ -505,6 +505,207 @@ describe('correcting a Note', () => {
   })
 })
 
+describe('renaming a Project', () => {
+  it('shows the whole stream under its new name, across every day in the Filter', async () => {
+    const { session } = await sessionOver([
+      { at: '2026-03-09T10:00:00', body: '#api the retry storm' },
+      { at: '2026-03-13T10:00:00', body: '#api rate limits' },
+      { at: '2026-03-13T11:00:00', body: '#billing invoices' },
+    ])
+
+    await session.open()
+    await session.moveTo(rangeForDays('2026-03-09', '2026-03-13'))
+    await session.renameProject('api', 'backend')
+
+    expect(projectsOf(session.snapshot())).toEqual([
+      'billing',
+      'backend',
+      'backend',
+    ])
+  })
+
+  it('keeps a narrowed Filter on the same stream under its new name', async () => {
+    const { session } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: '#api rate limits' },
+      { at: '2026-03-13T11:00:00', body: '#billing invoices' },
+    ])
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'api' })
+    await session.renameProject('api', 'backend')
+
+    expect(session.snapshot().filter?.project).toEqual({
+      kind: 'named',
+      name: 'backend',
+    })
+    expect(bodiesOf(session.snapshot())).toEqual(['rate limits'])
+  })
+
+  it('shows both streams merged once the target already existed', async () => {
+    const { session } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: '#api rate limits' },
+      { at: '2026-03-13T11:00:00', body: '#backend the retry storm' },
+    ])
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'api' })
+    await session.renameProject('api', 'backend')
+
+    // One stream now, under one name — not two options for the same filing.
+    expect(session.snapshot().projects).toEqual(['backend'])
+    expect(session.snapshot().filter?.project).toEqual({
+      kind: 'named',
+      name: 'backend',
+    })
+    expect(bodiesOf(session.snapshot())).toEqual([
+      'the retry storm',
+      'rate limits',
+    ])
+  })
+
+  it('leaves the constraint alone when it is not the source', async () => {
+    const { session } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: '#api rate limits' },
+      { at: '2026-03-13T11:00:00', body: '#billing invoices' },
+    ])
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'billing' })
+    await session.renameProject('api', 'backend')
+
+    expect(session.snapshot().filter?.project).toEqual({
+      kind: 'named',
+      name: 'billing',
+    })
+    expect(session.snapshot().projects).toEqual(['backend', 'billing'])
+    expect(bodiesOf(session.snapshot())).toEqual(['invoices'])
+  })
+
+  it('leaves Any and Unfiled exactly where they were', async () => {
+    const { session } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: '#api rate limits' },
+      { at: '2026-03-13T11:00:00', body: 'read the postmortem' },
+    ])
+
+    await session.open()
+    await session.renameProject('api', 'backend')
+
+    expect(session.snapshot().filter?.project).toEqual(ANY_PROJECT)
+    // Newest first: the later Note is Unfiled, the earlier one was renamed.
+    expect(projectsOf(session.snapshot())).toEqual([null, 'backend'])
+
+    await session.narrowTo(UNFILED)
+    await session.renameProject('backend', 'api')
+    expect(session.snapshot().filter?.project).toEqual(UNFILED)
+  })
+
+  it('says so when the rename was refused, and leaves the list and constraint as they were', async () => {
+    silenceErrors()
+    const { session } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: '#api rate limits' },
+    ])
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'api' })
+    await session.renameProject('no-such-project', 'backend')
+
+    expect(session.snapshot().problem).toBe(
+      'That Project could not be renamed.',
+    )
+    expect(session.snapshot().filter?.project).toEqual({
+      kind: 'named',
+      name: 'api',
+    })
+    expect(session.snapshot().projects).toEqual(['api'])
+    expect(bodiesOf(session.snapshot())).toEqual(['rate limits'])
+  })
+
+  it('stops saying so once a rename works', async () => {
+    silenceErrors()
+    const { session } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: '#api rate limits' },
+    ])
+
+    await session.open()
+    await session.renameProject('no-such-project', 'backend')
+    await session.renameProject('api', 'backend')
+
+    expect(session.snapshot().problem).toBeNull()
+  })
+
+  it('announces the change, so the tray hears about it too', async () => {
+    const { session, announced } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: '#api rate limits' },
+    ])
+    await session.open()
+    expect(announced.times).toBe(0)
+
+    await session.renameProject('api', 'backend')
+
+    expect(announced.times).toBe(1)
+  })
+
+  it('ends a Search, as every other act on the Project axis does', async () => {
+    const { session } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: '#api rate limits' },
+    ])
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'api' })
+    await session.search('limits')
+    await session.renameProject('api', 'backend')
+
+    expect(session.snapshot().searching).toBe(false)
+    expect(bodiesOf(session.snapshot())).toEqual(['rate limits'])
+    expect(session.snapshot().filter?.project).toEqual({
+      kind: 'named',
+      name: 'backend',
+    })
+  })
+
+  it('leaves a Search exactly as the reader asked it when the rename is refused', async () => {
+    silenceErrors()
+    const { session } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: '#api rate limits' },
+    ])
+
+    await session.open()
+    await session.search('limits')
+    await session.renameProject('no-such-project', 'backend')
+
+    expect(session.snapshot().searching).toBe(true)
+    expect(resultsOf(session.snapshot())).toEqual(['rate limits'])
+    expect(session.snapshot().problem).toBe(
+      'That Project could not be renamed.',
+    )
+  })
+
+  it('marks nothing edited, and reads nothing back, for a rename to the same name', async () => {
+    const { session, notes } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: '#api rate limits' },
+    ])
+
+    await session.open()
+    await session.renameProject('api', 'API')
+
+    expect(session.snapshot().problem).toBeNull()
+    expect(projectsOf(session.snapshot())).toEqual(['api'])
+    expect(notes[0].editedAt).toBeNull()
+  })
+
+  it('stays quiet about a rename the record refused', async () => {
+    silenceErrors()
+    const { session, announced } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: '#api rate limits' },
+    ])
+    await session.open()
+
+    await session.renameProject('no-such-project', 'backend')
+
+    expect(announced.times).toBe(0)
+  })
+})
+
 describe('searching the journal', () => {
   it('shows every matching Note in the journal, newest first, whatever the Filter', async () => {
     const { session } = await sessionOver([

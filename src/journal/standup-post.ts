@@ -98,18 +98,24 @@ export function standupPostRefuses(selection: StandupPostSelection): boolean {
 }
 
 /**
- * What the model hears, built from the selection already on screen: the
- * Digest of yesterday, verbatim — `#project` prefixes and all — plus a plain
- * Markdown list of the Tasks. No second serialisation: a second format would
- * eventually describe a journal the user does not have.
+ * Standup Material: the complete, lossless Markdown of yesterday, built from
+ * the selection already on screen — the Digest of yesterday, verbatim —
+ * `#project` prefixes and all — plus a plain Markdown list of the Tasks. It
+ * is what a Standup Post is written from, and what the user pastes instead
+ * when there is no Model Access, the endpoint is down, or the prose came
+ * back wrong. See `CONTEXT.md` and
+ * docs/adr/0031-standup-material-is-a-second-lossless-rendering.md.
+ *
+ * No second serialisation: a second format would eventually describe a
+ * journal the user does not have.
  *
  * The Notes half is literally the journal's own Digest for yesterday — the
  * same rendering History copies — so the two formats cannot drift apart; the
  * Task lists are the selection's own Tasks, each as one bullet. A section
- * with nothing in it is left out entirely, so a day of Tasks alone sends no
- * empty Notes heading, and vice versa.
+ * with nothing in it is left out entirely, so a day of Tasks alone carries
+ * no empty Notes heading, and vice versa.
  */
-export async function buildStandupPostInput({
+export async function buildStandupMaterial({
   journal,
   selection,
 }: {

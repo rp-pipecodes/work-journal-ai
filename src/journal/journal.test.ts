@@ -651,6 +651,169 @@ describe('editProject', () => {
   })
 })
 
+describe('renameProject', () => {
+  it('moves every Note under the source in one operation, keeping everything but the Project', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T09:00:00')
+    const first = await journal.capture('#habic shipped auth')
+    clock.set(local('2026-03-12T09:30:00'))
+    const second = await journal.capture('#habic reviewed the tray')
+    clock.set(local('2026-03-12T11:00:00'))
+    await journal.capture('#work done')
+    clock.set(local('2026-03-12T12:00:00'))
+    await journal.capture('unfiled thought')
+    clock.set(local('2026-03-12T17:00:00'))
+
+    await journal.renameProject('habic', 'work_journal-ai2')
+
+    const notes = await journal.notesForFilter({
+      from: '2026-03-11',
+      to: '2026-03-12',
+    })
+    expect(
+      notes.map((note) => ({ body: note.body, project: note.project })),
+    ).toEqual([
+      { body: 'unfiled thought', project: null },
+      { body: 'done', project: 'work' },
+      { body: 'reviewed the tray', project: 'work_journal-ai2' },
+      { body: 'shipped auth', project: 'work_journal-ai2' },
+    ])
+    // Provenance and filing hold still: Captured At, Body and Journal Day are
+    // not the rename's to move.
+    expect(notes.find((note) => note.id === first!.id)).toMatchObject({
+      body: 'shipped auth',
+      capturedAt: first!.capturedAt,
+      journalDay: first!.journalDay,
+    })
+    expect(notes.find((note) => note.id === second!.id)).toMatchObject({
+      body: 'reviewed the tray',
+      capturedAt: second!.capturedAt,
+      journalDay: second!.journalDay,
+    })
+  })
+
+  it('marks every moved Note edited at the same instant', async () => {
+    const { journal, clock } = await journalAt('2026-03-12T09:30:00')
+    const first = await journal.capture('#habic shipped')
+    clock.set(local('2026-03-12T11:00:00'))
+    const second = await journal.capture('#habic again')
+    clock.set(local('2026-03-12T17:00:00'))
+
+    await journal.renameProject('habic', 'work')
+
+    // One instant, not one per Note: the rename is one decision about the
+    // stream, and the source of truth for that is the clock, read once.
+    const editedAt = '2026-03-12T17:00:00.000Z'
+    expect((await journal.notesForFilter({ from: '2026-03-12', to: '2026-03-12' }))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: first!.id, editedAt }),
+        expect.objectContaining({ id: second!.id, editedAt }),
+      ]),
+    )
+  })
+
+  it('normalizes both names, so the source is found and the target is stored lowercase', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    await journal.capture('#HaBiC shipped')
+
+    await journal.renameProject('  HaBiC  ', 'Work')
+
+    expect(await journal.projectsInUse()).toEqual(['work'])
+  })
+
+  it('merges into a target that already exists, with one Project left on the Notes', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    await journal.capture('#habic shipped auth')
+    await journal.capture('#work done')
+    await journal.capture('#work invoiced')
+
+    await journal.renameProject('habic', 'work')
+
+    expect(await journal.projectsInUse()).toEqual(['work'])
+    const everything = await journal.notesForFilter({
+      from: '2026-03-12',
+      to: '2026-03-12',
+    })
+    expect(everything.map((note) => note.project)).toEqual([
+      'work',
+      'work',
+      'work',
+    ])
+  })
+
+  it('does nothing, and marks nothing edited, when the target is the source', async () => {
+    const { journal, clock } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('#habic shipped')
+    clock.set(local('2026-03-12T17:00:00'))
+
+    await journal.renameProject('habic', 'HaBiC')
+
+    const [stored] = await notesOn(journal, '2026-03-12')
+    expect(stored).toMatchObject({ project: 'habic', editedAt: null })
+    expect(stored.id).toBe(captured!.id)
+  })
+
+  it('refuses a target that is not a Project name, and moves nothing', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    await journal.capture('#habic shipped')
+
+    for (const target of ['not a name', '#habic', '', '  ', 'ha bic']) {
+      await expect(journal.renameProject('habic', target)).rejects.toThrow(
+        /project/i,
+      )
+    }
+
+    expect(await journal.projectsInUse()).toEqual(['habic'])
+  })
+
+  it('refuses a source that is not a Project name, however many Notes it would move', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    await journal.capture('#habic shipped')
+
+    // Both names are asked of the same rule, whatever the target: a source
+    // that cannot be a Project is not a stream the record holds, and a
+    // message that said so per target would be the rule speaking twice.
+    for (const source of ['ha bic', '#habic', '']) {
+      await expect(journal.renameProject(source, 'work')).rejects.toThrow(
+        /project/i,
+      )
+    }
+
+    expect(await journal.projectsInUse()).toEqual(['habic'])
+  })
+
+  it('refuses a source that is not in use, rather than renaming nothing', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    await journal.capture('#habic shipped')
+
+    await expect(journal.renameProject('no-such-project', 'work')).rejects.toThrow(
+      /no Notes|in use/i,
+    )
+    expect(await journal.projectsInUse()).toEqual(['habic'])
+  })
+
+  it('refuses a source that has just been renamed away, even though its name is a name', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    await journal.capture('#habic shipped')
+
+    await journal.renameProject('habic', 'work')
+
+    await expect(journal.renameProject('habic', 'other')).rejects.toThrow(
+      /no Notes|in use/i,
+    )
+  })
+
+  it('leaves the renamed stream where Predictions can find it, and the old name nowhere', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    await journal.capture('#habic shipped')
+
+    await journal.renameProject('habic', 'work_journal-ai2')
+
+    expect(await journal.projectPredictions('')).toEqual(['work_journal-ai2'])
+    expect(await journal.projectPredictions('hab')).toEqual([])
+    expect(await journal.projectPredictions('wor')).toEqual(['work_journal-ai2'])
+  })
+})
+
 describe('editBody leaves Project alone', () => {
   it('does not re-parse a Project Marker from the Body', async () => {
     const { journal } = await journalAt('2026-03-12T09:30:00')

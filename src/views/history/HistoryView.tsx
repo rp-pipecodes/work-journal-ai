@@ -5,6 +5,7 @@ import {
   ClipboardCopyIcon,
   HashIcon,
   NotebookPenIcon,
+  PencilIcon,
   SearchIcon,
   Trash2Icon,
   TriangleAlertIcon,
@@ -71,6 +72,7 @@ import {
   journalDayFor,
   projectChoice,
   projectConstraintFor,
+  projectName,
   rangeForDays,
   rangeForJournalDay,
   rangeForPreset,
@@ -137,6 +139,10 @@ export default function HistoryView({
   const copying = useRef(false)
   const says = useOnScreenToast()
   const page = useRef<HTMLDivElement>(null)
+  // The one Project being renamed, and the one waiting on a confirmed rename.
+  // Like `deleting`, a single portalled question about this screen rather than
+  // the session — the session does not know a dialog was ever open.
+  const [renaming, setRenaming] = useState<string | null>(null)
 
   // A confirmation is portalled to the end of the document, so hiding this
   // view leaves it standing over whatever is showing instead — see
@@ -149,6 +155,7 @@ export default function HistoryView({
   // they have already been given goes with the view — see `on-screen-toast`.
   useOffScreen(() => {
     setDeleting(null)
+    setRenaming(null)
     copying.current = false
   })
 
@@ -206,7 +213,14 @@ export default function HistoryView({
   // then an open Filter popup, then a Search, and the window when none has.
   // Dismissing the window closes it — History is not kept resident.
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
-    if (event.key !== 'Escape' || editing !== null || deleting !== null) return
+    if (
+      event.key !== 'Escape' ||
+      editing !== null ||
+      deleting !== null ||
+      renaming !== null
+    ) {
+      return
+    }
     // A popup — the day picker, the Project picker — is portalled out of the
     // page and closes itself on Escape, but the keystroke still arrives here
     // through the React tree. It belongs to whatever it was typed into.
@@ -238,6 +252,12 @@ export default function HistoryView({
   function confirmDelete(note: Note) {
     setDeleting(null)
     void session.delete(note.id)
+  }
+
+  /** Filing, not wording — but still one decision about the whole stream. */
+  function confirmRename(from: string, to: string) {
+    setRenaming(null)
+    void session.renameProject(from, to)
   }
 
   /** Both ends of the day axis, in the one move that sets them. */
@@ -289,6 +309,7 @@ export default function HistoryView({
               constraint={constraintOf(filter)}
               projects={projects}
               onNarrow={(constraint) => void session.narrowTo(constraint)}
+              onRename={setRenaming}
             />
             <SearchField
               term={term}
@@ -384,6 +405,13 @@ export default function HistoryView({
           note={deleting}
           onConfirm={confirmDelete}
           onCancel={() => setDeleting(null)}
+        />
+
+        <RenameProject
+          source={renaming}
+          projects={projects}
+          onConfirm={confirmRename}
+          onCancel={() => setRenaming(null)}
         />
 
         {/* Where a copy says what it did. Nothing else toasts. */}
@@ -665,6 +693,127 @@ function ConfirmDelete({
 }
 
 /**
+ * One whole Project into another. A confirmation rather than a text field on
+ * the row — the move is journal-wide, and saying which stream is being moved
+ * is the point of the surface.
+ *
+ * The question exists only while there is one: closed, nothing of it is kept —
+ * not what was typed, not which stream it was about — so a cancelled rename
+ * and a dismissed one leave exactly what they found.
+ */
+function RenameProject({
+  source,
+  projects,
+  onConfirm,
+  onCancel,
+}: {
+  /** The Project being renamed, or null while none is. */
+  source: string | null
+  projects: string[]
+  onConfirm: (from: string, to: string) => void
+  onCancel: () => void
+}) {
+  return (
+    <AlertDialog
+      open={source !== null}
+      onOpenChange={(open) => {
+        if (!open) onCancel()
+      }}
+    >
+      {source !== null && (
+        <RenameProjectDialog
+          source={source}
+          projects={projects}
+          onConfirm={onConfirm}
+          onCancel={onCancel}
+        />
+      )}
+    </AlertDialog>
+  )
+}
+
+/**
+ * The body of the rename question. The button names what will happen: `Rename`
+ * while the target is a new stream, `Merge` once it is one the journal already
+ * has, because the two read very differently after the fact.
+ */
+function RenameProjectDialog({
+  source,
+  projects,
+  onConfirm,
+  onCancel,
+}: {
+  source: string
+  projects: string[]
+  onConfirm: (from: string, to: string) => void
+  onCancel: () => void
+}) {
+  const [typed, setTyped] = useState('')
+
+  // The one valid spelling of the target, or nothing to confirm. What the
+  // record refuses comes back in the record's own words — nothing typed is
+  // not a refusal, only nothing to confirm yet.
+  let target: string | null = null
+  let problem: string | null = null
+  if (typed.trim() !== '') {
+    try {
+      target = projectName(typed)
+    } catch (error) {
+      problem = (error as Error).message
+    }
+  }
+
+  // The source is in `projects` too — it has Notes, which is why it is being
+  // renamed — so spelling it back is not a merge but the same name, however
+  // it is cased. Confirming it would close the question and do nothing at
+  // all: the button says Rename, says it cannot be pressed, and the dialog
+  // says why, rather than claiming two streams are about to become one.
+  const same = target !== null && target === source
+  const merging = target !== null && !same && projects.includes(target)
+
+  return (
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>Rename {formatProject(source)}?</AlertDialogTitle>
+        <AlertDialogDescription>
+          Every Note filed under it moves, in this window and out of it.
+          {merging && target !== null
+            ? ` Notes already under ${formatProject(target)} stay where they are: the two streams become one.`
+            : ''}
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <label className="grid gap-1.5">
+        <span className="type-meta text-muted-foreground">New Project name</span>
+        <Input
+          autoFocus
+          value={typed}
+          onChange={(event) => setTyped(event.target.value)}
+          aria-label="New Project name"
+          aria-invalid={problem !== null}
+          placeholder={formatProject(source)}
+        />
+      </label>
+      {(problem !== null || same) && (
+        <p role="alert" className="type-meta text-destructive">
+          {problem ?? 'That is already its name.'}
+        </p>
+      )}
+      <AlertDialogFooter>
+        <AlertDialogCancel onClick={onCancel}>Cancel</AlertDialogCancel>
+        <AlertDialogAction
+          disabled={target === null || same}
+          onClick={() => {
+            if (target !== null) onConfirm(source, target)
+          }}
+        >
+          {merging ? 'Merge' : 'Rename'}
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  )
+}
+
+/**
  * Named ranges that set the day axis once and are then forgotten. Nothing
  * holds the one that was chosen: what the reader reads afterwards is the range
  * itself, which is the only thing that is still true a day later.
@@ -791,15 +940,22 @@ function dayAsDate(journalDay: string): Date {
  * happens the moment its last Note is deleted or refiled: a picker that
  * silently stopped showing what it is narrowed to would be lying about the
  * empty list underneath it.
+ *
+ * While narrowed to a named Project, the one place the whole stream can be
+ * renamed from sits beside it — filing is per-Note here and the constraint is
+ * the one thing on screen that names the stream, so it is where renaming
+ * belongs. Any and Unfiled rename nothing: there is no stream to move.
  */
 function ProjectConstraintField({
   constraint,
   projects,
   onNarrow,
+  onRename,
 }: {
   constraint: ProjectConstraint
   projects: string[]
   onNarrow: (constraint: ProjectConstraint) => void
+  onRename: (name: string) => void
 }) {
   const labelId = useId()
   const valueId = useId()
@@ -820,33 +976,53 @@ function ProjectConstraintField({
   ]
 
   return (
-    <Select
-      items={options}
-      open={open}
-      onOpenChange={setOpen}
-      value={chosen}
-      onValueChange={(value) => onNarrow(projectConstraintFor(String(value)))}
-    >
-      {/* Same bargain as the days: the name of the control, then what it
-          currently narrows to. */}
-      <span id={labelId} className="sr-only">
-        Project
-      </span>
-      <SelectTrigger
-        size="sm"
-        aria-labelledby={`${labelId} ${valueId}`}
-        className="max-w-40"
+    <span className="flex items-center gap-1">
+      <Select
+        items={options}
+        open={open}
+        onOpenChange={setOpen}
+        value={chosen}
+        onValueChange={(value) => onNarrow(projectConstraintFor(String(value)))}
       >
-        <SelectValue id={valueId} />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
-            {option.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+        {/* Same bargain as the days: the name of the control, then what it
+            currently narrows to. */}
+        <span id={labelId} className="sr-only">
+          Project
+        </span>
+        <SelectTrigger
+          size="sm"
+          aria-labelledby={`${labelId} ${valueId}`}
+          className="max-w-40"
+        >
+          <SelectValue id={valueId} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {constraint.kind === 'named' && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => onRename(constraint.name)}
+                aria-label="Rename Project"
+                className="text-muted-foreground"
+              >
+                <PencilIcon />
+              </Button>
+            }
+          />
+          <TooltipContent>Rename Project</TooltipContent>
+        </Tooltip>
+      )}
+    </span>
   )
 }
 

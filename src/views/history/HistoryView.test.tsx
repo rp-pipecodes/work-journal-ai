@@ -1,13 +1,20 @@
 // @vitest-environment jsdom
 
+import { useState } from 'react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { cleanup, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import OnScreenContext from '@/components/on-screen-context'
 import { journalDayFor } from '@/journal/journal'
+import HistoryView from './HistoryView'
+import { fakeDesktop } from '@/platform/testing/desktop'
 import {
   closeTestDatabases,
   dayCell,
+  firstListShown,
   installMeasurementStubs,
+  journalHolding,
+  noteById,
   showHistory,
 } from './testing/history-view'
 import { formatDayRange } from './range-label'
@@ -114,6 +121,174 @@ describe('the Project constraint', () => {
 
     await user.click(project())
     expect(await screen.findByRole('option', { name: '#alpha' })).toBeTruthy()
+  })
+})
+
+describe('Rename Project', () => {
+  /** One Friday under two Projects, so a rename can be told from a merge. */
+  async function showTwoProjects() {
+    const opened = await showFilter([
+      { at: '2026-03-09T10:00:00', body: '#alpha the retry storm' },
+      { at: '2026-03-09T11:00:00', body: '#beta invoices' },
+    ])
+    const user = userEvent.setup()
+
+    await user.click(opened.project())
+    await user.click(await screen.findByRole('option', { name: '#alpha' }))
+
+    return { ...opened, user }
+  }
+
+  it('is offered next to the constraint only while narrowed to a Project', async () => {
+    const { project } = await showFilter([
+      { at: '2026-03-09T10:00:00', body: '#alpha Monday' },
+    ])
+    const user = userEvent.setup()
+
+    expect(
+      screen.queryByRole('button', { name: 'Rename Project' }),
+    ).toBeNull()
+
+    await user.click(project())
+    await user.click(await screen.findByRole('option', { name: '#alpha' }))
+    expect(
+      screen.getByRole('button', { name: 'Rename Project' }),
+    ).toBeTruthy()
+
+    // Unfiled and Any are not a stream to rename: per-Note filing already
+    // handles clearing, and there is no name to move.
+    await user.click(project())
+    await user.click(await screen.findByRole('option', { name: 'Unfiled' }))
+    expect(
+      screen.queryByRole('button', { name: 'Rename Project' }),
+    ).toBeNull()
+  })
+
+  it('renames the stream once confirmed, and stays narrowed to it', async () => {
+    const { user, core, notes, project } = await showTwoProjects()
+
+    await user.click(screen.getByRole('button', { name: 'Rename Project' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog.textContent).toContain('#alpha')
+
+    await user.type(within(dialog).getByLabelText('New Project name'), 'backend')
+    await user.click(within(dialog).getByRole('button', { name: 'Rename' }))
+
+    await vi.waitFor(async () => {
+      expect((await noteById(core, notes[0].id))?.project).toBe('backend')
+    })
+    expect((await noteById(core, notes[1].id))?.project).toBe('beta')
+    expect(project().textContent).toContain('#backend')
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+
+  it('reads a rename to the same name as neither rename nor merge', async () => {
+    const { user, core, notes } = await showTwoProjects()
+
+    await user.click(screen.getByRole('button', { name: 'Rename Project' }))
+    const dialog = await screen.findByRole('alertdialog')
+
+    // The placeholder suggests exactly this — the name it already has, typed
+    // back in whatever case. It is not a merge: #alpha is the source, and the
+    // button that would close the dialog while doing nothing must not be
+    // offered as either Rename or Merge.
+    await user.type(within(dialog).getByLabelText('New Project name'), 'Alpha')
+    const confirm = within(dialog).getByRole('button', { name: 'Rename' })
+    expect(confirm).toHaveProperty('disabled', true)
+    expect(within(dialog).queryByRole('button', { name: 'Merge' })).toBeNull()
+    expect(within(dialog).getByRole('alert').textContent).toBe(
+      'That is already its name.',
+    )
+
+    expect((await noteById(core, notes[0].id))?.project).toBe('alpha')
+  })
+
+  it('says Merge when the target already exists, and merges on confirm', async () => {
+    const { user, core, notes } = await showTwoProjects()
+
+    await user.click(screen.getByRole('button', { name: 'Rename Project' }))
+    const dialog = await screen.findByRole('alertdialog')
+
+    await user.type(within(dialog).getByLabelText('New Project name'), 'beta')
+    expect(within(dialog).getByRole('button', { name: 'Merge' })).toBeTruthy()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Merge' }))
+
+    await vi.waitFor(async () => {
+      expect((await noteById(core, notes[0].id))?.project).toBe('beta')
+      expect((await noteById(core, notes[1].id))?.project).toBe('beta')
+    })
+  })
+
+  it('offers nothing to confirm while the target is not a Project name', async () => {
+    const { user } = await showTwoProjects()
+
+    await user.click(screen.getByRole('button', { name: 'Rename Project' }))
+    const dialog = await screen.findByRole('alertdialog')
+
+    await user.type(
+      within(dialog).getByLabelText('New Project name'),
+      'not a name',
+    )
+    expect(within(dialog).getByRole('button', { name: 'Rename' })).toHaveProperty(
+      'disabled',
+      true,
+    )
+
+    // The dialog says what is wrong rather than leaving a dead button to say
+    // nothing: a control that cannot be pressed still has to explain itself.
+    expect(within(dialog).getByRole('alert')).toBeTruthy()
+  })
+
+  it('changes nothing when cancelled', async () => {
+    const { user, core, notes } = await showTwoProjects()
+
+    await user.click(screen.getByRole('button', { name: 'Rename Project' }))
+    const dialog = await screen.findByRole('alertdialog')
+    await user.type(within(dialog).getByLabelText('New Project name'), 'backend')
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    await vi.waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).toBeNull()
+    })
+    expect((await noteById(core, notes[0].id))?.project).toBe('alpha')
+  })
+
+  it('changes nothing when dismissed off screen, with the view', async () => {
+    const { core, notes, dismissOffScreen, project } = await showOffScreenable()
+    const user = userEvent.setup()
+
+    await user.click(project())
+    await user.click(await screen.findByRole('option', { name: '#alpha' }))
+    await user.click(screen.getByRole('button', { name: 'Rename Project' }))
+    const dialog = await screen.findByRole('alertdialog')
+    await user.type(within(dialog).getByLabelText('New Project name'), 'backend')
+
+    // Leaving History takes the question with it, un-asked — ADR 0024.
+    dismissOffScreen()
+
+    await vi.waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).toBeNull()
+    })
+    expect((await noteById(core, notes[0].id))?.project).toBe('alpha')
+  })
+
+  it('says what failed rather than leaving the reader guessing', async () => {
+    silenceErrors()
+    const { user, core, notes } = await showTwoProjects()
+
+    // The last Note under #alpha goes from another window between opening the
+    // dialog and confirming: the core refuses a rename that would move none.
+    await core.delete(notes[0].id)
+
+    await user.click(screen.getByRole('button', { name: 'Rename Project' }))
+    const dialog = await screen.findByRole('alertdialog')
+    await user.type(within(dialog).getByLabelText('New Project name'), 'backend')
+    await user.click(within(dialog).getByRole('button', { name: 'Rename' }))
+
+    const said = await screen.findByRole('alert')
+    expect(said.textContent).toContain('could not be renamed')
+    expect(await noteById(core, notes[0].id)).toBeNull()
   })
 })
 
@@ -225,7 +400,50 @@ async function showFilter(captured: Array<{ at: string; body: string }>) {
   }
 }
 
+/**
+ * The same History under a visibility the test can take away, for what the
+ * Main Window seam does to an open dialog: the section is hidden, and the
+ * dialog it portalled out of the document goes with it — ADR 0024.
+ */
+async function showOffScreenable() {
+  const { driver, core, notes } = await journalHolding([
+    { at: '2026-03-09T10:00:00', body: '#alpha the retry storm' },
+    { at: '2026-03-09T11:00:00', body: '#beta invoices' },
+  ])
+
+  const desktop = fakeDesktop({ driver })
+  const control = { hide: () => {} }
+  function Host() {
+    const [onScreen, setOnScreen] = useState(true)
+    control.hide = () => setOnScreen(false)
+
+    return (
+      <div hidden={!onScreen}>
+        <OnScreenContext.Provider value={onScreen}>
+          <HistoryView desktop={desktop} journal={Promise.resolve(core)} />
+        </OnScreenContext.Provider>
+      </div>
+    )
+  }
+
+  render(<Host />)
+  await firstListShown(2)
+
+  return {
+    desktop,
+    core,
+    notes,
+    dismissOffScreen: control.hide,
+    project: () => within(header()).getByRole('combobox', { name: /^Project/ }),
+  }
+}
+
 /** The Filter's header, which is the whole of what this file is about. */
 function header(): HTMLElement {
   return screen.getByRole('banner')
+}
+
+/** The record's refusals are the subject here, not noise on the console. */
+function silenceErrors() {
+  vi.spyOn(console, 'error').mockImplementation(() => {})
 }

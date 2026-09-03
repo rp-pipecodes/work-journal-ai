@@ -10,7 +10,7 @@ import {
   type StandupPostState,
 } from '@/journal/standup-post-session'
 import {
-  buildStandupPostInput,
+  buildStandupMaterial,
   standupPostRefuses,
   type StandupPostSelection,
 } from '@/journal/standup-post'
@@ -19,9 +19,12 @@ import type { AppSettings } from '@/settings/app-settings'
 
 /**
  * The prose a model writes from yesterday's Notes and the Tasks that still
- * stand, read before it is copied. The material is read by the session; the
- * post itself is this view's — it lives as long as the Main Window that
- * showed it, Generate again replaces it, and nothing of it is ever persisted.
+ * stand, read before it is copied — and, beside Generate, the Standup
+ * Material itself, copyable with no key, no network and no waiting (see
+ * docs/adr/0031-standup-material-is-a-second-lossless-rendering.md). The
+ * material is read by the session; the post itself is this view's — it lives
+ * as long as the Main Window that showed it, Generate again replaces it, and
+ * nothing of it is ever persisted.
  *
  * The model call is made from Rust so the API Key never enters this window —
  * see docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md.
@@ -51,15 +54,38 @@ export default function StandupPostView({
   // latter so a replacement post can say so. Nothing else about a call is
   // kept, and nothing here is persisted.
   const [post, setPost] = useState<{ markdown: string; model: string } | null>(null)
+  // The material copy's claim, said twice — a toast for whoever is looking,
+  // and a live region for whoever is not — and naming its subject: with two
+  // Copy actions on this screen, an unqualified "Copied" would not say which
+  // of the two things landed on the clipboard. The claim is held as the
+  // selection it was made for, so it retires itself the moment the session
+  // pushes another: focus, wake, a journal or Task change, and the midnight
+  // rollover all re-read the selection, and a claim about material that
+  // re-read may have replaced is not true anymore.
+  const [materialClaim, setMaterialClaim] = useState<{
+    selection: StandupPostSelection
+    count: number
+  } | null>(null)
   // The model being asked, while a call is in flight. Naming it is the whole
   // point: ten silent seconds read as broken without it.
   const [pending, setPending] = useState<string | null>(null)
   // Why there is no post, when there is not — one of the few kinds the call
   // answers with, rendered as one line. A previous post stays on screen.
   const [failure, setFailure] = useState<StandupFailure | null>(null)
-  // The copy confirmation, said twice — a toast for whoever is looking, and a
-  // live region for whoever is not, exactly as a Digest copy says what it did.
-  const [copied, setCopied] = useState(false)
+  // The post copy's claim, the same two ways. It is view state with no
+  // session behind it — the prose lives here — so this view is its only
+  // retire path besides a failed copy: Generate replacing the prose.
+  const [postClaim, setPostClaim] = useState<{ count: number } | null>(null)
+  // What each live region says, derived, never held: '' until a copy lands
+  // and gone the moment its claim is. Deriving is what retires a claim that
+  // a re-read has made untrue — there is no state to forget to clear.
+  const materialSaid =
+    state.state === 'ready' &&
+    materialClaim !== null &&
+    materialClaim.selection === state.selection
+      ? said('material', materialClaim.count)
+      : ''
+  const postSaid = postClaim !== null ? said('post', postClaim.count) : ''
   const says = useOnScreenToast()
   // A call is in flight, before the pending state has reached the button: a
   // double click must not spend the user's money twice.
@@ -110,7 +136,7 @@ export default function StandupPostView({
         // stored — `readSettings` resolves a cleared field to the default, so
         // a model is never asked under an empty system prompt.
         systemPrompt: stored.standupPrompt,
-        userContent: await buildStandupPostInput({
+        userContent: await buildStandupMaterial({
           journal: await journal,
           selection: state.selection,
         }),
@@ -118,7 +144,8 @@ export default function StandupPostView({
 
       if (response.state === 'generated') {
         setPost({ markdown: response.markdown, model: stored.model })
-        setCopied(false)
+        // A new post retires the copy claim with the prose it was about.
+        setPostClaim(null)
       } else {
         setFailure(response.failure)
       }
@@ -135,19 +162,74 @@ export default function StandupPostView({
     }
   }
 
-  /** The post onto the clipboard, and a confirmation once it is there. */
-  function copy(): void {
-    if (post === null) return
+  /**
+   * One copy, whichever of the two it is: the Markdown onto the clipboard and
+   * the toast that says how it went. Answers whether it landed, so the caller
+   * can keep or retire the claim its own live region is rendered from — the
+   * line beside a button may never say the opposite of the toast.
+   */
+  async function putOnClipboard(
+    subject: Subject,
+    read: () => Promise<string>,
+  ): Promise<boolean> {
+    try {
+      await desktop.copyToClipboard(await read())
+      says.success(landed(subject))
+      return true
+    } catch (error) {
+      console.error(`could not copy the standup ${subject}`, error)
+      says.failure(`Could not copy the standup ${subject}.`)
+      return false
+    }
+  }
 
-    desktop.copyToClipboard(post.markdown).then(
-      () => {
-        setCopied(true)
-        says.success('Copied the standup post to the clipboard.')
-      },
-      (error: unknown) => {
-        console.error('could not copy the standup post', error)
-        says.failure('Could not copy the standup post.')
-      },
+  /** The post onto the clipboard, and a confirmation naming it once there. */
+  async function copyPost(): Promise<void> {
+    if (post === null) return
+    const { markdown } = post
+
+    if (await putOnClipboard('post', async () => markdown)) {
+      // A repeat of the same live copy counts up, so its region says
+      // something new — a region announces on change, and identical text is
+      // silence. Counted from the claim as it stands rather than as this
+      // click first saw it, so two copies that overlap still count as two.
+      setPostClaim((claim) => ({ count: (claim?.count ?? 0) + 1 }))
+    } else {
+      // A copy that fails retires the earlier claim.
+      setPostClaim(null)
+    }
+  }
+
+  /**
+   * The Standup Material onto the clipboard, and a confirmation naming it
+   * once there. No Model Access is read and no call is made: the Markdown is
+   * built from the selection already on screen, so this works with no key,
+   * no network and no waiting — and stays exactly as live after a post
+   * exists, because the lossless rendering is there precisely when the prose
+   * turns out to be wrong.
+   */
+  async function copyMaterial(): Promise<void> {
+    if (state.state !== 'ready') return
+    const { selection } = state
+
+    const copied = await putOnClipboard('material', async () =>
+      buildStandupMaterial({ journal: await journal, selection }),
+    )
+
+    // Claimed for this very selection: any re-read retires it by
+    // construction, since a new one is a new object. A repeat of the same
+    // live copy counts up, counted from the claim as it stands rather than
+    // as this click first saw it, so two copies that overlap count as two.
+    setMaterialClaim((claim) =>
+      copied
+        ? {
+            selection,
+            count:
+              claim !== null && claim.selection === selection
+                ? claim.count + 1
+                : 1,
+          }
+        : null,
     )
   }
 
@@ -164,7 +246,8 @@ export default function StandupPostView({
         <h1 className="type-section">Standup Post</h1>
         <p className="pt-1 type-meta text-muted-foreground">
           Prose a model writes from what you did and what you still owe, for
-          you to read and then paste.
+          you to read and then paste — or yesterday as Markdown, with no key,
+          no network and no waiting.
         </p>
       </header>
 
@@ -177,7 +260,7 @@ export default function StandupPostView({
 
         {state.state === 'unreadable' && (
           <p role="alert" className="type-meta text-destructive">
-            The Standup Post material could not be read.
+            Yesterday could not be read.
           </p>
         )}
 
@@ -197,6 +280,38 @@ export default function StandupPostView({
                 Generate
               </Button>
 
+              {/*
+                The material as the user pastes it when there is no Model
+                Access, the endpoint is down, or the prose came back wrong:
+                built from the selection on screen, costing nothing and never
+                waiting. It stays here, live, once a post exists — and is
+                refused under the same gate as Generate, which is a day with
+                nothing in either half, not anything about the model.
+              */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void copyMaterial()}
+                disabled={standupPostRefuses(state.selection)}
+              >
+                <ClipboardCopyIcon data-icon="inline-start" />
+                Copy material
+              </Button>
+
+              {/*
+                The material copy's own confirmation, beside its own button
+                and naming its own subject — never the post's. A repeat says
+                its number: a region announces on change, so identical text
+                would leave the second copy unannounced.
+              */}
+              <span
+                role="status"
+                aria-live="polite"
+                className="type-meta text-muted-foreground"
+              >
+                {materialSaid}
+              </span>
+
               {pending !== null && (
                 <p role="status" className="type-meta text-muted-foreground">
                   Writing with {pending}…
@@ -215,13 +330,20 @@ export default function StandupPostView({
                   {post.markdown}
                 </div>
                 <div className="flex items-center gap-3">
-                  <Button size="sm" onClick={copy}>
+                  {/* Copy post, not Copy: with a second Copy on this screen,
+                      position is no longer enough to say what a button does. */}
+                  <Button
+                    size="sm"
+                    onClick={() => void copyPost()}
+                  >
                     <ClipboardCopyIcon data-icon="inline-start" />
-                    Copy
+                    Copy post
                   </Button>
-                  {/* Empty until a copy lands, and announced when it does. */}
+                  {/* Empty until a copy lands, and announced when it does —
+                      naming its subject, and numbering a repeat so identical
+                      text is said again. */}
                   <span role="status" aria-live="polite" className="type-meta text-muted-foreground">
-                    {copied ? 'Copied to the clipboard.' : ''}
+                    {postSaid}
                   </span>
                 </div>
               </section>
@@ -343,4 +465,26 @@ function describeFailure(failure: StandupFailure): string {
 
 function count(value: number, noun: string): string {
   return `${value} ${noun}${value === 1 ? '' : 's'}`
+}
+
+/**
+ * Which of the two artifacts a copy is about. There are exactly two, and
+ * every sentence either of them says is built from this one word, so the
+ * toast and the live region beside the button cannot drift apart.
+ */
+type Subject = 'post' | 'material'
+
+/** The one sentence a landed copy says, wherever it says it. */
+function landed(subject: Subject): string {
+  return `Copied the standup ${subject} to the clipboard.`
+}
+
+/**
+ * What a copy's live region says. The same words twice are not said twice —
+ * a region announces on change, so an identical repeat would be silence,
+ * exactly when the reader most needs telling — so a repeat carries its own
+ * number. The first copy reads plainly; the second says it is the second.
+ */
+function said(subject: Subject, count: number): string {
+  return count === 1 ? landed(subject) : `${landed(subject)} (${count})`
 }

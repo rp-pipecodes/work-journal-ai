@@ -98,7 +98,7 @@ _Avoid_: Meeting note, event, calendar entry
 Nothing. Text typed during a Capture but not committed does not exist — abandoning a Capture discards it, and the next Capture starts empty.
 
 **Project**:
-An optional named stream of work a Note is filed under. At most one per Note. First-class filing — parallel to Journal Day (when) rather than markup inside the Body (what was said). Identity is case-insensitive and stored lowercase; the name is a non-empty run of letters, digits, `_`, or `-`. Exists only as a value on Notes — no registry, so a name with no remaining Notes is gone.
+An optional named stream of work a Note is filed under. At most one per Note. First-class filing — parallel to Journal Day (when) rather than markup inside the Body (what was said). Identity is case-insensitive and stored lowercase; the name is a non-empty run of letters, digits, `_`, or `-`. Exists only as a value on Notes — no registry, so a name with no remaining Notes is gone. Renaming a Project changes that value on every Note filed under it in one operation, merging into the target when Notes already carry it; no Body text is rewritten, and renaming is not clearing — filing a Note under nothing stays a per-Note act.
 _Avoid_: Tag, label, category, context, hashtag
 
 **Project Marker**:
