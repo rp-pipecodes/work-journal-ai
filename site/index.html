@@ -6,7 +6,7 @@
     <title>Work Journal — a local-first log of work notes and tasks</title>
     <meta
       name="description"
-      content="A personal, local-first macOS menu bar app. Capture short notes about what you did, keep tasks for what is still to be done, and read either back as Markdown."
+      content="A personal, local-first macOS menu bar app. Capture short notes about what you did, keep tasks for what is still to do, and get yesterday written up as a standup post — by your own language model, or as plain Markdown without one."
     />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <link rel="canonical" href="https://rp-pipecodes.github.io/work-journal-ai/" />
@@ -14,11 +14,21 @@
     <meta property="og:title" content="Work Journal" />
     <meta
       property="og:description"
-      content="A local-first log of short work notes, and the tasks that go with them. Everything stays on your Mac."
+      content="A local-first log of short work notes and the tasks that go with them — read back as Markdown, with a standup post written from yesterday when you want one. Everything stays on your Mac."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://rp-pipecodes.github.io/work-journal-ai/" />
-    <meta name="twitter:card" content="summary" />
+    <meta
+      property="og:image"
+      content="https://rp-pipecodes.github.io/work-journal-ai/share-card.png"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="The Work Journal mark above the words Work Journal and the line: a local-first log of short work notes — and the tasks that go with them."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
 
     <style>
       :root {
@@ -111,8 +121,8 @@
         font-weight: 600;
       }
 
-      /* The feature groups are a list of lists inside one section, not four
-         sections: a rule between each of them would read as four topics. */
+      /* The feature groups are a list of lists inside one section, not five
+         sections: a rule between each of them would read as five topics. */
       section h3 {
         font-size: 1rem;
         font-weight: 600;
@@ -154,6 +164,15 @@
       .download:focus-visible {
         outline: 2px solid var(--fg);
         outline-offset: 3px;
+      }
+
+      /* Filled in from the GitHub API when the page loads, and hidden until
+         then: a page that fetched nothing says nothing rather than a version
+         that could be wrong. */
+      .latest-release {
+        margin: 0.9rem 0 0;
+        font-size: 0.95rem;
+        color: var(--muted);
       }
 
       /* Sits directly under the button on purpose: nobody should reach the
@@ -219,17 +238,19 @@
       </p>
 
       <p>
-        It lives in the menu bar. There is no Dock icon and no app to switch to:
-        one hotkey opens a text field for a note, another opens one for a task,
-        and both disappear again as soon as you are done. The tray menu offers
-        the same two, and carries today's note count beside its glyph — the only
-        reminder to journal the app will ever give you.
+        It lives in the menu bar. One hotkey opens a text field for a note,
+        another opens one for a task, and both disappear again as soon as you
+        are done. The tray menu offers the same two, and carries today's note
+        count beside its glyph — the only reminder to journal the app will ever
+        give you.
       </p>
 
       <p>
-        Everything is local. No account, no server, no network call — the notes
-        and tasks are a SQLite file on your Mac, and Export writes all of it to
-        Markdown so nothing is locked in.
+        Everything is stored locally — no account, no server. The notes and
+        tasks are a SQLite file on your Mac, and Export writes all of it to
+        Markdown so nothing is locked in. The app reaches the network only when
+        you ask it to: to write a standup post with the language model you point
+        it at, and to download an update you confirm.
       </p>
 
       <section>
@@ -241,6 +262,11 @@
           >Download for macOS</a
         >
 
+        <p class="latest-release" id="latest-release" hidden>
+          Latest release <span id="latest-release-version"></span> ·
+          <span id="latest-release-date"></span>
+        </p>
+
         <p class="requirements">
           Apple Silicon only. Unsigned and unnotarized — after dragging it to
           Applications you <strong>must</strong> clear the quarantine attribute
@@ -251,7 +277,10 @@
 
         <p class="muted">
           That step is not optional for a downloaded copy. A build you compiled
-          yourself and never moved is not quarantined and needs nothing.
+          yourself and never moved is not quarantined and needs nothing. It is
+          also the only time you will do it: from then on, Settings › Updates ›
+          Check for updates finds the newest release and installs and restarts
+          into it — the update is signed, and the app unpacks it itself.
         </p>
       </section>
 
@@ -269,9 +298,13 @@
             names you have used already are offered as you type.
           </li>
           <li>
-            Read back any range of days — with presets for today, yesterday, this
-            or last week, this or last month — narrowed to one project or not at
-            all.
+            Rename a project — or fold one into another — and every note filed
+            under it moves with it, in one operation.
+          </li>
+          <li>
+            Read back any range of days — with presets for today, yesterday,
+            this or last week, this or last month — narrowed to one project or
+            not at all.
           </li>
           <li>
             Search every note's text to jump to the day it is filed under.
@@ -307,6 +340,30 @@
           </li>
         </ul>
 
+        <h3>Standup Post</h3>
+        <ul>
+          <li>
+            Copy yesterday's digest straight from the tray menu, without opening
+            a window — the day's notes as Markdown, with nothing to configure.
+          </li>
+          <li>
+            One click further in, copy the Standup Material: yesterday's notes
+            plus the work kept and the tasks still standing. The complete input,
+            and what you paste when no model is set up.
+          </li>
+          <li>
+            Or have the standup written for you, in prose, from exactly that
+            material — read it before you copy it, since it is written and may
+            be wrong. Nothing is kept: close the window and it is gone.
+          </li>
+          <li>
+            The writing is done by a language model you point the app at — any
+            OpenAI-compatible endpoint, your key, your prompt for the voice. The
+            key lives in your Mac's keychain, and every other feature works with
+            none of it configured.
+          </li>
+        </ul>
+
         <h3>Meetings</h3>
         <ul>
           <li>
@@ -324,16 +381,12 @@
         <ul>
           <li>Copy the range you are looking at as Markdown.</li>
           <li>
-            Copy yesterday's digest straight from the tray menu, without opening
-            a window.
-          </li>
-          <li>
             Export every note and task to a Markdown file, regardless of what
             is on screen.
           </li>
           <li>
-            Remap either hotkey, pick a light, dark, or system theme, and start
-            at login.
+            Remap either hotkey, pick a light, dark, or system theme, start at
+            login, and choose which calendars meetings come from.
           </li>
         </ul>
       </section>
@@ -350,5 +403,29 @@
         </p>
       </footer>
     </main>
+
+    <script>
+      // Progressive enhancement: name the latest release under the download
+      // button. The button already points at the right place, so a failed
+      // fetch — no network, rate limiting — is silent and the line stays
+      // hidden rather than showing a version that could be wrong.
+      fetch(
+        "https://api.github.com/repos/rp-pipecodes/work-journal-ai/releases/latest",
+      )
+        .then((response) => (response.ok ? response.json() : null))
+        .then((release) => {
+          if (!release || !release.tag_name || !release.published_at) return;
+          document.getElementById("latest-release-version").textContent =
+            release.tag_name;
+          document.getElementById("latest-release-date").textContent =
+            new Intl.DateTimeFormat("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            }).format(new Date(release.published_at));
+          document.getElementById("latest-release").hidden = false;
+        })
+        .catch(() => {});
+    </script>
   </body>
 </html>
