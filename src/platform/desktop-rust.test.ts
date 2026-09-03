@@ -298,7 +298,45 @@ describe('the commands that can block on a person', () => {
     // The two that already carry the rule, here so it reads as a rule.
     'request_calendar_access',
     'request_task_alert_permission',
+    // The save dialog is the system's, and the app must not sit frozen
+    // behind it while the user reads it.
+    'choose_backup_location',
   ]
+
+  it('runs the backup status read off the main thread with its siblings', () => {
+    // The automatic-backups read reaches the file system, so it rides the
+    // same async shape as the commands beside it.
+    const declaration = rustSource.match(
+      /#\[tauri::command\(async\)\]\s*fn automatic_backups\b/,
+    )
+    expect(declaration).toBeTruthy()
+  })
+
+  it('carries every backup command the desktop surface names', () => {
+    // The webview calls these by name; a rename on either side is a Settings
+    // button that answers nothing. Each must be both declared as a command
+    // and listed in the invoke handler.
+    const handler = rustSource.match(
+      /invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\)/,
+    )?.[1]
+    expect(handler, 'the invoke handler could not be read').toBeTruthy()
+
+    for (const command of [
+      'automatic_backups',
+      'choose_backup_location',
+      'backup_journal',
+      'reveal_backups',
+    ]) {
+      expect(
+        rustSource.match(new RegExp(`fn ${command}\\b`)),
+        `${command} is not a command in ${RUST_FILE}`,
+      ).toBeTruthy()
+      expect(
+        handler,
+        `${command} is not registered in the invoke handler`,
+      ).toContain(command)
+    }
+  })
 
   it.each(BLOCKING_COMMANDS)('runs %s off the main thread', (command) => {
     // An `async fn` command is off the main thread by its very shape; the

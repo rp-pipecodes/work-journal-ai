@@ -11,6 +11,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
 import { LogicalSize } from '@tauri-apps/api/dpi'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { save, type SaveDialogOptions } from '@tauri-apps/plugin-dialog'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { relaunch } from '@tauri-apps/plugin-process'
@@ -39,6 +40,8 @@ import {
   TASKS_CHANGED_EVENT,
   THEME_CHANGED_EVENT,
   type AvailableUpdate,
+  type AutomaticBackups,
+  type BackupResult,
   type CalendarAccess,
   type CalendarInfo,
   type Desktop,
@@ -241,6 +244,22 @@ export function createTauriDesktop(): Desktop {
 
     exportJournal: (markdown, fileName) =>
       invoke<ExportedFile>('export_journal', { markdown, fileName }),
+
+    automaticBackups: () => invoke<AutomaticBackups>('automatic_backups'),
+
+    // The picker and the write are two invocations, sequenced by the caller:
+    // a `null` here means the user cancelled, and no backup call follows.
+    chooseBackupLocation: async () => {
+      // The Rust side already suggests the timestamped name and starts in
+      // Downloads; this passes its own options straight through so the
+      // dialog is the OS's and the defaults are decided in one place.
+      const options: SaveDialogOptions = {}
+      return save(options)
+    },
+
+    backupJournal: (path) => invoke<BackupResult>('backup_journal', { path }),
+
+    revealBackups: () => invoke('reveal_backups'),
 
     // The Key stays in the Keychain: only what the model needs to hear crosses
     // to Rust, and the answer comes back as one shape, success or failure.

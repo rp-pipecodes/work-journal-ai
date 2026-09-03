@@ -782,6 +782,143 @@ describe('Export', () => {
   })
 })
 
+describe('Backup', () => {
+  /**
+   * The line the Backup group keeps saying, found inside that group alone —
+   * found by its heading, the way a reader finds it.
+   */
+  function backupStatus(): string | null | undefined {
+    return screen
+      .getByRole('heading', { name: 'Backup' })
+      .closest('section')
+      ?.querySelector('p[role="status"]')?.textContent
+  }
+
+  it('says when the last automatic backup was taken', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.automaticBackupStatus = { count: 2, newestTakenAt: 1_788_425_100 }
+
+    showSettings(desktop)
+
+    await expect
+      .poll(backupStatus)
+      .toMatch(/Last automatic backup: .*2026/)
+  })
+
+  it('says there is none yet before the first launch has taken one', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.automaticBackupStatus = { count: 0, newestTakenAt: null }
+
+    showSettings(desktop)
+
+    await expect
+      .poll(backupStatus)
+      .toBe('No automatic backup yet — one is taken at launch.')
+  })
+
+  it('picks, then writes, and says where the manual backup went', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.chosenBackupLocation = '/Volumes/Offsite/work-journal-20260903T084500.db'
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Back up now' })).click()
+
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Backed up to /Volumes/Offsite/work-journal-20260903T084500.db.')
+    // The line underneath keeps saying it, as Export's does.
+    expect(backupStatus()).toMatch(
+      /Backed up to \/Volumes\/Offsite\/work-journal-20260903T084500\.db/,
+    )
+    expect(desktop.backups).toEqual([
+      '/Volumes/Offsite/work-journal-20260903T084500.db',
+    ])
+  })
+
+  it('reads Backing up… only while the write happens, not while the user browses', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.chosenBackupLocation = '/tmp/work-journal-20260903T084500.db'
+    // The picker stays open until the test says the user confirmed.
+    let releasePicker = () => {}
+    const picked = new Promise<void>((resolve) => {
+      releasePicker = resolve
+    })
+    desktop.chooseBackupLocation = () => picked.then(() => desktop.chosenBackupLocation)
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Back up now' })).click()
+
+    // The dialog is up: not backing up yet, and the button is honest about it.
+    expect(desktop.backups).toEqual([])
+    expect(screen.getByRole('button', { name: 'Back up now' })).toBeTruthy()
+
+    releasePicker()
+
+    // The write is the moment the label covers.
+    await screen.findByRole('button', { name: 'Backing up…' })
+    await expect.poll(() => desktop.backups).toHaveLength(1)
+  })
+
+  it('says a cancelled dialog as cancelled, and writes nothing', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.chosenBackupLocation = null
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Back up now' })).click()
+
+    await expect.poll(() => toasts().join(' | ')).toBe('Backup cancelled.')
+    expect(desktop.backups).toEqual([])
+    // Not an error: nothing on screen says the journal could not be backed up.
+    expect(backupStatus()).not.toMatch(/Could not/)
+  })
+
+  it('says so when the write fails, in the toast and on the line', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.chosenBackupLocation = '/tmp/work-journal-20260903T084500.db'
+    desktop.backupFails = true
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Back up now' })).click()
+
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Could not back up the journal.')
+    expect(backupStatus()).toBe('Could not back up the journal.')
+  })
+
+  it('reveals the automatic backups when asked', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Reveal backups' })).click()
+
+    await expect.poll(() => desktop.backupsRevealed).toBe(1)
+  })
+
+  it('keeps its promise small: no Key, no Hotkeys, no settings, no safety claim', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+
+    showSettings(desktop)
+
+    const group = screen
+      .getByRole('heading', { name: 'Backup' })
+      .closest('section')
+    const said = group?.textContent ?? ''
+
+    expect(said).toMatch(/API Key.*never included|never included/)
+    expect(said).toMatch(/Hotkeys and settings/)
+    // The automatic folder is not disaster recovery, and the copy says so.
+    expect(said).toMatch(/shares the disk's fate/)
+    expect(said).not.toMatch(/safe|encrypted|survives/i)
+  })
+})
+
 describe('Updates', () => {
   /** The line the Updates group keeps saying, found inside that group alone. */
   function updateStatus(): string | null | undefined {

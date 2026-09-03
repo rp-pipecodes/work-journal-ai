@@ -315,6 +315,19 @@ export interface ExportedFile {
   fileName: string
 }
 
+/** Where a manual backup ended up — the Rust side's `BackupResult`. */
+export interface BackupResult {
+  path: string
+  fileName: string
+}
+
+/** What the automatic backups look like right now, as the Rust side counts it. */
+export interface AutomaticBackups {
+  count: number
+  /** Epoch seconds of the newest snapshot, or null when there is none. */
+  newestTakenAt: number | null
+}
+
 /**
  * What a Standup Post call asks for: where the model is, which one, and the
  * two turns. The API Key is deliberately not among them — the Rust side
@@ -619,6 +632,33 @@ export interface Desktop {
 
   /** Writes a rendered export to a file, and says where it went. */
   exportJournal(markdown: string, fileName: string): Promise<ExportedFile>
+
+  /**
+   * What the automatic backups look like: how many, and when the newest was
+   * taken. Asked of the live directory rather than remembered — the folder
+   * sits beside the journal and the user can empty it.
+   */
+  automaticBackups(): Promise<AutomaticBackups>
+  /**
+   * Opens the save dialog and resolves to the path the user chose, or null
+   * for a cancelled one. One moment of the one gesture — see
+   * `backupJournal`, and the split `installUpdate` and `restart` already
+   * make. Deliberately not the write: the button that started this stays
+   * honest about which of the two moments it is waiting on, and a cancelled
+   * dialog is a frontend outcome rather than an error.
+   */
+  chooseBackupLocation(): Promise<string | null>
+  /**
+   * Writes the snapshot to the path `chooseBackupLocation` answered with, and
+   * says where it went. Every read and write happens on the Rust side — the
+   * webview only carries a path, exactly as `exportJournal` already does.
+   */
+  backupJournal(path: string): Promise<BackupResult>
+  /**
+   * Shows the automatic backups folder in the Finder — the one place the
+   * snapshots the app takes on its own can be seen and copied by hand.
+   */
+  revealBackups(): Promise<void>
 
   /**
    * The release newer than this build, or null when this build is already the

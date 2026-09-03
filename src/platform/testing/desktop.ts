@@ -4,7 +4,9 @@ import type { SettingsStore } from '../../settings/settings'
 import type { Theme } from '../../settings/theme'
 import type {
   AppIdentity,
+  AutomaticBackups,
   AvailableUpdate,
+  BackupResult,
   CalendarAccess,
   CalendarInfo,
   CaptureFit,
@@ -43,6 +45,24 @@ export interface FakeDesktop extends Desktop {
   loginItem: boolean
   /** Every export written, most recent last. */
   exported: Array<{ markdown: string; fileName: string }>
+  /**
+   * What the save dialog answers with: a path, or null for a cancelled one.
+   * Writable, so the three cases — cancel, pick-then-succeed,
+   * pick-then-fail — are separately scriptable.
+   */
+  chosenBackupLocation: string | null
+  /** Every backup written, most recent last. */
+  backups: string[]
+  /** Whether a backup write fails, as it does when the disk refuses. */
+  backupFails: boolean
+  /**
+   * What the automatic backups look like; writable, as an emptied folder is.
+   * Named `automaticBackupStatus` because the interface member of the same
+   * shape on `Desktop` is the method that reads it.
+   */
+  automaticBackupStatus: AutomaticBackups
+  /** How many times the backups folder was revealed. */
+  backupsRevealed: number
   /** Every size the Capture window was asked to take, most recent last. */
   fits: CaptureFit[]
   /** What is beside the menu bar glyph; null until something is put there. */
@@ -199,6 +219,11 @@ export function fakeDesktop({
     stored,
     loginItem: false,
     exported: [],
+    chosenBackupLocation: null,
+    backups: [],
+    backupFails: false,
+    automaticBackupStatus: { count: 0, newestTakenAt: null },
+    backupsRevealed: 0,
     fits: [],
     trayTitle: null,
     clipboard: null,
@@ -417,6 +442,25 @@ export function fakeDesktop({
     exportJournal: async (markdown, fileName): Promise<ExportedFile> => {
       desktop.exported.push({ markdown, fileName })
       return { path: `/tmp/${fileName}`, fileName }
+    },
+
+    automaticBackups: async (): Promise<AutomaticBackups> =>
+      desktop.automaticBackupStatus,
+
+    chooseBackupLocation: async (): Promise<string | null> =>
+      desktop.chosenBackupLocation,
+
+    backupJournal: async (path): Promise<BackupResult> => {
+      if (desktop.backupFails) {
+        throw new Error('The snapshot could not be written.')
+      }
+      desktop.backups.push(path)
+      const fileName = path.split('/').pop() ?? path
+      return { path, fileName }
+    },
+
+    revealBackups: async () => {
+      desktop.backupsRevealed += 1
     },
 
     generateStandupPost: async (request): Promise<StandupPostResponse> => {
