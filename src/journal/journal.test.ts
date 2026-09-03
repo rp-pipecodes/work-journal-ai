@@ -2511,6 +2511,163 @@ describe('completeTask and reopenTask', () => {
   })
 })
 
+describe('completeTaskAt', () => {
+  it('completes an ordinary Task delivered for the slot it still holds', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T08:00:00')
+    const task = await journal.createTask('renew the certificate', {
+      date: '2026-03-09',
+      time: '09:00',
+    })
+    clock.set(local('2026-03-09T09:00:30'))
+
+    const outcome = await journal.completeTaskAt(task.id, {
+      date: '2026-03-09',
+      time: '09:00',
+    })
+
+    expect(outcome).toEqual({
+      outcome: 'completed',
+      task: expect.objectContaining({
+        id: task.id,
+        completedAt: local('2026-03-09T09:00:30').toISOString(),
+      }),
+    })
+    expect(await journal.openTasks()).toEqual([])
+  })
+
+  it('refuses a slot whose date has moved since the caller was told', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T08:00:00')
+    const task = await journal.createTask('renew the certificate', {
+      date: '2026-03-09',
+      time: '09:00',
+    })
+    const rescheduled = await journal.editTask(task.id, {
+      description: 'renew the certificate',
+      schedule: { date: '2026-03-16', time: '09:00' },
+    })
+    clock.set(local('2026-03-09T09:00:30'))
+
+    const outcome = await journal.completeTaskAt(task.id, {
+      date: '2026-03-09',
+      time: '09:00',
+    })
+
+    expect(outcome).toEqual({ outcome: 'stale', task: rescheduled })
+    expect(await journal.openTasks()).toEqual([rescheduled])
+    expect(await journal.completedTasks()).toEqual([])
+  })
+
+  it('refuses a slot whose time has moved, on the same day', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T08:00:00')
+    const task = await journal.createTask('renew the certificate', {
+      date: '2026-03-09',
+      time: '09:00',
+    })
+    const rescheduled = await journal.editTask(task.id, {
+      description: 'renew the certificate',
+      schedule: { date: '2026-03-09', time: '17:00' },
+    })
+    clock.set(local('2026-03-09T09:00:30'))
+
+    const outcome = await journal.completeTaskAt(task.id, {
+      date: '2026-03-09',
+      time: '09:00',
+    })
+
+    expect(outcome).toEqual({ outcome: 'stale', task: rescheduled })
+    expect(await journal.openTasks()).toEqual([rescheduled])
+  })
+
+  it('never moves the instant a Task already Completed was kept at', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T08:00:00')
+    const task = await journal.createTask('renew the certificate', {
+      date: '2026-03-09',
+      time: '09:00',
+    })
+    clock.set(local('2026-03-09T08:45:00'))
+    const completed = await journal.completeTask(task.id)
+
+    clock.set(local('2026-03-09T09:00:30'))
+    const outcome = await journal.completeTaskAt(task.id, {
+      date: '2026-03-09',
+      time: '09:00',
+    })
+
+    expect(outcome).toEqual({ outcome: 'stale', task: completed })
+    expect(await journal.completedTasks()).toEqual([completed])
+  })
+
+  it('refuses a Task that has since been deleted, without failing', async () => {
+    const { journal } = await journalAt('2026-03-09T08:00:00')
+    const task = await journal.createTask('renew the certificate', {
+      date: '2026-03-09',
+      time: '09:00',
+    })
+    await journal.deleteTask(task.id)
+
+    const outcome = await journal.completeTaskAt(task.id, {
+      date: '2026-03-09',
+      time: '09:00',
+    })
+
+    expect(outcome).toEqual({ outcome: 'stale', task: null })
+  })
+
+  it('keeps the occurrence and advances the series when the slot still stands', async () => {
+    const { journal, clock } = await journalAt('2026-03-10T08:00:00')
+    const daily = await journal.createTask(
+      'water the plants',
+      { date: '2026-03-10', time: '09:00' },
+      { unit: 'day', interval: 1, weekdays: [] },
+    )
+    clock.set(local('2026-03-10T09:00:30'))
+
+    const outcome = await journal.completeTaskAt(daily.id, {
+      date: '2026-03-10',
+      time: '09:00',
+    })
+
+    expect(outcome).toEqual({
+      outcome: 'completed',
+      task: expect.objectContaining({
+        scheduledDate: '2026-03-11',
+        scheduledTime: '09:00',
+        completedAt: null,
+      }),
+    })
+    expect(
+      (await journal.occurrencesOf(daily.id)).map(
+        (one) => `${formatSlot(slotOf(one))} ${one.completedAt === null ? 'open' : 'kept'}`,
+      ),
+    ).toEqual(['2026-03-11 09:00 open', '2026-03-10 09:00 kept'])
+  })
+
+  it('refuses a slot the series has already advanced past', async () => {
+    const { journal, clock } = await journalAt('2026-03-10T08:00:00')
+    const daily = await journal.createTask(
+      'water the plants',
+      { date: '2026-03-10', time: '09:00' },
+      { unit: 'day', interval: 1, weekdays: [] },
+    )
+    clock.set(local('2026-03-10T09:00:30'))
+    await journal.completeTask(daily.id)
+
+    // The banner delivered for the 10th, clicked after the series moved on.
+    clock.set(local('2026-03-10T22:00:00'))
+    const outcome = await journal.completeTaskAt(daily.id, {
+      date: '2026-03-10',
+      time: '09:00',
+    })
+
+    expect(outcome.outcome).toBe('stale')
+    expect(
+      (await journal.occurrencesOf(daily.id)).map(
+        (one) => `${formatSlot(slotOf(one))} ${one.completedAt === null ? 'open' : 'kept'}`,
+      ),
+    ).toEqual(['2026-03-11 09:00 open', '2026-03-10 09:00 kept'])
+  })
+})
+
 describe('editTask', () => {
   it('rewords a Task without touching Task Created At', async () => {
     const { journal, clock } = await journalAt('2026-03-09T10:00:00')

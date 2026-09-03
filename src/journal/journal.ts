@@ -181,6 +181,11 @@ export interface TaskSchedule {
   time: string | null
 }
 
+/** What a guarded completion did, and what the Task looks like afterwards. */
+export type CompletionAtSlot =
+  | { outcome: 'completed'; task: Task }
+  | { outcome: 'stale'; task: Task | null }
+
 /** Whether a Task is still a commitment, or a record that one was kept. */
 export function isOpen(task: Task): boolean {
   return task.completedAt === null
@@ -551,6 +556,12 @@ export interface Journal {
    * would be in the way every single time.
    */
   completeTask(id: string): Promise<Task>
+  /**
+   * Completes a Task only if it still stands at the slot the caller was told
+   * about — the guarded twin of `completeTask`, for an actor holding a copy of
+   * a schedule that may have moved under it.
+   */
+  completeTaskAt(id: string, slot: TaskSchedule): Promise<CompletionAtSlot>
   /** Puts the commitment back: Task Completed At is removed, not kept. */
   reopenTask(id: string): Promise<Task>
   /**
@@ -1144,6 +1155,50 @@ export function createJournal({
   clock: Clock
   driver: SqlDriver
 }): Journal {
+  /**
+   * Keeping an Open Task, whichever kind it is — the one place completion is
+   * spelled out, so the checkbox in Tasks View and a guarded completion from
+   * somewhere the user cannot see both keep the same transactional promises.
+   * The caller has already established that the Task is Open.
+   */
+  async function completeOpen(task: Task): Promise<Task> {
+    const now = clock.now()
+
+    if (task.recurrence === null || task.recurrenceAnchor === null) {
+      const completedAt = now.toISOString()
+      await driver.execute(UPDATE_TASK_COMPLETED_AT, [completedAt, task.id])
+      return { ...task, completedAt }
+    }
+
+    // A Recurring Task is never itself Completed: the occurrence is kept,
+    // stays in the Task's own history, and the Task carries on asking for
+    // the next slot that is still ahead.
+    const open = await readOpenOccurrence(driver, task.id)
+    const next = advancedSlot(
+      task.recurrenceAnchor,
+      task.recurrence,
+      open.scheduledTime,
+      open.scheduledDate,
+      now,
+    )
+    const advanced: Task = {
+      ...task,
+      scheduledDate: next,
+      scheduledTime: open.scheduledTime,
+    }
+
+    await driver.transaction([
+      { sql: COMPLETE_TASK_OCCURRENCE, params: [now.toISOString(), open.id] },
+      opensOccurrence(advanced, now, open.id),
+      {
+        sql: UPDATE_TASK_SCHEDULE,
+        params: [next, open.scheduledTime, task.id],
+      },
+    ])
+
+    return advanced
+  }
+
   return {
     async capture(text) {
       assertOneLine(text)
@@ -1581,41 +1636,31 @@ export function createJournal({
         return task
       }
 
-      const now = clock.now()
+      return completeOpen(task)
+    },
 
-      if (task.recurrence === null || task.recurrenceAnchor === null) {
-        const completedAt = now.toISOString()
-        await driver.execute(UPDATE_TASK_COMPLETED_AT, [completedAt, id])
-        return { ...task, completedAt }
+
+    async completeTaskAt(id, slot) {
+      // A deleted Task is stale rather than a failure: the caller is holding a
+      // copy of something the user was entitled to throw away.
+      const task = await findTask(driver, id)
+
+      if (task === null) {
+        return { outcome: 'stale', task: null }
       }
 
-      // A Recurring Task is never itself Completed: the occurrence is kept,
-      // stays in the Task's own history, and the Task carries on asking for
-      // the next slot that is still ahead.
-      const open = await readOpenOccurrence(driver, id)
-      const next = advancedSlot(
-        task.recurrenceAnchor,
-        task.recurrence,
-        open.scheduledTime,
-        open.scheduledDate,
-        now,
-      )
-      const advanced: Task = {
-        ...task,
-        scheduledDate: next,
-        scheduledTime: open.scheduledTime,
+      const held = scheduleOf(task)
+
+      if (
+        !isOpen(task) ||
+        held === null ||
+        held.date !== slot.date ||
+        held.time !== slot.time
+      ) {
+        return { outcome: 'stale', task }
       }
 
-      await driver.transaction([
-        { sql: COMPLETE_TASK_OCCURRENCE, params: [now.toISOString(), open.id] },
-        opensOccurrence(advanced, now, open.id),
-        {
-          sql: UPDATE_TASK_SCHEDULE,
-          params: [next, open.scheduledTime, id],
-        },
-      ])
-
-      return advanced
+      return { outcome: 'completed', task: await completeOpen(task) }
     },
 
     async reopenTask(id) {
@@ -2988,6 +3033,13 @@ async function read(driver: SqlDriver, id: string): Promise<Note> {
  * here, so changing one that is no longer there fails loudly rather than
  * silently updating nothing.
  */
+/** The Task, or null when there is none — for callers a gap is an answer to. */
+async function findTask(driver: SqlDriver, id: string): Promise<Task | null> {
+  const [row] = await driver.select<TaskRow>(SELECT_TASK, [id])
+
+  return row === undefined ? null : toTask(row)
+}
+
 async function readTask(driver: SqlDriver, id: string): Promise<Task> {
   const [row] = await driver.select<TaskRow>(SELECT_TASK, [id])
 
