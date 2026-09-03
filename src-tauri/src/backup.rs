@@ -320,18 +320,14 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    /// Runs one async test on its own single-threaded runtime: the runtime is
-    /// only the shape an async test takes here, not something the module
-    /// depends on — tokio is already in the tree through tauri and sqlx.
+    /// Runs one async test on Tauri's own runtime: the same runtime the app
+    /// and the startup snapshot task run on, reached through the `tauri` crate
+    /// the module already depends on. No test-only runtime, no extra dep.
     macro_rules! async_test {
         ($name:ident, $body:block) => {
             #[test]
             fn $name() {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("could not start a runtime")
-                    .block_on(async { $body });
+                tauri::async_runtime::block_on(async { $body });
             }
         };
     }

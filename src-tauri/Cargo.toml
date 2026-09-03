@@ -45,9 +45,6 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "nat
 # The save dialog behind the manual backup — and #161's open dialog after it.
 tauri-plugin-dialog = { version = "2.7.3" }
 
-[dev-dependencies]
-tokio = { version = "1", features = ["rt", "macros"] }
-
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 # The calendar an Import reads, and the wake notification that makes it look
