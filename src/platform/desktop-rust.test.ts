@@ -352,6 +352,91 @@ describe('the commands that can block on a person', () => {
 })
 
 /**
+ * The argument names a command is invoked with, checked both ways. Tauri
+ * matches the keys of the webview's invoke payload against the command's
+ * parameter names — snake_case on the Rust side reads as camelCase in the
+ * payload — and a name that matches nothing refuses the call before the
+ * command's body runs. Silent is the cruelty of it: the build passes, the
+ * fake desktop passes every test, and pressing the button reports nothing.
+ *
+ * Both sides are read as source, as the shared strings above are: the
+ * arguments `tauri-desktop.ts` sends, and the parameters each command
+ * receives. Parameters this side never sends are named here so that adding
+ * one is a deliberate act rather than a silent one.
+ */
+describe('the arguments commands are invoked with', () => {
+  const desktopSource = read(DESKTOP_FILE)
+
+  /**
+   * Every command whose arguments the webview sends, with what it sends.
+   * The payload's keys must be exactly these, and Rust's parameters — read
+   * back in camelCase — must match them one for one.
+   */
+  const invoked: Record<string, string[]> = {
+    journal_transaction: ['statements'],
+    reconcile_task_alerts: ['alerts'],
+    set_hotkey: ['action', 'hotkey'],
+    save_api_key: ['apiKey'],
+    export_journal: ['markdown', 'fileName'],
+    backup_journal: ['path'],
+    generate_standup_post: ['request'],
+    show_tray_count: ['title'],
+  }
+
+  /** The parameter names of one Rust command, in snake_case as written. */
+  function rustParameters(command: string): string[] {
+    const signature = rustSource.match(
+      new RegExp(`(?:async )?fn ${command}\\b([\\s\\S]*?)\\) ->`),
+    )?.[1]
+    if (signature === undefined) {
+      throw new Error(`${command} is not a command in ${RUST_FILE}`)
+    }
+
+    return [...signature.matchAll(/[(,]\s*(?:mut )?([a-z_][a-z0-9_]*):/gm)]
+      .map(([, name]) => name)
+      // Handled by Tauri itself — the app handle, injected state, the
+      // window — are not part of the payload the webview sends, and never
+      // have been: `journal_transaction`'s `databases` and `set_hotkey`'s
+      // `hotkeys` ride in the command's context, not its arguments.
+      .filter((name) => !['app', '_app', 'window', 'state'].includes(name))
+      // State's generic is a type, not a name; `databases` and `hotkeys`
+      // are `State<'_, T>` parameters and are dropped here with their kind.
+      .filter((name) => !new RegExp(`${name}:\\s*tauri::State`).test(signature))
+  }
+
+  it('sends every argument with the name the command receives', () => {
+    expect(Object.keys(invoked).length).toBeGreaterThan(0)
+
+    for (const [command, sent] of Object.entries(invoked)) {
+      const parameters = rustParameters(command)
+        .map((name) => name.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()))
+
+      expect(
+        parameters,
+        `${command} receives [${parameters.join(', ')}] but the webview sends ` +
+          `[${sent.join(', ')}] — a name the command does not receive refuses ` +
+          'the call before its body runs',
+      ).toEqual(sent)
+    }
+  })
+
+  it('accounts for every command the webview invokes with arguments', () => {
+    // Read from `tauri-desktop.ts` itself, so a new invoke with a payload
+    // has to land in `invoked` above — checked, or named here — rather than
+    // appearing silently beside them.
+    const sent = [...desktopSource.matchAll(/invoke[^\n]*'([a-z_]+)'/g)].map(
+      ([, command]) => command,
+    )
+    const withPayload = sent.filter((command) =>
+      new RegExp(`'${command}'\\\\?,\\s*\\{`).test(desktopSource),
+    )
+
+    const unaccounted = withPayload.filter((command) => !(command in invoked))
+    expect(unaccounted, unaccounted.join('; ')).toEqual([])
+  })
+})
+
+/**
  * The Standup Post call's wire contract, checked the way the rest of the
  * shared names are — by reading both sides' sources, because a drift between
  * them is silent: no error, no failed build, and no symptom except a failure

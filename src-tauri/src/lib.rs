@@ -1284,36 +1284,40 @@ async fn choose_backup_location(app: tauri::AppHandle) -> Result<Option<String>,
 ///
 /// A destination that is not absolute, or that would clobber a file the user
 /// was never asked about overwriting, is refused before any statement runs.
+/// The parameter is named for what the webview sends — `path`, as
+/// `backupJournal` in `src/platform/desktop.ts` invokes it — because a
+/// mismatched argument name is refused before this body runs, and says
+/// nothing. `desktop-rust.test.ts` holds the pair together.
 #[tauri::command(async)]
 async fn backup_journal(
     _app: tauri::AppHandle,
     databases: tauri::State<'_, DbInstances>,
-    destination: String,
+    path: String,
 ) -> Result<BackupResult, String> {
-    let path = std::path::Path::new(&destination);
-    if !path.is_absolute() {
+    let destination = std::path::Path::new(&path);
+    if !destination.is_absolute() {
         return Err("the destination is not a path this dialog could have given".to_string());
     }
     // The file name alone is what carries the name; the directory it sits in
     // must be a directory the OS dialog, not the webview, chose.
-    let file_name = path
+    let file_name = destination
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
     backup::plain_destination(&file_name)
         .ok_or_else(|| "the destination is not a plain file name".to_string())?;
-    if path.exists() {
+    if destination.exists() {
         return Err("there is already a file there".to_string());
     }
 
     let pool = journal_pool(databases).await?;
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = destination.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    backup::take_snapshot(path, &pool).await?;
+    backup::take_snapshot(destination, &pool).await?;
 
     Ok(BackupResult {
-        path: destination,
+        path,
         file_name,
     })
 }
