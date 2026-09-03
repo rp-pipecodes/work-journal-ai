@@ -20,6 +20,7 @@ import {
   decideArrival,
   describeCopiedDigest,
   groupByJournalDay,
+  projectName,
   type DayRange,
   type Digest,
   type Filter,
@@ -150,6 +151,18 @@ export interface HistorySession {
   refile(id: string, journalDay: string): Promise<void>
   editProject(id: string, project: string | null): Promise<void>
   delete(id: string): Promise<void>
+  /**
+   * One Project into another, on every Note, wherever they are filed — then
+   * the list, the Digest and the picker's options as they now read.
+   *
+   * The correction is the core's and the sequencing is here, as with every
+   * other correction, with one rule of its own: a Filter narrowed to the
+   * source Project must move to the target before the read, so the same
+   * logical stream stays on screen under its new name rather than vanishing
+   * into an empty list. The constraint is the session's, so the move is too —
+   * no view has to know that a rename touched what it is reading.
+   */
+  renameProject(from: string, to: string): Promise<void>
   /**
    * The whole Filter on the clipboard. Deliberately not async: the Digest is
    * held from the read that drew the list, so what is copied is what the reader
@@ -453,6 +466,65 @@ export function createHistorySession({
       ),
     delete: (id) =>
       correct('That Note could not be deleted.', (core) => core.delete(id)),
+
+    async renameProject(from, to) {
+      const source = project
+      let problem: string | null = null
+      try {
+        // Both names are normalized by the core's own rule — a constraint is
+        // held as the core stores names, so comparing against anything else
+        // would miss the stream it is narrowed to. Normalizing can itself
+        // refuse, so it happens inside the try like everything else that can.
+        const fromName = projectName(from)
+        const toName = projectName(to)
+        const same = fromName === toName
+        // A Filter narrowed to the source moves to the target before the
+        // read, so the same logical stream stays on screen under its new name
+        // rather than vanishing into an empty list. The constraint is the
+        // session's, so the move is too — no view has to know that a rename
+        // touched what it is reading.
+        if (project.kind === 'named' && project.name === fromName) {
+          project = { kind: 'named', name: toName }
+        }
+        if (!same) {
+          const core = await journal
+          await core.renameProject(from, to)
+          announceChange()
+        }
+      } catch (error) {
+        console.error('could not rename the Project', error)
+        problem = 'That Project could not be renamed.'
+        // A refused rename leaves the constraint it was refused under.
+        project = source
+      }
+
+      // A refusal leaves the screen exactly as it was — a Search included —
+      // and says so; the problem goes the moment a rename works or the Filter
+      // moves.
+      if (problem !== null) {
+        show({ problem })
+        return
+      }
+
+      // The reader's own act on the Project axis ends a Search, as every
+      // other act on that axis does, and the list is re-read under the
+      // constraint as it now stands — moved to the target when this session
+      // was narrowed to the source, so the same stream is on screen under its
+      // new name rather than an empty list.
+      abandonWaitingTerm()
+      if (snapshot.filter !== null) {
+        const filter: Filter = { ...snapshot.filter, project }
+        show({
+          filter,
+          searching: false,
+          confirmation: null,
+          problem: null,
+        })
+        await read(filter)
+      } else {
+        show({ problem: null })
+      }
+    },
 
     copy() {
       const copied = digest
