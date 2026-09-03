@@ -239,6 +239,7 @@ pub fn rollback_path(config_dir: &Path, now: SystemTime) -> PathBuf {
 /// the restore that just happened. A restored file that found no live journal
 /// — a first run with a staged file — carries no rollback, because there was
 /// nothing to keep.
+#[derive(Debug)]
 pub enum ApplyOutcome {
     Absent,
     Restored { rollback: Option<PathBuf> },
@@ -328,14 +329,43 @@ pub async fn validate_restore_candidate(candidate: &Path) -> Result<i64, String>
     Ok(version)
 }
 
+/// Whether two paths name the same file. Canonicalization covers `.`, `..`,
+/// symlinks and spelling differences; when either side cannot be
+/// canonicalized — the staged path usually does not exist yet — the paths as
+/// written are compared instead.
+fn same_file(first: &Path, second: &Path) -> bool {
+    if first == second {
+        return true;
+    }
+    match (std::fs::canonicalize(first), std::fs::canonicalize(second)) {
+        (Ok(first), Ok(second)) => first == second,
+        _ => false,
+    }
+}
+
 /// Stages a validated candidate by copying it to the staged path, beside the
 /// live journal. Validates first, so a refusal stages nothing and touches
-/// neither the staged path nor the live database. Answers with the staged
-/// path.
+/// neither the staged path nor the live database. A candidate that is the
+/// staged file itself is refused before the copy — copying a file onto
+/// itself truncates it to zero bytes, and validation passes first, on the
+/// intact file — as is one that is the live journal, which there is nothing
+/// to restore from. Answers with the staged path.
 pub async fn stage_restore(candidate: &Path, config_dir: &Path) -> Result<PathBuf, String> {
     validate_restore_candidate(candidate).await?;
 
     let staged = staged_restore_path(config_dir);
+    if same_file(candidate, &staged) {
+        return Err(format!(
+            "the backup is the staged restore itself: {}",
+            candidate.display()
+        ));
+    }
+    if same_file(candidate, &live_database_path(config_dir)) {
+        return Err(format!(
+            "the backup is the live journal itself: {}",
+            candidate.display()
+        ));
+    }
     if let Some(parent) = staged.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("the staged restore could not be prepared: {error}"))?;
@@ -346,14 +376,18 @@ pub async fn stage_restore(candidate: &Path, config_dir: &Path) -> Result<PathBu
 }
 
 /// Applies a staged restore, before plugin-sql opens. When a staged file is
-/// present it renames the live journal to the timestamped rollback path,
-/// removes the stale `-wal` and `-shm` sidecars — the restored file has its
-/// own history and applying the old journal's WAL to it is the corruption
-/// case — and renames the staged file into the exact path plugin-sql will
-/// open, leaving the rollback file in place. Renames only, no copies, so a
-/// half-written journal is never the live one. An absent staged file is the
-/// ordinary path and costs nothing. If any step fails, the journal is left as
-/// it was and the failure is answered as an error for the caller to log.
+/// present it renames the live journal to the timestamped rollback path —
+/// with its `-wal` and `-shm` sidecars alongside it, since they hold
+/// committed transactions the main file alone does not contain — and renames
+/// the staged file into the exact path plugin-sql will open, leaving the
+/// rollback file in place. The restored file has its own history, and the old
+/// journal's WAL applied to it is the corruption case, so no sidecar ever
+/// outlives the journal it belonged to — but none is ever deleted either.
+/// Renames only, no copies, so a half-written journal is never the live one.
+/// An absent staged file is the ordinary path and costs nothing, as are
+/// missing sidecars. If any step fails, every rename already made is undone,
+/// the journal is left as it was, and the failure is answered as an error
+/// for the caller to log.
 pub fn apply_staged_restore(
     config_dir: &Path,
     now: SystemTime,
@@ -375,32 +409,32 @@ pub fn apply_staged_restore(
         None
     };
 
-    // The restored file has its own history; the old journal's WAL applied to
-    // it is the corruption case. Missing sidecars are the ordinary case.
-    for sidecar in [sidecar_path(&live, "wal"), sidecar_path(&live, "shm")] {
-        match std::fs::remove_file(&sidecar) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => {
-                // The live journal is already the rollback; put it back before
-                // answering, so a failed sidecar removal leaves the journal as
-                // it was.
-                if let Some(rollback) = &rollback {
-                    let _ = std::fs::rename(rollback, &live);
+    // Each sidecar moved, so a later failure can move every one back.
+    let mut moved_sidecars: Vec<(PathBuf, PathBuf)> = Vec::new();
+    if let Some(rollback) = &rollback {
+        for kind in ["wal", "shm"] {
+            let from = sidecar_path(&live, kind);
+            let to = sidecar_path(rollback, kind);
+            match std::fs::rename(&from, &to) {
+                Ok(()) => moved_sidecars.push((from, to)),
+                // A journal in rollback-journal mode leaves none behind.
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    undo_restore(&live, &rollback, &moved_sidecars);
+                    return Err(format!(
+                        "the stale {} sidecar could not be kept with its journal: {error}",
+                        from.display()
+                    ));
                 }
-                return Err(format!(
-                    "the stale {} sidecar could not be removed: {error}",
-                    sidecar.display()
-                ));
             }
         }
     }
 
     if let Err(error) = std::fs::rename(&staged, &live) {
-        // The staged file is still where it was; put the live journal back
-        // where it was too.
+        // The staged file is still where it was; put the live journal — and
+        // any sidecar already moved — back where each was too.
         if let Some(rollback) = &rollback {
-            let _ = std::fs::rename(rollback, &live);
+            undo_restore(&live, rollback, &moved_sidecars);
         }
         return Err(format!(
             "the staged backup could not replace the journal: {error}"
@@ -408,6 +442,17 @@ pub fn apply_staged_restore(
     }
 
     Ok(ApplyOutcome::Restored { rollback })
+}
+
+/// Puts back everything `apply_staged_restore` moved: each sidecar, then the
+/// journal itself. Best effort — renames that already succeeded once are
+/// expected to succeed again — and deliberately silent, since it only runs on
+/// a path that is already answering an error.
+fn undo_restore(live: &Path, rollback: &Path, moved_sidecars: &[(PathBuf, PathBuf)]) {
+    for (from, to) in moved_sidecars.iter().rev() {
+        let _ = std::fs::rename(to, from);
+    }
+    let _ = std::fs::rename(rollback, live);
 }
 
 /// `work-journal.db` plus `-wal` or `-shm`: the sidecars a WAL-mode journal
@@ -421,18 +466,26 @@ fn sidecar_path(live: &Path, sidecar: &str) -> PathBuf {
 /// cannot be expected to hold the version 6 occurrence table, or nothing old
 /// would ever be migratable. What is checked is that the tables the claimed
 /// version must have are there.
+///
+/// Every arm is an explicit version: the `_` fallback is the latest known
+/// set, and validation never sends it anything newer than
+/// `SUPPORTED_MIGRATION_VERSION` — while `the_supported_version_tracks_the_
+/// migrations_list` and `expected_tables_cover_the_real_schema` fail if a
+/// migration lands without teaching this function its tables.
 fn expected_tables(version: i64) -> &'static [&'static str] {
+    const LATEST: &[&str] = &[
+        "notes",
+        "imported_meetings",
+        "tasks",
+        "task_occurrences",
+        "_sqlx_migrations",
+    ];
     match version {
         1 | 2 => &["notes", "_sqlx_migrations"],
         3 => &["notes", "imported_meetings", "_sqlx_migrations"],
         4 | 5 => &["notes", "imported_meetings", "tasks", "_sqlx_migrations"],
-        _ => &[
-            "notes",
-            "imported_meetings",
-            "tasks",
-            "task_occurrences",
-            "_sqlx_migrations",
-        ],
+        6 => LATEST,
+        _ => LATEST,
     }
 }
 
@@ -1024,6 +1077,74 @@ mod tests {
         std::fs::read(path).expect("could not read the candidate")
     }
 
+    /// The six migration files, in version order — the very files
+    /// `migrations()` in `lib.rs` serves plugin-sql.
+    const REAL_MIGRATIONS: [&str; 6] = [
+        include_str!("../migrations/0001_create_notes.sql"),
+        include_str!("../migrations/0002_notes_project.sql"),
+        include_str!("../migrations/0003_note_origin_and_imported_meetings.sql"),
+        include_str!("../migrations/0004_create_tasks.sql"),
+        include_str!("../migrations/0005_task_schedule.sql"),
+        include_str!("../migrations/0006_task_recurrence.sql"),
+    ];
+
+    /// Seeds `pool` with the real schema up to `up_to`, recording each
+    /// version in a `_sqlx_migrations` table shaped exactly like the one
+    /// sqlx itself keeps — so validation meets the production schema rather
+    /// than the hand-written DDL `write_journal_file` uses.
+    async fn seed_real_schema(pool: &SqlitePool, up_to: i64, marker: &str) {
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS _sqlx_migrations (
+                version BIGINT PRIMARY KEY,
+                description TEXT NOT NULL,
+                installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                success BOOLEAN NOT NULL,
+                checksum BLOB NOT NULL,
+                execution_time BIGINT NOT NULL
+            );",
+        )
+        .execute(pool)
+        .await
+        .expect("could not create the migrations table");
+        for (index, ddl) in REAL_MIGRATIONS.iter().enumerate().take(up_to as usize) {
+            let version = index as i64 + 1;
+            sqlx::query(ddl)
+                .execute(pool)
+                .await
+                .unwrap_or_else(|_| panic!("real migration {version} failed"));
+            sqlx::query(
+                "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
+                 VALUES (?, ?, 1, X'00', 0)",
+            )
+            .bind(version)
+            .bind(format!("migration {version}"))
+            .execute(pool)
+            .await
+            .expect("could not record the migration");
+        }
+        sqlx::query(
+            "INSERT INTO notes (id, body, captured_at, journal_day)
+             VALUES ('n1', ?, '2026-09-03T08:45:00Z', '2026-09-03')",
+        )
+        .bind(marker)
+        .execute(pool)
+        .await
+        .expect("could not seed the Note");
+    }
+
+    /// A journal file carrying the real schema at the supported version, with
+    /// one Note carrying `marker`.
+    async fn real_journal_file(directory: &TempDir, name: &str, marker: &str) -> PathBuf {
+        let path = directory.path.join(name);
+        let url = format!("sqlite:{}?mode=rwc", path.display());
+        let pool = SqlitePool::connect(&url)
+            .await
+            .expect("could not create the journal file");
+        seed_real_schema(&pool, SUPPORTED_MIGRATION_VERSION, marker).await;
+        pool.close().await;
+        path
+    }
+
     async_test!(a_healthy_candidate_validates_at_the_supported_version, {
         let directory = TempDir::new("restore-healthy");
         let candidate = healthy_candidate(&directory, "candidate.db", "the journal").await;
@@ -1283,12 +1404,13 @@ mod tests {
         assert!(rollback.exists());
     });
 
-    async_test!(stale_sidecars_never_outlive_the_journal_they_belonged_to, {
+    async_test!(sidecars_travel_with_the_journal_they_belonged_to, {
         let config = TempDir::new("restore-sidecars");
         let live = live_database_path(&config.path);
         write_journal_file(&live, SUPPORTED_MIGRATION_VERSION, "the live journal").await;
-        // A WAL-mode journal leaves these beside itself; a stale pair applied
-        // to the restored file is the corruption case.
+        // A WAL-mode journal leaves these beside itself; they hold committed
+        // transactions the main file alone does not contain, so deleting them
+        // with the journal they belong to would silently lose commits.
         let wal = PathBuf::from(format!("{}-wal", live.display()));
         let shm = PathBuf::from(format!("{}-shm", live.display()));
         std::fs::write(&wal, "stale wal").unwrap();
@@ -1296,14 +1418,71 @@ mod tests {
 
         let elsewhere = TempDir::new("restore-sidecars-candidate");
         let candidate = healthy_candidate(&elsewhere, "candidate.db", "the earlier journal").await;
+        let candidate_bytes = candidate_bytes(&candidate);
         stage_restore(&candidate, &config.path)
             .await
             .expect("staging must succeed");
 
-        apply_staged_restore(&config.path, SystemTime::now()).expect("apply must succeed");
+        let now = UNIX_EPOCH + Duration::from_secs(1_788_425_100);
+        let outcome = apply_staged_restore(&config.path, now).expect("apply must succeed");
+        let rollback = match outcome {
+            ApplyOutcome::Restored { rollback } => rollback.expect("a live journal must be kept"),
+            ApplyOutcome::Absent => panic!("a staged file was present"),
+        };
 
-        assert!(!wal.exists(), "the stale -wal must be gone");
-        assert!(!shm.exists(), "the stale -shm must be gone");
+        // The live path holds the restored journal with no stale sidecars
+        // beside it — applying the old journal's WAL to it is the corruption
+        // case — while the rollback keeps its own history whole.
+        assert_eq!(std::fs::read(&live).unwrap(), candidate_bytes);
+        assert!(!wal.exists(), "the stale -wal must not outlive its journal");
+        assert!(!shm.exists(), "the stale -shm must not outlive its journal");
+        let rollback_wal = PathBuf::from(format!("{}-wal", rollback.display()));
+        let rollback_shm = PathBuf::from(format!("{}-shm", rollback.display()));
+        assert_eq!(std::fs::read(&rollback_wal).unwrap(), b"stale wal");
+        assert_eq!(std::fs::read(&rollback_shm).unwrap(), b"stale shm");
+    });
+
+    async_test!(a_failed_sidecar_move_leaves_the_journal_as_it_was, {
+        let config = TempDir::new("restore-sidecar-failure");
+        let live = live_database_path(&config.path);
+        write_journal_file(&live, SUPPORTED_MIGRATION_VERSION, "the live journal").await;
+        let live_before = std::fs::read(&live).unwrap();
+        let wal = PathBuf::from(format!("{}-wal", live.display()));
+        let shm = PathBuf::from(format!("{}-shm", live.display()));
+        std::fs::write(&wal, "stale wal").unwrap();
+        std::fs::write(&shm, "stale shm").unwrap();
+
+        let elsewhere = TempDir::new("restore-sidecar-failure-candidate");
+        let candidate = healthy_candidate(&elsewhere, "candidate.db", "the earlier journal").await;
+        let staged = stage_restore(&candidate, &config.path)
+            .await
+            .expect("staging must succeed");
+        let staged_before = std::fs::read(&staged).unwrap();
+
+        // A non-empty directory where the rollback `-shm` has to go makes
+        // that rename fail after the `-wal` already moved.
+        let now = UNIX_EPOCH + Duration::from_secs(1_788_425_100);
+        let rollback_shm = PathBuf::from(format!(
+            "{}-shm",
+            rollback_path(&config.path, now).display()
+        ));
+        std::fs::create_dir_all(&rollback_shm).unwrap();
+        std::fs::write(rollback_shm.join("junk"), "someone else's file").unwrap();
+
+        let failure = apply_staged_restore(&config.path, now)
+            .expect_err("a failed sidecar move must not restore");
+
+        assert!(
+            failure.contains("sidecar"),
+            "a refusal names which check failed, got: {failure}"
+        );
+        // Everything is where it was: the live journal, both sidecars with
+        // their bytes, and the staged file still waiting.
+        assert_eq!(std::fs::read(&live).unwrap(), live_before);
+        assert_eq!(std::fs::read(&wal).unwrap(), b"stale wal");
+        assert_eq!(std::fs::read(&shm).unwrap(), b"stale shm");
+        assert_eq!(std::fs::read(&staged).unwrap(), staged_before);
+        assert!(!rollback_path(&config.path, now).exists());
     });
 
     async_test!(an_older_snapshot_is_migrated_forward_after_replacement, {
@@ -1335,5 +1514,168 @@ mod tests {
             .expect("the migrated table must read back");
         assert_eq!(count, 0);
         pool.close().await;
+    });
+
+    async_test!(a_candidate_equal_to_the_staged_path_is_refused_without_truncating_it, {
+        let config = TempDir::new("restore-self-stage");
+        let elsewhere = TempDir::new("restore-self-stage-candidate");
+        let candidate = healthy_candidate(&elsewhere, "candidate.db", "the journal").await;
+        let staged = stage_restore(&candidate, &config.path)
+            .await
+            .expect("staging must succeed");
+        let staged_before = std::fs::read(&staged).unwrap();
+        assert!(!staged_before.is_empty());
+
+        // Copying a file onto itself truncates it to zero bytes — validation
+        // passes first, on the intact file, so the guard must come before
+        // the copy.
+        let refusal = stage_restore(&staged, &config.path)
+            .await
+            .expect_err("staging the staged file onto itself must not succeed");
+
+        assert!(
+            refusal.contains("staged"),
+            "a refusal names which check failed, got: {refusal}"
+        );
+        assert_eq!(std::fs::read(&staged).unwrap(), staged_before);
+    });
+
+    async_test!(a_candidate_equal_to_the_live_path_is_refused, {
+        let config = TempDir::new("restore-live-as-candidate");
+        let live = live_database_path(&config.path);
+        write_journal_file(&live, SUPPORTED_MIGRATION_VERSION, "the live journal").await;
+        let live_before = std::fs::read(&live).unwrap();
+
+        let refusal = stage_restore(&live, &config.path)
+            .await
+            .expect_err("staging the live journal must not succeed");
+
+        assert!(
+            refusal.contains("live"),
+            "a refusal names which check failed, got: {refusal}"
+        );
+        assert_eq!(std::fs::read(&live).unwrap(), live_before);
+        assert!(!staged_restore_path(&config.path).exists());
+    });
+
+    #[test]
+    fn the_supported_version_tracks_the_migrations_list() {
+        // Every future migration must raise the version boundary a restore
+        // refuses on: the constant and the list have to move together, and
+        // this is what holds them together.
+        let newest = crate::migrations()
+            .iter()
+            .map(|migration| migration.version)
+            .max()
+            .expect("the app ships migrations");
+        assert_eq!(SUPPORTED_MIGRATION_VERSION, newest);
+    }
+
+    async_test!(expected_tables_cover_the_real_schema_at_the_supported_version, {
+        // `expected_tables` is checked against hand-written DDL everywhere
+        // else; this pins it against the production schema instead, so a
+        // migration that adds a table without teaching the check fails here.
+        let directory = TempDir::new("restore-real-tables");
+        let journal = real_journal_file(&directory, "journal.db", "the journal").await;
+        let url = format!("sqlite:{}?mode=ro", journal.display());
+        let pool = SqlitePool::connect(&url).await.expect("could not open");
+        use sqlx::Row;
+        let tables: Vec<String> = sqlx::query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+        )
+        .try_map(|row: sqlx::sqlite::SqliteRow| row.try_get(0))
+        .fetch_all(&pool)
+        .await
+        .expect("the tables could not be read");
+        pool.close().await;
+
+        let expected = expected_tables(SUPPORTED_MIGRATION_VERSION);
+        for table in &tables {
+            assert!(
+                expected.contains(&table.as_str()),
+                "the real schema holds {table}, which the check does not expect"
+            );
+        }
+        // And the check expects nothing the real schema does not hold.
+        for table in expected {
+            assert!(
+                tables.iter().any(|name| name == table),
+                "the check expects {table}, which the real schema does not hold"
+            );
+        }
+    });
+
+    async_test!(a_real_schema_journal_missing_its_newest_table_is_refused, {
+        let directory = TempDir::new("restore-real-missing");
+        let journal = real_journal_file(&directory, "journal.db", "the journal").await;
+        let url = format!("sqlite:{}?mode=rwc", journal.display());
+        let pool = SqlitePool::connect(&url).await.expect("could not open");
+        sqlx::query("DROP TABLE task_occurrences;")
+            .execute(&pool)
+            .await
+            .expect("could not drop");
+        pool.close().await;
+
+        let refusal = validate_restore_candidate(&journal)
+            .await
+            .expect_err("a real journal missing a table must not validate");
+
+        assert!(
+            refusal.contains("missing tables") && refusal.contains("task_occurrences"),
+            "a refusal names which check failed, got: {refusal}"
+        );
+    });
+
+    async_test!(a_snapshot_round_trips_byte_identical_through_validate_stage_apply, {
+        // Done criterion: a backup taken by the snapshot path restores to a
+        // byte-identical journal — through the real schema, not hand DDL.
+        let source = TempDir::new("round-trip-source");
+        let source_path = source.path.join("work-journal.db");
+        let url = format!("sqlite:{}?mode=rwc", source_path.display());
+        let pool = SqlitePool::connect(&url)
+            .await
+            .expect("could not create the source journal");
+        seed_real_schema(&pool, SUPPORTED_MIGRATION_VERSION, "the snapshot note").await;
+
+        let elsewhere = TempDir::new("round-trip-snapshot");
+        let snapshot = elsewhere.path.join("work-journal-20260903T084500.db");
+        take_snapshot(&snapshot, &pool)
+            .await
+            .expect("the snapshot failed");
+        pool.close().await;
+        let snapshot_bytes = std::fs::read(&snapshot).unwrap();
+
+        let version = validate_restore_candidate(&snapshot)
+            .await
+            .expect("a snapshot taken by this app must validate");
+        assert_eq!(version, SUPPORTED_MIGRATION_VERSION);
+
+        let config = TempDir::new("round-trip-config");
+        let live = live_database_path(&config.path);
+        write_journal_file(&live, SUPPORTED_MIGRATION_VERSION, "the live journal").await;
+        let live_before = std::fs::read(&live).unwrap();
+
+        stage_restore(&snapshot, &config.path)
+            .await
+            .expect("the snapshot must stage");
+        let now = UNIX_EPOCH + Duration::from_secs(1_788_425_100);
+        let outcome = apply_staged_restore(&config.path, now).expect("apply must succeed");
+        let rollback = match outcome {
+            ApplyOutcome::Restored { rollback } => rollback.expect("a live journal must be kept"),
+            ApplyOutcome::Absent => panic!("a staged file was present"),
+        };
+
+        assert_eq!(std::fs::read(&live).unwrap(), snapshot_bytes);
+        assert_eq!(std::fs::read(&rollback).unwrap(), live_before);
+
+        // The restored journal opens standalone with the snapshot's rows.
+        let url = format!("sqlite:{}?mode=ro", live.display());
+        let restored = SqlitePool::connect(&url).await.expect("did not open");
+        let (body,): (String,) = sqlx::query_as("SELECT body FROM notes WHERE id = 'n1'")
+            .fetch_one(&restored)
+            .await
+            .expect("the snapshot Note did not read back");
+        assert_eq!(body, "the snapshot note");
+        restored.close().await;
     });
 }

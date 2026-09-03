@@ -216,7 +216,7 @@ A snapshot of the journal's SQLite file itself — every table and row as stored
 _Avoid_: Export, dump, save as, archive
 
 **Restore**:
-Replacing the live journal with an earlier whole taken as a Backup. The candidate is validated read-only before anything is staged — `quick_check`, the tables its version must hold, and a `_sqlx_migrations` version no newer than this build understands — and an older one is migrated forward on next launch. The replacement happens at startup before anything holds the file; the previous journal is kept as a timestamped rollback file beside the live one and never deleted, the stale `-wal` and `-shm` sidecars go with the journal they belonged to, and the app restarts. Holds no settings and restores none: the API Key, Hotkeys and settings stay as they were.
+Replacing the live journal with an earlier whole taken as a Backup. The candidate is validated read-only before anything is staged — `quick_check`, the tables its version must hold, and a `_sqlx_migrations` version no newer than this build understands — and an older one is migrated forward on next launch. The replacement happens at startup before anything holds the file; the previous journal is kept as a timestamped rollback file beside the live one and never deleted, its `-wal` and `-shm` sidecars renamed alongside the journal they belong to, and the app restarts. Holds no settings and restores none: the API Key, Hotkeys and settings stay as they were.
 _Avoid_: Undo, import, merge, sync
 
 **Deletion**:

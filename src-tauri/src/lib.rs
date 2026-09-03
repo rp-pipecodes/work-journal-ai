@@ -1935,3 +1935,20 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The database path is named once: the URL plugin-sql opens must stay
+    /// the `sqlite:` scheme plus `backup::DATABASE_FILE_NAME`, which the
+    /// live/staged/rollback paths resolve from. If they drift, a restore
+    /// renames into a file plugin-sql never opens — silently doing nothing.
+    #[test]
+    fn the_database_url_names_the_database_file() {
+        assert_eq!(
+            DATABASE_URL,
+            format!("sqlite:{}", backup::DATABASE_FILE_NAME)
+        );
+    }
+}
