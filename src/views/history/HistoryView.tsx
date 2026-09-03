@@ -751,16 +751,16 @@ function RenameProjectDialog({
   const [typed, setTyped] = useState('')
 
   // The one valid spelling of the target, or nothing to confirm. What the
-  // record would refuse is said in the record's own words, asked rather than
-  // thrown, so the view never re-authors the core's rejection. Nothing typed
-  // is not a refusal — it is only nothing to confirm yet.
+  // record refuses comes back in the record's own words — nothing typed is
+  // not a refusal, only nothing to confirm yet.
   let target: string | null = null
-  const problem =
-    typed.trim() !== '' && !isProjectName(typed)
-      ? `Not a Project: ${typed}.`
-      : null
-  if (!problem && typed.trim() !== '') {
-    target = projectName(typed)
+  let problem: string | null = null
+  if (typed.trim() !== '') {
+    try {
+      target = projectName(typed)
+    } catch (error) {
+      problem = (error as Error).message
+    }
   }
 
   // The source is in `projects` too — it has Notes, which is why it is being
