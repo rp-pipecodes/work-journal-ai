@@ -659,6 +659,23 @@ export interface Desktop {
    * snapshots the app takes on its own can be seen and copied by hand.
    */
   revealBackups(): Promise<void>
+  /**
+   * Opens the open dialog and resolves to the path the user chose, or null
+   * for a cancelled one. One moment of the one gesture — see
+   * `stageRestore`, and the split `installUpdate` and `restart` already
+   * make. Deliberately not the stage: the button that started this stays
+   * honest about which of the two moments it is waiting on, and a cancelled
+   * dialog is a frontend outcome rather than an error.
+   */
+  chooseRestoreCandidate(): Promise<string | null>
+  /**
+   * Validates the candidate `chooseRestoreCandidate` answered with and stages
+   * it for the next launch. Refuses anything that is not a readable journal
+   * snapshot at a supported version, naming which check failed — and stages
+   * nothing on a refusal. Every read happens on the Rust side; the webview
+   * only carries a path, exactly as `backupJournal` already does.
+   */
+  stageRestore(path: string): Promise<void>
 
   /**
    * The release newer than this build, or null when this build is already the

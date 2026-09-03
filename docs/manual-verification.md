@@ -336,6 +336,21 @@ The snapshot items are checked with `sqlite3` (ships with macOS). A first launch
 - [ ] With the app's Model Access configured, no file in `backups/` contains the API Key: `grep -c sk- <snapshot>` finds nothing, and the settings file is not among what any snapshot holds.
 - [ ] The release build takes its launch snapshot with nothing on screen: no window, no dialog, no error, whether or not the snapshot succeeded.
 
+## Restore
+
+The destructive path. Run these against a release build with a journal holding Notes, Tasks, a Recurring Task with completed occurrences, and a refused meeting (delete one Imported Note). Keep a backup from before the walk: **Back up now** to Downloads, then add and delete Notes and Tasks.
+
+- [ ] **Settings › Restore › Restore from backup…** opens a confirmation saying the current journal is replaced, the previous one is kept as a rollback file, the app restarts, and the API Key, Hotkeys and settings are not restored.
+- [ ] Cancelling that confirmation stages nothing, restarts nothing, and leaves the journal exactly as it was.
+- [ ] Confirming opens an open dialog filtered to `.db`; cancelling it says "Restore cancelled.", stages nothing, and leaves the journal exactly as it was.
+- [ ] Choosing the backup from before the walk, confirming, says "Journal restored. Restarting…" — readable before the window goes — and the app restarts on its own.
+- [ ] After the restart the journal is the earlier one: the Notes and Tasks added after the backup are gone, the deleted ones are back, the Recurring Task shows its earlier occurrence history, and the previously refused meeting is still refused (no new Imported Note for it).
+- [ ] Choosing a corrupt file (a snapshot truncated by hand, or random bytes renamed to `.db`) refuses with the check that failed, stages nothing, and leaves the journal untouched.
+- [ ] Choosing a newer snapshot (one whose `_sqlx_migrations` holds a version newer than this build) refuses with the version it needs, stages nothing, and leaves the journal untouched.
+- [ ] After a restore, a file named `work-journal-rollback-…T….db` sits beside `work-journal.db`; `sqlite3 <that file> "PRAGMA quick_check;"` says `ok`, and it opens standalone with the replaced journal in it.
+- [ ] Task Alerts reflect the restored Tasks rather than the replaced ones: a Task with a time restored from the backup alerts at its minute, and nothing arrives for a Task that only existed after the backup.
+- [ ] The API Key, Hotkeys, Theme, Start at Login answer and Model Access are exactly as they were before the restore.
+
 ## Updates
 
 Needs two builds: the one installed, and a release tagged after it.

@@ -974,6 +974,190 @@ describe('Backup', () => {
   })
 })
 
+describe('Restore', () => {
+  /**
+   * The line the Backup group keeps saying, shared by restore — found inside
+   * that group alone, by its heading, the way a reader finds it.
+   */
+  function restoreStatus(): string | null | undefined {
+    return screen
+      .getByRole('heading', { name: 'Backup' })
+      .closest('section')
+      ?.querySelector('p[role="status"]')?.textContent
+  }
+
+  async function confirmRestoreDialog() {
+    const dialog = await screen.findByRole('alertdialog')
+    const confirm = (
+      await import('@testing-library/react')
+    ).within(dialog).getByRole('button', { name: 'Restore' })
+    confirm.click()
+  }
+
+  it('says before confirming that the journal is replaced, kept, restarted, and what is not restored', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Restore from backup…' })).click()
+
+    const dialog = await screen.findByRole('alertdialog')
+    const said = dialog.textContent ?? ''
+
+    expect(said).toMatch(/replaced/)
+    expect(said).toMatch(/rollback/)
+    expect(said).toMatch(/restart/i)
+    expect(said).toMatch(/API Key/)
+    expect(said).toMatch(/Hotkeys/)
+    expect(said).toMatch(/settings.*not restored|not restored/i)
+    // Nothing staged by asking the question.
+    expect(desktop.stagedRestores).toEqual([])
+    expect(desktop.restarts).toBe(0)
+  })
+
+  it('stages nothing when the confirmation is refused', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.chosenRestoreCandidate = '/Volumes/Offsite/work-journal-20260903T084500.db'
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Restore from backup…' })).click()
+
+    const dialog = await screen.findByRole('alertdialog')
+    const { within } = await import('@testing-library/react')
+    within(dialog).getByRole('button', { name: 'Cancel' }).click()
+
+    await expect
+      .poll(() => screen.queryByRole('alertdialog'))
+      .toBeNull()
+    // Refused before the open dialog: nothing chosen, nothing staged, no
+    // restart.
+    expect(desktop.stagedRestores).toEqual([])
+    expect(desktop.restarts).toBe(0)
+  })
+
+  it('says a cancelled open dialog as cancelled, and stages nothing', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.chosenRestoreCandidate = null
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Restore from backup…' })).click()
+    await confirmRestoreDialog()
+
+    await expect.poll(() => toasts().join(' | ')).toBe('Restore cancelled.')
+    expect(desktop.stagedRestores).toEqual([])
+    expect(desktop.restarts).toBe(0)
+    expect(restoreStatus()).not.toMatch(/Could not/)
+  })
+
+  it('reports why an invalid candidate was refused, and restarts nothing', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.chosenRestoreCandidate = '/Volumes/Offsite/work-journal-20260903T084500.db'
+    desktop.restoreError =
+      'the backup needs migration version 7, newer than this build understands (6)'
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Restore from backup…' })).click()
+    await confirmRestoreDialog()
+
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe(
+        'the backup needs migration version 7, newer than this build understands (6)',
+      )
+    expect(restoreStatus()).toBe(
+      'the backup needs migration version 7, newer than this build understands (6)',
+    )
+    // Refused: nothing staged, no restart.
+    expect(desktop.stagedRestores).toEqual([])
+    expect(desktop.restarts).toBe(0)
+  })
+
+  it('stages a valid candidate and restarts once, after the restored line is on screen', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.chosenRestoreCandidate = '/Volumes/Offsite/work-journal-20260903T084500.db'
+
+    const frames = holdFrames()
+
+    try {
+      showSettings(desktop)
+
+      ;(await screen.findByRole('button', { name: 'Restore from backup…' })).click()
+      await confirmRestoreDialog()
+
+      await expect
+        .poll(restoreStatus)
+        .toBe('Journal restored. Restarting…')
+      expect(desktop.stagedRestores).toEqual([
+        '/Volumes/Offsite/work-journal-20260903T084500.db',
+      ])
+      // The toast says it too, in its own layer.
+      expect(
+        document.querySelector('[data-sonner-toaster]')?.textContent,
+      ).toMatch(/Journal restored/)
+
+      // In the DOM is not yet on screen: nothing has been painted, and the
+      // confirmation dialog's own animation frames may still be queued ahead
+      // of the restart's two — so what is asserted is the boundary, not the
+      // exact count: no restart before a paint, one after paints have had
+      // their chance.
+      expect(desktop.restarts).toBe(0)
+
+      frames.drain()
+      expect(desktop.restarts).toBe(1)
+    } finally {
+      frames.restore()
+    }
+  })
+
+  it('does not restart once Settings has gone away', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.chosenRestoreCandidate = '/Volumes/Offsite/work-journal-20260903T084500.db'
+
+    const frames = holdFrames()
+
+    try {
+      showSettings(desktop)
+
+      ;(await screen.findByRole('button', { name: 'Restore from backup…' })).click()
+      await confirmRestoreDialog()
+
+      await expect
+        .poll(restoreStatus)
+        .toBe('Journal restored. Restarting…')
+
+      cleanup()
+      frames.drain()
+
+      expect(desktop.restarts).toBe(0)
+    } finally {
+      frames.restore()
+    }
+  })
+
+  it('says to quit by hand when the restart itself will not happen', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.chosenRestoreCandidate = '/Volumes/Offsite/work-journal-20260903T084500.db'
+    desktop.restart = async () => {
+      desktop.restarts += 1
+      throw new Error('The process would not go.')
+    }
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Restore from backup…' })).click()
+    await confirmRestoreDialog()
+
+    await expect
+      .poll(restoreStatus)
+      .toBe('Journal restored. Quit and open it again to use it.')
+    expect(desktop.restarts).toBe(1)
+  })
+})
+
 describe('Updates', () => {
   /** The line the Updates group keeps saying, found inside that group alone. */
   function updateStatus(): string | null | undefined {

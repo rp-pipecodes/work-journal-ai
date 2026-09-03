@@ -2,16 +2,19 @@
 //! never only as durable as the one file it lives in. What a Backup is, and
 //! why `VACUUM INTO` and never a file copy, is
 //! docs/adr/0032-a-backup-is-a-sqlite-snapshot-taken-with-vacuum-into.md;
-//! restoring one is #161 and not here.
+//! restoring one is
+//! docs/adr/0033-a-restore-replaces-the-journal-at-startup-and-keeps-a-rollback.md.
 //!
 //! Everything in this module is narrow and Tauri-free: filenames, due and
-//! prune arithmetic, and one snapshot through a `SqlitePool`. The command and
-//! the startup hook in `lib.rs` hand it what it needs; nothing here reaches
-//! for the app.
+//! prune arithmetic, one snapshot through a `SqlitePool`, and the restore
+//! side — validating a candidate read-only, staging it, and applying a staged
+//! file at startup. The commands and the startup hook in `lib.rs` hand it
+//! what it needs; nothing here reaches for the app.
 
 use serde::Serialize;
-use sqlx::SqlitePool;
+use sqlx::{Connection, SqlitePool};
 use crate::export::free_path;
+use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -33,6 +36,28 @@ const FILE_STEM: &str = "work-journal";
 /// The extension a snapshot carries: a backup is a SQLite file, not a
 /// document.
 const FILE_EXTENSION: &str = "db";
+
+/// The live journal's file name, named once here. `DATABASE_URL` in `lib.rs`
+/// is `sqlite:` plus this, and every restore path below is built from it, so
+/// the database path is named in exactly one place.
+pub const DATABASE_FILE_NAME: &str = "work-journal.db";
+
+/// The newest `_sqlx_migrations` version this build understands. An older
+/// snapshot is accepted and migrated forward by the immutable list; a newer
+/// one is refused before anything is touched. Every future migration raises
+/// this.
+pub const SUPPORTED_MIGRATION_VERSION: i64 = 6;
+
+/// The staged file a validated candidate is copied to, beside the live
+/// journal. Not a snapshot name, so pruning never touches it, and never
+/// opened by plugin-sql — it becomes the live journal only when the startup
+/// hook renames it into place.
+const STAGED_FILE_NAME: &str = "work-journal-restore-staged.db";
+
+/// The stem a rollback file carries: `work-journal-rollback-` plus the
+/// instant in UTC, second-precise, plus `.db`. Beside the live journal, never
+/// deleted by the app, and openable in `sqlite3` directly.
+const ROLLBACK_STEM: &str = "work-journal-rollback";
 
 /// What Settings says about the automatic backups: how many there are, and
 /// when the newest was taken. Null when there are none — a first run, or a
@@ -179,6 +204,236 @@ pub async fn take_snapshot(destination: &Path, pool: &SqlitePool) -> Result<(), 
         .await
         .map_err(|error| format!("the snapshot could not be written: {error}"))?;
     Ok(())
+}
+
+/// The live journal plugin-sql opens, resolved from the config directory it
+/// resolves every relative `sqlite:` URL into. Named from
+/// `DATABASE_FILE_NAME`, so the database path is named once.
+pub fn live_database_path(config_dir: &Path) -> PathBuf {
+    config_dir.join(DATABASE_FILE_NAME)
+}
+
+/// Where a validated candidate waits for the next launch, beside the live
+/// journal.
+pub fn staged_restore_path(config_dir: &Path) -> PathBuf {
+    config_dir.join(STAGED_FILE_NAME)
+}
+
+/// The filename a rollback of `instant` carries:
+/// `work-journal-rollback-20260903T084500.db`. UTC, second-precise, like a
+/// snapshot name, so it sorts with its own instant.
+pub fn rollback_file_name(instant: SystemTime) -> String {
+    let seconds = instant
+        .duration_since(UNIX_EPOCH)
+        .map(|since| since.as_secs())
+        .unwrap_or(0);
+    format!("{ROLLBACK_STEM}-{}.{FILE_EXTENSION}", timestamp(seconds))
+}
+
+/// The previous journal's resting place after a restore, beside the live one.
+pub fn rollback_path(config_dir: &Path, now: SystemTime) -> PathBuf {
+    config_dir.join(rollback_file_name(now))
+}
+
+/// What applying a staged file did: nothing to do on an ordinary launch, or
+/// the restore that just happened. A restored file that found no live journal
+/// — a first run with a staged file — carries no rollback, because there was
+/// nothing to keep.
+pub enum ApplyOutcome {
+    Absent,
+    Restored { rollback: Option<PathBuf> },
+}
+
+/// Opens a candidate read-only and validates it: `quick_check`, the expected
+/// table set for the schema version it claims, and the `_sqlx_migrations`
+/// boundary. Never opens it with the app's own pool, never writes to the
+/// file, and never mutates anything on a refusal. A refusal names which check
+/// failed. Answers with the migration version the candidate carries, so the
+/// caller can log what it staged.
+pub async fn validate_restore_candidate(candidate: &Path) -> Result<i64, String> {
+    if !candidate.is_file() {
+        return Err(format!(
+            "the backup is not a plain file: {}",
+            candidate.display()
+        ));
+    }
+
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(candidate)
+        .read_only(true)
+        .create_if_missing(false);
+    let mut connection = sqlx::sqlite::SqliteConnection::connect_with(&options)
+        .await
+        .map_err(|error| format!("the backup could not be opened as a SQLite database: {error}"))?;
+
+    // `quick_check` answers one row holding `ok` when the file is sound, and
+    // one row per problem when it is not. Anything but exactly `ok` refuses.
+    use sqlx::Row;
+    let rows: Vec<String> = sqlx::query("PRAGMA quick_check")
+        .try_map(|row: sqlx::sqlite::SqliteRow| row.try_get(0))
+        .fetch_all(&mut connection)
+        .await
+        .map_err(|error| {
+            format!("the backup failed its integrity check (quick_check could not run): {error}")
+        })?;
+    if rows != [String::from("ok")] {
+        return Err(format!(
+            "the backup failed its integrity check (quick_check): {}",
+            rows.join("; ")
+        ));
+    }
+
+    let tables: HashSet<String> = sqlx::query("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .try_map(|row: sqlx::sqlite::SqliteRow| row.try_get(0))
+        .fetch_all(&mut connection)
+        .await
+        .map_err(|error| format!("the backup's tables could not be read: {error}"))?
+        .into_iter()
+        .collect();
+    if !tables.contains("_sqlx_migrations") {
+        return Err("the backup is not a journal (missing _sqlx_migrations)".to_string());
+    }
+
+    let version: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
+        .fetch_one(&mut connection)
+        .await
+        .map_err(|error| {
+            format!("the backup's migration version could not be read: {error}")
+        })?;
+    let Some(version) = version else {
+        return Err("the backup carries no migration version".to_string());
+    };
+    if version > SUPPORTED_MIGRATION_VERSION {
+        return Err(format!(
+            "the backup needs migration version {version}, newer than this build understands ({SUPPORTED_MIGRATION_VERSION})"
+        ));
+    }
+    if version < 1 {
+        return Err(format!("the backup carries an unknown migration version: {version}"));
+    }
+
+    let missing: Vec<&&str> = expected_tables(version)
+        .iter()
+        .filter(|table| !tables.contains(**table))
+        .collect();
+    if !missing.is_empty() {
+        let missing = missing
+            .into_iter()
+            .map(|table| table.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(format!("the backup is missing tables: {missing}"));
+    }
+
+    Ok(version)
+}
+
+/// Stages a validated candidate by copying it to the staged path, beside the
+/// live journal. Validates first, so a refusal stages nothing and touches
+/// neither the staged path nor the live database. Answers with the staged
+/// path.
+pub async fn stage_restore(candidate: &Path, config_dir: &Path) -> Result<PathBuf, String> {
+    validate_restore_candidate(candidate).await?;
+
+    let staged = staged_restore_path(config_dir);
+    if let Some(parent) = staged.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("the staged restore could not be prepared: {error}"))?;
+    }
+    std::fs::copy(candidate, &staged)
+        .map_err(|error| format!("the backup could not be staged: {error}"))?;
+    Ok(staged)
+}
+
+/// Applies a staged restore, before plugin-sql opens. When a staged file is
+/// present it renames the live journal to the timestamped rollback path,
+/// removes the stale `-wal` and `-shm` sidecars — the restored file has its
+/// own history and applying the old journal's WAL to it is the corruption
+/// case — and renames the staged file into the exact path plugin-sql will
+/// open, leaving the rollback file in place. Renames only, no copies, so a
+/// half-written journal is never the live one. An absent staged file is the
+/// ordinary path and costs nothing. If any step fails, the journal is left as
+/// it was and the failure is answered as an error for the caller to log.
+pub fn apply_staged_restore(
+    config_dir: &Path,
+    now: SystemTime,
+) -> Result<ApplyOutcome, String> {
+    let staged = staged_restore_path(config_dir);
+    if !staged.is_file() {
+        return Ok(ApplyOutcome::Absent);
+    }
+    let live = live_database_path(config_dir);
+
+    // The previous journal, kept before the live path is touched. Absent on a
+    // first run with a staged file — then there is nothing to keep.
+    let rollback = if live.is_file() {
+        let rollback = rollback_path(config_dir, now);
+        std::fs::rename(&live, &rollback)
+            .map_err(|error| format!("the live journal could not be kept as a rollback: {error}"))?;
+        Some(rollback)
+    } else {
+        None
+    };
+
+    // The restored file has its own history; the old journal's WAL applied to
+    // it is the corruption case. Missing sidecars are the ordinary case.
+    for sidecar in [sidecar_path(&live, "wal"), sidecar_path(&live, "shm")] {
+        match std::fs::remove_file(&sidecar) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                // The live journal is already the rollback; put it back before
+                // answering, so a failed sidecar removal leaves the journal as
+                // it was.
+                if let Some(rollback) = &rollback {
+                    let _ = std::fs::rename(rollback, &live);
+                }
+                return Err(format!(
+                    "the stale {} sidecar could not be removed: {error}",
+                    sidecar.display()
+                ));
+            }
+        }
+    }
+
+    if let Err(error) = std::fs::rename(&staged, &live) {
+        // The staged file is still where it was; put the live journal back
+        // where it was too.
+        if let Some(rollback) = &rollback {
+            let _ = std::fs::rename(rollback, &live);
+        }
+        return Err(format!(
+            "the staged backup could not replace the journal: {error}"
+        ));
+    }
+
+    Ok(ApplyOutcome::Restored { rollback })
+}
+
+/// `work-journal.db` plus `-wal` or `-shm`: the sidecars a WAL-mode journal
+/// leaves beside itself.
+fn sidecar_path(live: &Path, sidecar: &str) -> PathBuf {
+    PathBuf::from(format!("{}-{sidecar}", live.display()))
+}
+
+/// The tables a journal at `version` must hold. Version-aware because an
+/// older snapshot is accepted and migrated forward: a version 5 snapshot
+/// cannot be expected to hold the version 6 occurrence table, or nothing old
+/// would ever be migratable. What is checked is that the tables the claimed
+/// version must have are there.
+fn expected_tables(version: i64) -> &'static [&'static str] {
+    match version {
+        1 | 2 => &["notes", "_sqlx_migrations"],
+        3 => &["notes", "imported_meetings", "_sqlx_migrations"],
+        4 | 5 => &["notes", "imported_meetings", "tasks", "_sqlx_migrations"],
+        _ => &[
+            "notes",
+            "imported_meetings",
+            "tasks",
+            "task_occurrences",
+            "_sqlx_migrations",
+        ],
+    }
 }
 
 /// Reads what Settings says about the automatic backups, out of the live
@@ -703,4 +958,382 @@ mod tests {
         assert_eq!(status.count, 2);
         assert_eq!(status.newest_taken_at, Some(1_788_425_100 + 100));
     }
+
+    /// A journal file at `version`, with the tables that version must hold
+    /// and one Note carrying `marker`, so a replacement can be told apart
+    /// from what it replaced.
+    async fn write_journal_file(path: &Path, version: i64, marker: &str) {
+        let url = format!("sqlite:{}?mode=rwc", path.display());
+        let pool = SqlitePool::connect(&url)
+            .await
+            .expect("could not create the journal file");
+        sqlx::query(
+            "CREATE TABLE notes (id TEXT PRIMARY KEY, body TEXT NOT NULL);
+             CREATE TABLE _sqlx_migrations (version BIGINT PRIMARY KEY, description TEXT NOT NULL);",
+        )
+        .execute(&pool)
+        .await
+        .expect("could not create the base tables");
+        if version >= 3 {
+            sqlx::query(
+                "CREATE TABLE imported_meetings (event_key TEXT PRIMARY KEY, handled_at TEXT NOT NULL);",
+            )
+            .execute(&pool)
+            .await
+            .expect("could not create imported_meetings");
+        }
+        if version >= 4 {
+            sqlx::query(
+                "CREATE TABLE tasks (id TEXT PRIMARY KEY, description TEXT NOT NULL, created_at TEXT NOT NULL);",
+            )
+            .execute(&pool)
+            .await
+            .expect("could not create tasks");
+        }
+        if version >= 6 {
+            sqlx::query(
+                "CREATE TABLE task_occurrences (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, scheduled_date TEXT NOT NULL, completed_at TEXT, created_at TEXT NOT NULL);",
+            )
+            .execute(&pool)
+            .await
+            .expect("could not create task_occurrences");
+        }
+        for migrated in 1..=version {
+            sqlx::query("INSERT INTO _sqlx_migrations VALUES (?, ?)")
+                .bind(migrated)
+                .bind(format!("migration {migrated}"))
+                .execute(&pool)
+                .await
+                .expect("could not record the migration");
+        }
+        sqlx::query("INSERT INTO notes VALUES ('n1', ?)")
+            .bind(marker)
+            .execute(&pool)
+            .await
+            .expect("could not seed the Note");
+        pool.close().await;
+    }
+
+    async fn healthy_candidate(directory: &TempDir, name: &str, marker: &str) -> PathBuf {
+        let path = directory.path.join(name);
+        write_journal_file(&path, SUPPORTED_MIGRATION_VERSION, marker).await;
+        path
+    }
+
+    fn candidate_bytes(path: &Path) -> Vec<u8> {
+        std::fs::read(path).expect("could not read the candidate")
+    }
+
+    async_test!(a_healthy_candidate_validates_at_the_supported_version, {
+        let directory = TempDir::new("restore-healthy");
+        let candidate = healthy_candidate(&directory, "candidate.db", "the journal").await;
+        let before = candidate_bytes(&candidate);
+
+        let version = validate_restore_candidate(&candidate)
+            .await
+            .expect("a healthy candidate must validate");
+
+        assert_eq!(version, SUPPORTED_MIGRATION_VERSION);
+        // Read-only: validation leaves the file it was handed exactly as it
+        // found it.
+        assert_eq!(candidate_bytes(&candidate), before);
+    });
+
+    async_test!(a_malformed_file_is_refused_without_touching_it, {
+        let directory = TempDir::new("restore-malformed");
+        let candidate = directory.path.join("candidate.db");
+        std::fs::write(&candidate, "this is not a SQLite file at all").unwrap();
+        let before = candidate_bytes(&candidate);
+
+        let refusal = validate_restore_candidate(&candidate)
+            .await
+            .expect_err("a malformed file must not validate");
+
+        assert!(
+            refusal.contains("quick_check") || refusal.contains("could not be opened"),
+            "a refusal names which check failed, got: {refusal}"
+        );
+        assert_eq!(candidate_bytes(&candidate), before);
+    });
+
+    async_test!(a_truncated_snapshot_is_refused, {
+        let directory = TempDir::new("restore-truncated");
+        let candidate = healthy_candidate(&directory, "candidate.db", "the journal").await;
+        let length = std::fs::metadata(&candidate).unwrap().len();
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&candidate)
+            .unwrap();
+        file.set_len(length / 2).unwrap();
+        drop(file);
+
+        let refusal = validate_restore_candidate(&candidate)
+            .await
+            .expect_err("a truncated file must not validate");
+
+        assert!(
+            refusal.contains("quick_check") || refusal.contains("could not be opened"),
+            "a refusal names which check failed, got: {refusal}"
+        );
+    });
+
+    async_test!(a_valid_sqlite_file_that_is_not_a_journal_is_refused, {
+        let directory = TempDir::new("restore-not-a-journal");
+        let candidate = directory.path.join("candidate.db");
+        let url = format!("sqlite:{}?mode=rwc", candidate.display());
+        let pool = SqlitePool::connect(&url).await.expect("could not create");
+        sqlx::query("CREATE TABLE foo (id TEXT PRIMARY KEY);")
+            .execute(&pool)
+            .await
+            .expect("could not create");
+        pool.close().await;
+        let before = candidate_bytes(&candidate);
+
+        let refusal = validate_restore_candidate(&candidate)
+            .await
+            .expect_err("a non-journal must not validate");
+
+        assert!(
+            refusal.contains("not a journal") || refusal.contains("missing"),
+            "a refusal names which check failed, got: {refusal}"
+        );
+        assert_eq!(candidate_bytes(&candidate), before);
+    });
+
+    async_test!(a_journal_missing_a_table_for_its_version_is_refused, {
+        let directory = TempDir::new("restore-missing-table");
+        let candidate = healthy_candidate(&directory, "candidate.db", "the journal").await;
+        let url = format!("sqlite:{}?mode=rwc", candidate.display());
+        let pool = SqlitePool::connect(&url).await.expect("could not open");
+        sqlx::query("DROP TABLE tasks;")
+            .execute(&pool)
+            .await
+            .expect("could not drop");
+        pool.close().await;
+        let before = candidate_bytes(&candidate);
+
+        let refusal = validate_restore_candidate(&candidate)
+            .await
+            .expect_err("a journal missing a table must not validate");
+
+        assert!(
+            refusal.contains("missing tables") && refusal.contains("tasks"),
+            "a refusal names which check failed, got: {refusal}"
+        );
+        assert_eq!(candidate_bytes(&candidate), before);
+    });
+
+    async_test!(a_newer_migration_version_is_refused_before_anything_is_touched, {
+        let directory = TempDir::new("restore-newer");
+        let candidate = directory.path.join("candidate.db");
+        write_journal_file(&candidate, SUPPORTED_MIGRATION_VERSION, "the journal").await;
+        let url = format!("sqlite:{}?mode=rwc", candidate.display());
+        let pool = SqlitePool::connect(&url).await.expect("could not open");
+        sqlx::query("INSERT INTO _sqlx_migrations VALUES (?, ?)")
+            .bind(SUPPORTED_MIGRATION_VERSION + 1)
+            .bind("a future migration")
+            .execute(&pool)
+            .await
+            .expect("could not insert the newer version");
+        pool.close().await;
+        let before = candidate_bytes(&candidate);
+
+        let refusal = validate_restore_candidate(&candidate)
+            .await
+            .expect_err("a newer snapshot must not validate");
+
+        assert!(
+            refusal.contains("newer"),
+            "a refusal names which check failed, got: {refusal}"
+        );
+        assert_eq!(candidate_bytes(&candidate), before);
+    });
+
+    async_test!(an_older_snapshot_is_accepted_and_names_its_version, {
+        let directory = TempDir::new("restore-older");
+        let candidate = directory.path.join("candidate.db");
+        write_journal_file(&candidate, SUPPORTED_MIGRATION_VERSION - 1, "the old journal").await;
+
+        let version = validate_restore_candidate(&candidate)
+            .await
+            .expect("an older snapshot must validate");
+
+        assert_eq!(version, SUPPORTED_MIGRATION_VERSION - 1);
+    });
+
+    async_test!(a_path_that_is_not_a_plain_file_is_refused, {
+        let directory = TempDir::new("restore-not-a-file");
+        let missing = directory.path.join("missing.db");
+
+        for candidate in [&directory.path, &missing] {
+            let refusal = validate_restore_candidate(candidate)
+                .await
+                .expect_err("a directory or a missing file must not validate");
+            assert!(
+                refusal.contains("not a plain file"),
+                "a refusal names which check failed, got: {refusal}"
+            );
+        }
+    });
+
+    async_test!(a_refusal_touches_neither_the_live_database_nor_the_staged_path, {
+        let config = TempDir::new("restore-refusal-leaves-live");
+        let live = live_database_path(&config.path);
+        write_journal_file(&live, SUPPORTED_MIGRATION_VERSION, "the live journal").await;
+        let live_before = std::fs::read(&live).expect("could not read the live journal");
+
+        let elsewhere = TempDir::new("restore-refusal-candidate");
+        let candidate = elsewhere.path.join("candidate.db");
+        std::fs::write(&candidate, "not a database").unwrap();
+
+        let refusal = stage_restore(&candidate, &config.path).await;
+        assert!(refusal.is_err(), "an invalid candidate must not stage");
+
+        // The live journal is byte-identical, and nothing was staged.
+        assert_eq!(std::fs::read(&live).unwrap(), live_before);
+        assert!(!staged_restore_path(&config.path).exists());
+    });
+
+    async_test!(a_validated_candidate_stages_byte_identical, {
+        let config = TempDir::new("restore-stage");
+        let elsewhere = TempDir::new("restore-stage-candidate");
+        let candidate = healthy_candidate(&elsewhere, "candidate.db", "the journal").await;
+        let candidate_before = candidate_bytes(&candidate);
+
+        let staged = stage_restore(&candidate, &config.path)
+            .await
+            .expect("a healthy candidate must stage");
+
+        assert_eq!(staged, staged_restore_path(&config.path));
+        assert_eq!(std::fs::read(&staged).unwrap(), candidate_before);
+        // The candidate itself is left alone.
+        assert_eq!(candidate_bytes(&candidate), candidate_before);
+    });
+
+    #[test]
+    fn the_database_path_is_named_once() {
+        let config = PathBuf::from("/tmp/config");
+        assert_eq!(
+            live_database_path(&config),
+            PathBuf::from("/tmp/config").join(DATABASE_FILE_NAME)
+        );
+        assert_eq!(DATABASE_FILE_NAME, "work-journal.db");
+        assert_ne!(staged_restore_path(&config), live_database_path(&config));
+        assert_ne!(rollback_path(&config, UNIX_EPOCH), live_database_path(&config));
+        assert_ne!(
+            rollback_path(&config, UNIX_EPOCH),
+            staged_restore_path(&config)
+        );
+    }
+
+    #[test]
+    fn a_rollback_name_carries_its_instant() {
+        let instant = UNIX_EPOCH + Duration::from_secs(1_788_425_100);
+        assert_eq!(
+            rollback_file_name(instant),
+            "work-journal-rollback-20260903T084500.db"
+        );
+    }
+
+    async_test!(an_absent_staged_file_costs_nothing, {
+        let config = TempDir::new("restore-absent");
+        let live = live_database_path(&config.path);
+        write_journal_file(&live, SUPPORTED_MIGRATION_VERSION, "the live journal").await;
+        let live_before = std::fs::read(&live).unwrap();
+
+        let outcome = apply_staged_restore(&config.path, SystemTime::now())
+            .expect("an absent staged file must not fail");
+
+        assert!(matches!(outcome, ApplyOutcome::Absent));
+        assert_eq!(std::fs::read(&live).unwrap(), live_before);
+    });
+
+    async_test!(a_successful_replacement_keeps_the_previous_journal_as_a_rollback, {
+        let config = TempDir::new("restore-replace");
+        let live = live_database_path(&config.path);
+        write_journal_file(&live, SUPPORTED_MIGRATION_VERSION, "the live journal").await;
+        let live_before = std::fs::read(&live).unwrap();
+
+        let elsewhere = TempDir::new("restore-replace-candidate");
+        let candidate = healthy_candidate(&elsewhere, "candidate.db", "the earlier journal").await;
+        let candidate_bytes = candidate_bytes(&candidate);
+        stage_restore(&candidate, &config.path)
+            .await
+            .expect("staging must succeed");
+
+        let now = UNIX_EPOCH + Duration::from_secs(1_788_425_100);
+        let outcome = apply_staged_restore(&config.path, now).expect("apply must succeed");
+        let rollback = match outcome {
+            ApplyOutcome::Restored { rollback } => rollback.expect("a live journal must be kept"),
+            ApplyOutcome::Absent => panic!("a staged file was present"),
+        };
+
+        // Byte-identical: the live journal is the candidate, whole.
+        assert_eq!(std::fs::read(&live).unwrap(), candidate_bytes);
+        // The previous journal survives, whole, and is never deleted by a
+        // second apply with nothing staged.
+        assert_eq!(std::fs::read(&rollback).unwrap(), live_before);
+        assert_eq!(
+            rollback.file_name().unwrap().to_string_lossy(),
+            "work-journal-rollback-20260903T084500.db"
+        );
+        assert!(!staged_restore_path(&config.path).exists());
+        let again = apply_staged_restore(&config.path, SystemTime::now()).expect("second apply");
+        assert!(matches!(again, ApplyOutcome::Absent));
+        assert!(rollback.exists());
+    });
+
+    async_test!(stale_sidecars_never_outlive_the_journal_they_belonged_to, {
+        let config = TempDir::new("restore-sidecars");
+        let live = live_database_path(&config.path);
+        write_journal_file(&live, SUPPORTED_MIGRATION_VERSION, "the live journal").await;
+        // A WAL-mode journal leaves these beside itself; a stale pair applied
+        // to the restored file is the corruption case.
+        let wal = PathBuf::from(format!("{}-wal", live.display()));
+        let shm = PathBuf::from(format!("{}-shm", live.display()));
+        std::fs::write(&wal, "stale wal").unwrap();
+        std::fs::write(&shm, "stale shm").unwrap();
+
+        let elsewhere = TempDir::new("restore-sidecars-candidate");
+        let candidate = healthy_candidate(&elsewhere, "candidate.db", "the earlier journal").await;
+        stage_restore(&candidate, &config.path)
+            .await
+            .expect("staging must succeed");
+
+        apply_staged_restore(&config.path, SystemTime::now()).expect("apply must succeed");
+
+        assert!(!wal.exists(), "the stale -wal must be gone");
+        assert!(!shm.exists(), "the stale -shm must be gone");
+    });
+
+    async_test!(an_older_snapshot_is_migrated_forward_after_replacement, {
+        let config = TempDir::new("restore-migrate");
+        let live = live_database_path(&config.path);
+        write_journal_file(&live, SUPPORTED_MIGRATION_VERSION, "the live journal").await;
+
+        let elsewhere = TempDir::new("restore-migrate-candidate");
+        let candidate = elsewhere.path.join("candidate.db");
+        write_journal_file(&candidate, SUPPORTED_MIGRATION_VERSION - 1, "the old journal").await;
+        stage_restore(&candidate, &config.path)
+            .await
+            .expect("an older snapshot must stage");
+        apply_staged_restore(&config.path, SystemTime::now()).expect("apply must succeed");
+
+        // The existing immutable list brings the restored file forward: the
+        // version 6 DDL — the same file `migrations()` in `lib.rs` serves
+        // plugin-sql for version 6 — applies cleanly on top of it.
+        let url = format!("sqlite:{}?mode=rwc", live.display());
+        let pool = SqlitePool::connect(&url).await.expect("could not open");
+        let migration: &str = include_str!("../migrations/0006_task_recurrence.sql");
+        sqlx::query(migration)
+            .execute(&pool)
+            .await
+            .expect("the older snapshot must be migratable to version 6");
+        let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM task_occurrences")
+            .fetch_one(&pool)
+            .await
+            .expect("the migrated table must read back");
+        assert_eq!(count, 0);
+        pool.close().await;
+    });
 }

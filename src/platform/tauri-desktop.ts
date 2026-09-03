@@ -12,7 +12,12 @@ import { emit, listen } from '@tauri-apps/api/event'
 import { LogicalSize } from '@tauri-apps/api/dpi'
 import { downloadDir, join } from '@tauri-apps/api/path'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { save, type SaveDialogOptions } from '@tauri-apps/plugin-dialog'
+import {
+  open,
+  save,
+  type OpenDialogOptions,
+  type SaveDialogOptions,
+} from '@tauri-apps/plugin-dialog'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { relaunch } from '@tauri-apps/plugin-process'
@@ -268,6 +273,28 @@ export function createTauriDesktop(): Desktop {
     backupJournal: (path) => invoke<BackupResult>('backup_journal', { path }),
 
     revealBackups: () => invoke('reveal_backups'),
+
+    // The picker and the stage are two invocations, sequenced by the caller:
+    // a `null` here means the user cancelled, and no stage call follows.
+    //
+    // The dialog is opened here rather than by a Rust command, for the same
+    // reason `chooseBackupLocation` opens its own: the file the user is
+    // offered is chosen on this side, and a cancelled dialog is a frontend
+    // outcome rather than an error. Filtered to the backup extension, so the
+    // common case is one confirm — and no path is ever hand-typed.
+    async chooseRestoreCandidate() {
+      const options: OpenDialogOptions = {
+        filters: [{ name: 'Work Journal backup', extensions: ['db'] }],
+        multiple: false,
+        directory: false,
+      }
+      const chosen = await open(options)
+      if (chosen === null) return null
+      if (Array.isArray(chosen)) return chosen[0] ?? null
+      return chosen
+    },
+
+    stageRestore: (path) => invoke('stage_restore', { path }),
 
     // The Key stays in the Keychain: only what the model needs to hear crosses
     // to Rust, and the answer comes back as one shape, success or failure.

@@ -323,6 +323,7 @@ describe('the commands that can block on a person', () => {
       'automatic_backups',
       'backup_journal',
       'reveal_backups',
+      'stage_restore',
     ]) {
       expect(
         rustSource.match(new RegExp(`fn ${command}\\b`)),
@@ -558,6 +559,67 @@ describe('the manual backup save dialog', () => {
     expect(backupFileName(new Date(Date.UTC(2026, 8, 3, 8, 45, 0)))).toBe(
       'work-journal-20260903T084500.db',
     )
+  })
+})
+
+/**
+ * The restore's open dialog and staged apply, checked where the drift
+ * actually happens. Choosing a candidate opens the dialog from the webview
+ * with no Rust command between the button and the OS, so the filter lives
+ * entirely on this side; staging validates on the Rust side and the startup
+ * hook applies before plugin-sql opens. A dialog with no filter offers every
+ * file, and a hook registered after the sql plugin opens onto the journal it
+ * was meant to replace.
+ */
+describe('the restore from a backup', () => {
+  const tauriDesktopSource = read('src/platform/tauri-desktop.ts')
+
+  it('opens the candidate dialog filtered to the backup extension', () => {
+    const choose = tauriDesktopSource.match(
+      /async chooseRestoreCandidate\(\) \{([\s\S]*?)\n\s*\},/,
+    )?.[1]
+    expect(
+      choose,
+      'chooseRestoreCandidate is not where it is expected to be',
+    ).toBeTruthy()
+
+    // No path is ever hand-typed: the dialog filters to the backup
+    // extension, offers one file, and a cancelled dialog answers null.
+    expect(choose).toContain('filters')
+    expect(choose).toContain("'db'")
+    expect(choose).toContain('multiple: false')
+  })
+
+  it('stages through the command the Rust side validates', () => {
+    expect(tauriDesktopSource).toContain("invoke('stage_restore'")
+  })
+
+  it('registers the staged apply before plugin-sql opens', () => {
+    // The only moment nothing holds the live journal is before the sql
+    // plugin's setup connects the pool and runs the migrations. The restore
+    // plugin's setup must run first, which registration order decides.
+    const restoreAt = rustSource.indexOf('Builder::new("restore")')
+    const sqlAt = rustSource.indexOf('tauri_plugin_sql::Builder::new()')
+    expect(restoreAt).toBeGreaterThan(-1)
+    expect(sqlAt).toBeGreaterThan(-1)
+    expect(
+      restoreAt,
+      'the restore hook must be registered before plugin-sql',
+    ).toBeLessThan(sqlAt)
+    expect(rustSource).toContain('apply_staged_restore')
+  })
+
+  it('grants the open dialog beside the save dialog and nothing more', () => {
+    const capabilities = read('src-tauri/capabilities/default.json')
+    expect(capabilities).toContain('dialog:allow-open')
+    expect(capabilities).toContain('dialog:allow-save')
+  })
+
+  it('mirrors the staging in the testing desktop the webview tests run on', () => {
+    const fake = read('src/platform/testing/desktop.ts')
+    expect(fake).toContain('chooseRestoreCandidate')
+    expect(fake).toContain('stageRestore')
+    expect(fake).toContain('stagedRestores')
   })
 })
 
