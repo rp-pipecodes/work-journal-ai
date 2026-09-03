@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -561,6 +562,57 @@ describe('Standup Post section', () => {
             .parentElement as HTMLElement,
         ).getByRole('status').textContent,
       ).toBe('')
+    })
+  })
+
+  it('announces a repeat copy that overlaps the first', async () => {
+    const { journal, clock, desktop, settings } = await standupPostAt()
+    await journalWithBothHalves(journal, clock)
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    const copyMaterial = await screen.findByRole('button', {
+      name: 'Copy material',
+    })
+
+    // Both clicks dispatched before either copy's write has resolved, so
+    // neither handler can have seen the other's claim. Counting from the
+    // claim as this click first saw it would leave the second copy saying
+    // exactly what the first did — silence, which is the failure the count
+    // exists to prevent.
+    fireEvent.click(copyMaterial)
+    fireEvent.click(copyMaterial)
+
+    await waitFor(() => {
+      expect(
+        within(
+          screen.getByRole('button', { name: 'Copy material' })
+            .parentElement as HTMLElement,
+        ).getByRole('status').textContent,
+      ).toBe('Copied the standup material to the clipboard. (2)')
+    })
+  })
+
+  it('announces a repeat post copy that overlaps the first', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await standupPostAt()
+    await journalWithBothHalves(journal, clock)
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    await screen.findByRole('button', { name: 'Generate' })
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    await screen.findByText('The standup post the model wrote.')
+
+    const copyPost = screen.getByRole('button', { name: 'Copy post' })
+    fireEvent.click(copyPost)
+    fireEvent.click(copyPost)
+
+    await waitFor(() => {
+      expect(
+        within(
+          screen.getByRole('button', { name: 'Copy post' })
+            .parentElement as HTMLElement,
+        ).getByRole('status').textContent,
+      ).toBe('Copied the standup post to the clipboard. (2)')
     })
   })
 

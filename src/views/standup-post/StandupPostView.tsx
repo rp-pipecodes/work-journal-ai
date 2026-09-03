@@ -83,12 +83,9 @@ export default function StandupPostView({
     state.state === 'ready' &&
     materialClaim !== null &&
     materialClaim.selection === state.selection
-      ? said(materialClaim, 'Copied the standup material to the clipboard.')
+      ? said('material', materialClaim.count)
       : ''
-  const postSaid =
-    postClaim !== null
-      ? said(postClaim, 'Copied the standup post to the clipboard.')
-      : ''
+  const postSaid = postClaim !== null ? said('post', postClaim.count) : ''
   const says = useOnScreenToast()
   // A call is in flight, before the pending state has reached the button: a
   // double click must not spend the user's money twice.
@@ -165,23 +162,41 @@ export default function StandupPostView({
     }
   }
 
+  /**
+   * One copy, whichever of the two it is: the Markdown onto the clipboard and
+   * the toast that says how it went. Answers whether it landed, so the caller
+   * can keep or retire the claim its own live region is rendered from — the
+   * line beside a button may never say the opposite of the toast.
+   */
+  async function putOnClipboard(
+    subject: Subject,
+    read: () => Promise<string>,
+  ): Promise<boolean> {
+    try {
+      await desktop.copyToClipboard(await read())
+      says.success(landed(subject))
+      return true
+    } catch (error) {
+      console.error(`could not copy the standup ${subject}`, error)
+      says.failure(`Could not copy the standup ${subject}.`)
+      return false
+    }
+  }
+
   /** The post onto the clipboard, and a confirmation naming it once there. */
   async function copyPost(): Promise<void> {
     if (post === null) return
+    const { markdown } = post
 
-    try {
-      await desktop.copyToClipboard(post.markdown)
+    if (await putOnClipboard('post', async () => markdown)) {
       // A repeat of the same live copy counts up, so its region says
       // something new — a region announces on change, and identical text is
-      // silence. See `said`.
-      setPostClaim(postClaim !== null ? { count: postClaim.count + 1 } : { count: 1 })
-      says.success('Copied the standup post to the clipboard.')
-    } catch (error) {
-      // A later copy that fails retires the earlier claim: the line beside
-      // the button may not go on saying the opposite of the toast.
+      // silence. Counted from the claim as it stands rather than as this
+      // click first saw it, so two copies that overlap still count as two.
+      setPostClaim((claim) => ({ count: (claim?.count ?? 0) + 1 }))
+    } else {
+      // A copy that fails retires the earlier claim.
       setPostClaim(null)
-      console.error('could not copy the standup post', error)
-      says.failure('Could not copy the standup post.')
     }
   }
 
@@ -195,30 +210,27 @@ export default function StandupPostView({
    */
   async function copyMaterial(): Promise<void> {
     if (state.state !== 'ready') return
+    const { selection } = state
 
-    try {
-      const material = await buildStandupMaterial({
-        journal: await journal,
-        selection: state.selection,
-      })
-      await desktop.copyToClipboard(material)
-      // Claimed for this very selection: any re-read retires it by
-      // construction, since a new one is a new object. A repeat of the same
-      // live copy counts up; see `said`.
-      setMaterialClaim(
-        materialClaim !== null && materialClaim.selection === state.selection
-          ? { selection: state.selection, count: materialClaim.count + 1 }
-          : { selection: state.selection, count: 1 },
-      )
-      says.success('Copied the standup material to the clipboard.')
-    } catch (error) {
-      // A later copy that fails retires the earlier claim, as the post's
-      // does — the line beside the button may not go on saying the opposite
-      // of the toast.
-      setMaterialClaim(null)
-      console.error('could not copy the standup material', error)
-      says.failure('Could not copy the standup material.')
-    }
+    const copied = await putOnClipboard('material', async () =>
+      buildStandupMaterial({ journal: await journal, selection }),
+    )
+
+    // Claimed for this very selection: any re-read retires it by
+    // construction, since a new one is a new object. A repeat of the same
+    // live copy counts up, counted from the claim as it stands rather than
+    // as this click first saw it, so two copies that overlap count as two.
+    setMaterialClaim((claim) =>
+      copied
+        ? {
+            selection,
+            count:
+              claim !== null && claim.selection === selection
+                ? claim.count + 1
+                : 1,
+          }
+        : null,
+    )
   }
 
   return (
@@ -456,11 +468,23 @@ function count(value: number, noun: string): string {
 }
 
 /**
+ * Which of the two artifacts a copy is about. There are exactly two, and
+ * every sentence either of them says is built from this one word, so the
+ * toast and the live region beside the button cannot drift apart.
+ */
+type Subject = 'post' | 'material'
+
+/** The one sentence a landed copy says, wherever it says it. */
+function landed(subject: Subject): string {
+  return `Copied the standup ${subject} to the clipboard.`
+}
+
+/**
  * What a copy's live region says. The same words twice are not said twice —
  * a region announces on change, so an identical repeat would be silence,
  * exactly when the reader most needs telling — so a repeat carries its own
  * number. The first copy reads plainly; the second says it is the second.
  */
-function said(claim: { count: number }, text: string): string {
-  return claim.count === 1 ? text : `${text} (${claim.count})`
+function said(subject: Subject, count: number): string {
+  return count === 1 ? landed(subject) : `${landed(subject)} (${count})`
 }
