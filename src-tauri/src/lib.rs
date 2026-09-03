@@ -148,7 +148,12 @@ const RESIDENT_WINDOW_WIDTH: f64 = 626.0;
 
 /// Relative, so plugin-sql resolves it inside the app's data directory and the
 /// journal survives a restart of the app and of the machine. Must match
-/// `DATABASE_URL` in `src/platform/desktop.ts`, as `src/platform/desktop-rust.test.ts` checks.
+/// `DATABASE_URL` in `src/platform/desktop.ts`, as
+/// `src/platform/desktop-rust.test.ts` checks — and must match the one entry
+/// of `plugins.sql.preload` in `tauri.conf.json` and `tauri.dev.conf.json`,
+/// which is what opens the pool (and runs the migrations) before `setup`
+/// spawns the automatic snapshot. The two configs are JSON, which no test
+/// reads, so the preload entry says the same thing in words beside it.
 const DATABASE_URL: &str = "sqlite:work-journal.db";
 
 /// The two Entry Point items of the Tray Menu, held so that remapping either
@@ -1162,10 +1167,13 @@ fn take_automatic_snapshot(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let pool = match journal_pool(app.state::<DbInstances>()).await {
             Ok(pool) => pool,
-            // A database not open yet — migrations can still be running — is
-            // not a failed backup; the next launch takes the snapshot.
+            // The config's sql `preload` opens the pool before setup runs, so
+            // an empty DbInstances here means the preload did not happen at
+            // all — worth a log line that names the cause, since a silent
+            // one would leave the journal running for years with no backup
+            // and nothing said about it.
             Err(error) => {
-                log::info!("no automatic snapshot this launch: {error}");
+                log::error!("no automatic snapshot this launch: {error}");
                 return;
             }
         };

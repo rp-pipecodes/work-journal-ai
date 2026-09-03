@@ -20,6 +20,16 @@ The destination is a bound parameter (`VACUUM INTO ?`), never an interpolated
 path; a SQLite version that refuses a bound target stops this design rather
 than bending it into string formatting.
 
+"The pool already has open" is made true by the plugin's own config:
+`plugins.sql.preload` names `sqlite:work-journal.db` in `tauri.conf.json`, so
+the plugin's `initialize` — which runs before the app's `setup` — connects the
+pool and applies the migrations before any window or command can ask for them.
+Without that line nothing had ever asked the plugin to open the database until
+a webview called `Database.load`, which is after the first paint: the snapshot
+task spawned in `setup` would find `DbInstances` empty on every launch and the
+automatic backup would never run at all. The preload also makes the ordering
+claim below literal — migrations have finished before `setup` runs anything.
+
 A Backup contains the journal and nothing else. The API Key lives in the
 Keychain (ADR 0026) and never enters a snapshot; settings, Hotkeys and the
 login-item answer live in `settings.json` and are not journal. Restoring a
