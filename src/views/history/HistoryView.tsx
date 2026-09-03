@@ -763,9 +763,13 @@ function RenameProjectDialog({
     }
   }
 
-  // Renaming into an existing stream merges the two, and the button says so
-  // rather than springing that on the reader after they have confirmed.
-  const merging = target !== null && projects.includes(target)
+  // The source is in `projects` too — it has Notes, which is why it is being
+  // renamed — so spelling it back is not a merge but the same name, however
+  // it is cased. Confirming it would close the question and do nothing at
+  // all: the button says Rename, says it cannot be pressed, and the dialog
+  // says why, rather than claiming two streams are about to become one.
+  const same = target !== null && target === source
+  const merging = target !== null && !same && projects.includes(target)
 
   return (
     <AlertDialogContent>
@@ -789,15 +793,15 @@ function RenameProjectDialog({
           placeholder={formatProject(source)}
         />
       </label>
-      {problem !== null && (
+      {(problem !== null || same) && (
         <p role="alert" className="type-meta text-destructive">
-          {problem}
+          {problem ?? 'That is already its name.'}
         </p>
       )}
       <AlertDialogFooter>
         <AlertDialogCancel onClick={onCancel}>Cancel</AlertDialogCancel>
         <AlertDialogAction
-          disabled={target === null}
+          disabled={target === null || same}
           onClick={() => {
             if (target !== null) onConfirm(source, target)
           }}

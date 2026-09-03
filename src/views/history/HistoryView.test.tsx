@@ -182,6 +182,27 @@ describe('Rename Project', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull()
   })
 
+  it('reads a rename to the same name as neither rename nor merge', async () => {
+    const { user, core, notes } = await showTwoProjects()
+
+    await user.click(screen.getByRole('button', { name: 'Rename Project' }))
+    const dialog = await screen.findByRole('alertdialog')
+
+    // The placeholder suggests exactly this — the name it already has, typed
+    // back in whatever case. It is not a merge: #alpha is the source, and the
+    // button that would close the dialog while doing nothing must not be
+    // offered as either Rename or Merge.
+    await user.type(within(dialog).getByLabelText('New Project name'), 'Alpha')
+    const confirm = within(dialog).getByRole('button', { name: 'Rename' })
+    expect(confirm).toHaveProperty('disabled', true)
+    expect(within(dialog).queryByRole('button', { name: 'Merge' })).toBeNull()
+    expect(within(dialog).getByRole('alert').textContent).toBe(
+      'That is already its name.',
+    )
+
+    expect((await noteById(core, notes[0].id))?.project).toBe('alpha')
+  })
+
   it('says Merge when the target already exists, and merges on confirm', async () => {
     const { user, core, notes } = await showTwoProjects()
 
