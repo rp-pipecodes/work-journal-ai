@@ -480,6 +480,14 @@ export interface Journal {
   /** The commitments that were kept, most recently completed first. */
   completedTasks(): Promise<Task[]>
   /**
+   * Every Task Occurrence whose completion falls on a Journal Day in the
+   * range, newest completion first, each paired with the Task it belongs to.
+   * A Recurring Task is never completed by this — what it kept is its
+   * occurrence's record, and the Task carries on asking for the next slot —
+   * so a range read here never decides anything about the parent.
+   */
+  occurrencesKeptIn(range: DayRange): Promise<CompletedOccurrence[]>
+  /**
    * Changes a Task: what it says, and when it is meant to be done. One
    * operation and one write, because the Task Editor commits both at once and
    * a save that half landed would leave the user unable to say which half.
@@ -606,6 +614,18 @@ interface NoteRow {
   origin: string
 }
 
+/**
+ * One kept slot of a Recurring Task, together with the Task it belongs to —
+ * the Task Description travels with it, because a rendering of what was done
+ * has to say what was done without a second read. The Task itself is not
+ * marked completed by this pairing: a kept occurrence is the occurrence's
+ * record, and the parent carries on.
+ */
+export interface CompletedOccurrence {
+  task: Task
+  occurrence: TaskOccurrence
+}
+
 interface TaskRow {
   id: string
   description: string
@@ -632,6 +652,14 @@ interface TaskOccurrenceRow {
 /** The recurrence columns, in the order every Task statement writes them. */
 const RECURRENCE_COLUMNS =
   'recurrence_unit, recurrence_interval, recurrence_weekdays, recurrence_anchor_date'
+
+/** The same, aliased for the one join that reads a Task beside an occurrence. */
+const RECURRENCE_COLUMNS_ALIASED = [
+  't.recurrence_unit AS t_recurrence_unit',
+  't.recurrence_interval AS t_recurrence_interval',
+  't.recurrence_weekdays AS t_recurrence_weekdays',
+  't.recurrence_anchor_date AS t_recurrence_anchor_date',
+].join(', ')
 
 const INSERT_TASK = `
   INSERT INTO tasks (
@@ -798,6 +826,59 @@ const SELECT_COMPLETED_OCCURRENCES_FOR_EXPORT = `
   WHERE completed_at IS NOT NULL
   ORDER BY scheduled_date ASC, scheduled_time IS NOT NULL, scheduled_time ASC, id ASC
 `
+
+/**
+ * The completed occurrences of a day range, newest completion first — the
+ * order a reader of what was kept yesterday wants. The predicate is on
+ * `completed_at`, the same one `completedTasks()` asks; the range is a range
+ * of Journal Days, so the bounds are the UTC instants of the range's own
+ * local midnights — bound by the caller, below, because a Journal Day's
+ * midnight is the local calendar's, not UTC's. The parent Task rides along
+ * on the join: only the Task's columns are aliased, because `id` and the
+ * recurrence columns are the ones the two tables name alike, and the
+ * occurrence columns read as themselves straight into `toOccurrence`.
+ */
+const SELECT_COMPLETED_OCCURRENCES_IN_RANGE = `
+  SELECT
+    o.id,
+    o.task_id,
+    o.scheduled_date,
+    o.scheduled_time,
+    o.completed_at,
+    o.created_at,
+    o.advanced_from,
+    t.id AS t_id,
+    t.description AS t_description,
+    t.created_at AS t_created_at,
+    t.completed_at AS t_completed_at,
+    t.scheduled_date AS t_scheduled_date,
+    t.scheduled_time AS t_scheduled_time,
+    ${RECURRENCE_COLUMNS_ALIASED}
+  FROM task_occurrences o
+  JOIN tasks t ON t.id = o.task_id
+  WHERE o.completed_at IS NOT NULL
+    AND o.completed_at >= ?
+    AND o.completed_at < ?
+  ORDER BY o.completed_at DESC, o.id DESC
+`
+
+/**
+ * The joined row of the read above: the occurrence's own columns, plus the
+ * Task's beside them under their aliases. Extends `TaskOccurrenceRow` so the
+ * occurrence needs no remap — only the Task is lifted out by hand.
+ */
+interface CompletedOccurrenceRow extends TaskOccurrenceRow {
+  t_id: string
+  t_description: string
+  t_created_at: string
+  t_completed_at: string | null
+  t_scheduled_date: string | null
+  t_scheduled_time: string | null
+  t_recurrence_unit: string | null
+  t_recurrence_interval: number | null
+  t_recurrence_weekdays: string | null
+  t_recurrence_anchor_date: string | null
+}
 
 /**
  * Keeps the commitment this occurrence stands for, and only while it is still
@@ -1274,6 +1355,45 @@ export function createJournal({
     async completedTasks() {
       const rows = await driver.select<TaskRow>(SELECT_COMPLETED_TASKS, [])
       return rows.map(toTask)
+    },
+
+    async occurrencesKeptIn(range) {
+      // The range's ends are Journal Days — local calendar days — so the
+      // bounds must be the UTC instants of their local midnights. A string
+      // bound would be a UTC midnight, and west of UTC every evening
+      // completion would fall on the next UTC day and out of "yesterday"
+      // entirely — while an ordinary Task completed at the same instant,
+      // narrowed locally, stayed in it. The start of a day is the instant a
+      // date-only Scheduled For stands for, so `scheduledInstant` is the one
+      // place the awkward midnights are decided in.
+      const from = scheduledInstant({
+        date: range.from,
+        time: null,
+      }).toISOString()
+      const to = scheduledInstant({
+        date: shiftDay(range.to, 1),
+        time: null,
+      }).toISOString()
+      const rows = await driver.select<CompletedOccurrenceRow>(
+        SELECT_COMPLETED_OCCURRENCES_IN_RANGE,
+        [from, to],
+      )
+
+      return rows.map((row) => ({
+        task: toTask({
+          id: row.t_id,
+          description: row.t_description,
+          created_at: row.t_created_at,
+          completed_at: row.t_completed_at,
+          scheduled_date: row.t_scheduled_date,
+          scheduled_time: row.t_scheduled_time,
+          recurrence_unit: row.t_recurrence_unit,
+          recurrence_interval: row.t_recurrence_interval,
+          recurrence_weekdays: row.t_recurrence_weekdays,
+          recurrence_anchor_date: row.t_recurrence_anchor_date,
+        }),
+        occurrence: toOccurrence(row),
+      }))
     },
 
     async editTask(id, { description, schedule, recurrence }) {

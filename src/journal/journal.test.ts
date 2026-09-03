@@ -13,10 +13,13 @@ import {
   formatJournalDay,
   formatProject,
   formatTimeOfDay,
+  formatSlot,
+  slotOf,
   isProjectName,
   formatTrayCount,
   exportFileName,
   groupOpenTasks,
+  isOpen,
   scheduledInstant,
   scheduleOf,
   taskAlertId,
@@ -35,8 +38,10 @@ import {
   type CalendarEvent,
   type Journal,
   type ProjectConstraint,
+  type Task,
   type TaskGroup,
   type TaskGroupName,
+  type TaskOccurrence,
 } from './journal'
 import { fixedClock, migrationSql, openTestDatabase } from './testing/database'
 
@@ -2110,6 +2115,185 @@ describe('completedTasks', () => {
     expect(
       (await journal.completedTasks()).map((task) => task.description),
     ).toEqual(['first made', 'second made'])
+  })
+})
+
+describe('occurrencesKeptIn', () => {
+  /** The kept occurrences, as plain `description (slot)` lines, newest first. */
+  function kept(
+    pairs: Array<{ task: Task; occurrence: TaskOccurrence }>,
+  ): string[] {
+    return pairs.map(
+      ({ task, occurrence }) =>
+        `${task.description} (${formatSlot(slotOf(occurrence))})`,
+    )
+  }
+
+  it('returns every occurrence completed on a Journal Day in the range, newest completion first', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T08:00:00')
+    const daily = await journal.createTask(
+      'water the plants',
+      { date: '2026-03-10', time: '09:00' },
+      { unit: 'day', interval: 1, weekdays: [] },
+    )
+
+    // Two slots kept on the 11th, in a deliberate order: the earlier slot
+    // completed later, so reading back newest first is a real reorder.
+    clock.set(local('2026-03-11T09:15:00'))
+    await journal.completeTask(daily.id)
+    clock.set(local('2026-03-11T10:00:00'))
+    await journal.completeTask(daily.id)
+    clock.set(local('2026-03-11T17:00:00'))
+    await journal.capture('a note on the day')
+
+    const selected = await journal.occurrencesKeptIn({
+      from: '2026-03-11',
+      to: '2026-03-11',
+    })
+
+    expect(kept(selected)).toEqual([
+      'water the plants (2026-03-12 09:00)',
+      'water the plants (2026-03-10 09:00)',
+    ])
+    // The parent Task reads whole, as it stands now — advanced, still Open,
+    // never itself completed — so a renderer can say what was done.
+    const parent = (await journal.openTasks()).find((one) => one.id === daily.id)
+    expect(selected[0].task).toEqual(parent)
+    expect(isOpen(selected[0].task)).toBe(true)
+    expect(selected[0].occurrence.completedAt).not.toBeNull()
+  })
+
+  it('leaves out occurrences completed outside the range', async () => {
+    const { journal, clock } = await journalAt('2026-03-10T08:00:00')
+    const daily = await journal.createTask(
+      'water the plants',
+      { date: '2026-03-10', time: '09:00' },
+      { unit: 'day', interval: 1, weekdays: [] },
+    )
+
+    clock.set(local('2026-03-10T09:15:00'))
+    await journal.completeTask(daily.id) // kept 03-10 09:00, advances to the 11th
+    clock.set(local('2026-03-11T09:15:00'))
+    await journal.completeTask(daily.id) // kept 03-11 09:00, advances to the 12th
+    clock.set(local('2026-03-12T09:15:00'))
+    await journal.completeTask(daily.id) // kept 03-12 09:00, advances to the 13th
+
+    expect(
+      kept(
+        await journal.occurrencesKeptIn({
+          from: '2026-03-11',
+          to: '2026-03-11',
+        }),
+      ),
+    ).toEqual(['water the plants (2026-03-11 09:00)'])
+    expect(
+      kept(
+        await journal.occurrencesKeptIn({
+          from: '2026-03-10',
+          to: '2026-03-11',
+        }),
+      ),
+    ).toEqual([
+      'water the plants (2026-03-11 09:00)',
+      'water the plants (2026-03-10 09:00)',
+    ])
+  })
+
+  it('returns a stopped recurrence\u2019s retained history', async () => {
+    const { journal, clock } = await journalAt('2026-03-11T08:00:00')
+    const daily = await journal.createTask(
+      'water the plants',
+      { date: '2026-03-10', time: '09:00' },
+      { unit: 'day', interval: 1, weekdays: [] },
+    )
+
+    clock.set(local('2026-03-11T09:15:00'))
+    await journal.completeTask(daily.id)
+    await journal.stopRecurrence(daily.id)
+    expect((await journal.openTasks())[0].recurrence).toBeNull()
+
+    expect(
+      kept(
+        await journal.occurrencesKeptIn({
+          from: '2026-03-10',
+          to: '2026-03-11',
+        }),
+      ),
+    ).toEqual(['water the plants (2026-03-10 09:00)'])
+  })
+
+  it('is empty when the range holds no completed occurrence', async () => {
+    const { journal } = await journalAt('2026-03-11T08:00:00')
+    await journal.createTask(
+      'water the plants',
+      { date: '2026-03-10', time: '09:00' },
+      { unit: 'day', interval: 1, weekdays: [] },
+    )
+
+    expect(
+      await journal.occurrencesKeptIn({
+        from: '2026-03-11',
+        to: '2026-03-11',
+      }),
+    ).toEqual([])
+  })
+
+  it('bounds the range at local midnight, not UTC midnight', async () => {
+    // July: the suite's pinned Europe/Lisbon is at UTC+1, so an occurrence
+    // completed at 00:30 local on the 2nd is stored 2026-07-01T23:30Z — a
+    // string comparison against UTC day bounds would file it under the 1st.
+    const { journal, clock } = await journalAt('2026-07-01T22:00:00')
+    const daily = await journal.createTask(
+      'water the plants',
+      { date: '2026-07-01', time: '23:00' },
+      { unit: 'day', interval: 1, weekdays: [] },
+    )
+
+    clock.set(local('2026-07-02T00:30:00'))
+    await journal.completeTask(daily.id)
+
+    const onTheSecond = await journal.occurrencesKeptIn({
+      from: '2026-07-02',
+      to: '2026-07-02',
+    })
+    expect(kept(onTheSecond)).toEqual(['water the plants (2026-07-01 23:00)'])
+
+    const onTheFirst = await journal.occurrencesKeptIn({
+      from: '2026-07-01',
+      to: '2026-07-01',
+    })
+    expect(onTheFirst).toEqual([])
+  })
+
+  it('bounds the range at local midnight across the DST fallback', async () => {
+    // Late October: Europe/Lisbon falls back on the 25th, so the night
+    // before is still UTC+1 and a completion at 00:30 local on the 25th is
+    // stored 2026-10-24T23:30Z — a different UTC day from the local one it
+    // belongs to, on the very weekend the offset moves.
+    const { journal, clock } = await journalAt('2026-10-24T22:00:00')
+    const daily = await journal.createTask(
+      'water the plants',
+      { date: '2026-10-24', time: '23:00' },
+      { unit: 'day', interval: 1, weekdays: [] },
+    )
+
+    clock.set(local('2026-10-25T00:30:00'))
+    await journal.completeTask(daily.id)
+
+    expect(
+      kept(
+        await journal.occurrencesKeptIn({
+          from: '2026-10-25',
+          to: '2026-10-25',
+        }),
+      ),
+    ).toEqual(['water the plants (2026-10-24 23:00)'])
+    expect(
+      await journal.occurrencesKeptIn({
+        from: '2026-10-24',
+        to: '2026-10-24',
+      }),
+    ).toEqual([])
   })
 })
 

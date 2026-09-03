@@ -25,6 +25,7 @@ describe('Standup Post session startup', () => {
       journal: Promise.resolve({
         notesForFilter: async () => [],
         completedTasks: async () => [],
+        occurrencesKeptIn: async () => [],
         openTasks: async () => [],
       } as unknown as Journal),
       desktop,
