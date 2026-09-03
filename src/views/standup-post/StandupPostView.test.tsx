@@ -1,13 +1,23 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
 import { createJournal, formatJournalDay, type Journal } from '@/journal/journal'
 import { fixedClock, openTestDatabase } from '@/journal/testing/database'
 import { createAppSettings } from '@/settings/app-settings'
 import type { StandupFailure } from '@/platform/desktop'
+import {
+  buildStandupMaterial,
+  selectStandupPost,
+} from '@/journal/standup-post'
 import StandupPostView from './StandupPostView'
 
 const openDatabases: Array<() => void> = []
@@ -193,12 +203,158 @@ describe('Standup Post section', () => {
     expect(request.userContent).toContain('## Completed yesterday')
     expect(request.userContent).toContain('## Still to do')
 
-    await user.click(screen.getByRole('button', { name: 'Copy' }))
+    await user.click(screen.getByRole('button', { name: 'Copy post' }))
 
     await waitFor(() => {
       expect(desktop.clipboard).toBe('The standup post the model wrote.')
     })
-    expect(await screen.findByText('Copied to the clipboard.')).toBeTruthy()
+    // Said twice: the live region beside the button and the toast.
+    expect(
+      await screen.findAllByText('Copied the standup post to the clipboard.'),
+    ).toBeTruthy()
+  })
+
+  it('copies the exact Standup Material with zero model calls and no Model Access', async () => {
+    const user = userEvent.setup()
+    // No Model Access at all — the state this button exists for.
+    const { journal, clock, desktop, settings } = await standupPostAt({})
+    await journalWithBothHalves(journal, clock)
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    await screen.findByRole('button', { name: 'Copy material' })
+
+    await user.click(screen.getByRole('button', { name: 'Copy material' }))
+
+    const expected = await buildStandupMaterial({
+      journal,
+      selection: await selectStandupPost({ journal, clock }),
+    })
+    await waitFor(() => {
+      expect(desktop.clipboard).toBe(expected)
+    })
+    // The Markdown carries both halves, exactly as a call would send it.
+    expect(desktop.clipboard).toContain('- #ops shipped the migration')
+    expect(desktop.clipboard).toContain('## Completed yesterday')
+    expect(desktop.clipboard).toContain('## Still to do')
+    expect(
+      await screen.findAllByText(
+        'Copied the standup material to the clipboard.',
+      ),
+    ).toBeTruthy()
+    // No Model Access was read and no call was spent.
+    expect(desktop.standupRequests).toEqual([])
+  })
+
+  it('keeps Copy material enabled and correct after a post exists', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await standupPostAt()
+    await journalWithBothHalves(journal, clock)
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    await screen.findByRole('button', { name: 'Generate' })
+
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    await screen.findByText('The standup post the model wrote.')
+
+    // Prose has arrived; the lossless rendering is still there, still live —
+    // that is the point of a second rendering.
+    const copyMaterial = screen.getByRole('button', {
+      name: 'Copy material',
+    }) as HTMLButtonElement
+    expect(copyMaterial.disabled).toBe(false)
+
+    // Built before the click: the fixture's clock is shared with the section,
+    // and what the selection describes must not move while the copy lands.
+    const expected = await buildStandupMaterial({
+      journal,
+      selection: await selectStandupPost({ journal, clock }),
+    })
+    await user.click(copyMaterial)
+    await waitFor(() => {
+      expect(desktop.clipboard).toBe(expected)
+    })
+    // Each confirmation is beside its own button and names its own subject:
+    // a shared flag would let a material copy light up beside the post.
+    // Scoped to the rows, because the toasts of earlier tests outlive them
+    // in the document.
+    expect(
+      within(copyMaterial.parentElement as HTMLElement).getByRole('status')
+        .textContent,
+    ).toBe('Copied the standup material to the clipboard.')
+    expect(
+      within(
+        screen.getByRole('button', { name: 'Copy post' })
+          .parentElement as HTMLElement,
+      ).getByRole('status').textContent,
+    ).toBe('')
+  })
+
+  it('keeps Copy material working after a generation failure', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await standupPostAt()
+    await journalWithBothHalves(journal, clock)
+    desktop.standupPostResponse = {
+      state: 'failed',
+      failure: { kind: 'offline' },
+    }
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    await screen.findByRole('button', { name: 'Generate' })
+
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    await screen.findByRole('alert')
+
+    // No post ever arrived; the material is still one click away.
+    await user.click(screen.getByRole('button', { name: 'Copy material' }))
+    const expected = await buildStandupMaterial({
+      journal,
+      selection: await selectStandupPost({ journal, clock }),
+    })
+    await waitFor(() => {
+      expect(desktop.clipboard).toBe(expected)
+    })
+  })
+
+  it('disables Copy material under the same refusal as Generate', async () => {
+    const { clock, desktop, settings, journal } = await standupPostAt()
+
+    renderStandupPost({ journal, clock, desktop, settings })
+
+    expect(await screen.findByText('Nothing to say yet.')).toBeTruthy()
+    expect(
+      (screen.getByRole('button', { name: 'Copy material' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true)
+  })
+
+  it('says when copying the material could not be written', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await standupPostAt()
+    await journalWithBothHalves(journal, clock)
+    let copies = 0
+    const write = desktop.copyToClipboard.bind(desktop)
+    desktop.copyToClipboard = async (text) => {
+      copies += 1
+      // The post copy, if any, still works; the material's write is refused.
+      if (text === 'The standup post the model wrote.') return write(text)
+      throw new Error('the clipboard refused')
+    }
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    await screen.findByRole('button', { name: 'Copy material' })
+
+    await user.click(screen.getByRole('button', { name: 'Copy material' }))
+
+    await waitFor(() => {
+      if (
+        !document.body.textContent?.includes(
+          'Could not copy the standup material.',
+        )
+      ) {
+        throw new Error('the failed material copy was not said')
+      }
+    })
+    expect(copies).toBe(1)
   })
 
   it('shows a pending state naming the model while the call is in flight', async () => {
@@ -456,7 +612,7 @@ describe('Standup Post section', () => {
 
     await user.click(screen.getByRole('button', { name: 'Generate' }))
     await screen.findByText('The standup post the model wrote.')
-    await user.click(screen.getByRole('button', { name: 'Copy' }))
+    await user.click(screen.getByRole('button', { name: 'Copy post' }))
     await waitFor(() => {
       expect(desktop.clipboard).toBe('The standup post the model wrote.')
     })
@@ -486,7 +642,7 @@ describe('Standup Post section', () => {
 
     await user.click(screen.getByRole('button', { name: 'Generate' }))
     await screen.findByText('The standup post the model wrote.')
-    await user.click(screen.getByRole('button', { name: 'Copy' }))
+    await user.click(screen.getByRole('button', { name: 'Copy post' }))
 
     await waitFor(() => {
       if (!document.body.textContent?.includes('Could not copy the standup post.')) {

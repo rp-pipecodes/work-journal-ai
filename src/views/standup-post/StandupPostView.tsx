@@ -10,7 +10,7 @@ import {
   type StandupPostState,
 } from '@/journal/standup-post-session'
 import {
-  buildStandupPostInput,
+  buildStandupMaterial,
   standupPostRefuses,
   type StandupPostSelection,
 } from '@/journal/standup-post'
@@ -57,9 +57,13 @@ export default function StandupPostView({
   // Why there is no post, when there is not — one of the few kinds the call
   // answers with, rendered as one line. A previous post stays on screen.
   const [failure, setFailure] = useState<StandupFailure | null>(null)
-  // The copy confirmation, said twice — a toast for whoever is looking, and a
-  // live region for whoever is not, exactly as a Digest copy says what it did.
-  const [copied, setCopied] = useState(false)
+  // Each copy's own confirmation, said twice — a toast for whoever is looking,
+  // and a live region for whoever is not — and each naming its subject: with
+  // two Copy actions on this screen, an unqualified "Copied" would not say
+  // which of the two things landed on the clipboard. One boolean each, never a
+  // shared one, so a material copy cannot light up beside the post.
+  const [copiedMaterial, setCopiedMaterial] = useState(false)
+  const [copiedPost, setCopiedPost] = useState(false)
   const says = useOnScreenToast()
   // A call is in flight, before the pending state has reached the button: a
   // double click must not spend the user's money twice.
@@ -110,7 +114,7 @@ export default function StandupPostView({
         // stored — `readSettings` resolves a cleared field to the default, so
         // a model is never asked under an empty system prompt.
         systemPrompt: stored.standupPrompt,
-        userContent: await buildStandupPostInput({
+        userContent: await buildStandupMaterial({
           journal: await journal,
           selection: state.selection,
         }),
@@ -118,7 +122,7 @@ export default function StandupPostView({
 
       if (response.state === 'generated') {
         setPost({ markdown: response.markdown, model: stored.model })
-        setCopied(false)
+        setCopiedPost(false)
       } else {
         setFailure(response.failure)
       }
@@ -135,13 +139,13 @@ export default function StandupPostView({
     }
   }
 
-  /** The post onto the clipboard, and a confirmation once it is there. */
-  function copy(): void {
+  /** The post onto the clipboard, and a confirmation naming it once there. */
+  function copyPost(): void {
     if (post === null) return
 
     desktop.copyToClipboard(post.markdown).then(
       () => {
-        setCopied(true)
+        setCopiedPost(true)
         says.success('Copied the standup post to the clipboard.')
       },
       (error: unknown) => {
@@ -149,6 +153,31 @@ export default function StandupPostView({
         says.failure('Could not copy the standup post.')
       },
     )
+  }
+
+  /**
+   * The Standup Material onto the clipboard, and a confirmation naming it
+   * once there. No Model Access is read and no call is made: the Markdown is
+   * built from the selection already on screen, so this works with no key,
+   * no network and no waiting — and stays exactly as live after a post
+   * exists, because the lossless rendering is there precisely when the prose
+   * turns out to be wrong.
+   */
+  async function copyMaterial(): Promise<void> {
+    if (state.state !== 'ready') return
+
+    try {
+      const material = await buildStandupMaterial({
+        journal: await journal,
+        selection: state.selection,
+      })
+      await desktop.copyToClipboard(material)
+      setCopiedMaterial(true)
+      says.success('Copied the standup material to the clipboard.')
+    } catch (error) {
+      console.error('could not copy the standup material', error)
+      says.failure('Could not copy the standup material.')
+    }
   }
 
   return (
@@ -177,7 +206,7 @@ export default function StandupPostView({
 
         {state.state === 'unreadable' && (
           <p role="alert" className="type-meta text-destructive">
-            The Standup Post material could not be read.
+            Yesterday could not be read.
           </p>
         )}
 
@@ -197,6 +226,38 @@ export default function StandupPostView({
                 Generate
               </Button>
 
+              {/*
+                The material as the user pastes it when there is no Model
+                Access, the endpoint is down, or the prose came back wrong:
+                built from the selection on screen, costing nothing and never
+                waiting. It stays here, live, once a post exists — and is
+                refused under the same gate as Generate, which is a day with
+                nothing in either half, not anything about the model.
+              */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void copyMaterial()}
+                disabled={standupPostRefuses(state.selection)}
+              >
+                <ClipboardCopyIcon data-icon="inline-start" />
+                Copy material
+              </Button>
+
+              {/*
+                The material copy's own confirmation, beside its own button
+                and naming its own subject — never the post's.
+              */}
+              <span
+                role="status"
+                aria-live="polite"
+                className="type-meta text-muted-foreground"
+              >
+                {copiedMaterial
+                  ? 'Copied the standup material to the clipboard.'
+                  : ''}
+              </span>
+
               {pending !== null && (
                 <p role="status" className="type-meta text-muted-foreground">
                   Writing with {pending}…
@@ -215,13 +276,18 @@ export default function StandupPostView({
                   {post.markdown}
                 </div>
                 <div className="flex items-center gap-3">
-                  <Button size="sm" onClick={copy}>
+                  {/* Copy post, not Copy: with a second Copy on this screen,
+                      position is no longer enough to say what a button does. */}
+                  <Button size="sm" onClick={copyPost}>
                     <ClipboardCopyIcon data-icon="inline-start" />
-                    Copy
+                    Copy post
                   </Button>
-                  {/* Empty until a copy lands, and announced when it does. */}
+                  {/* Empty until a copy lands, and announced when it does —
+                      naming its subject, as the material's confirmation does. */}
                   <span role="status" aria-live="polite" className="type-meta text-muted-foreground">
-                    {copied ? 'Copied to the clipboard.' : ''}
+                    {copiedPost
+                      ? 'Copied the standup post to the clipboard.'
+                      : ''}
                   </span>
                 </div>
               </section>
