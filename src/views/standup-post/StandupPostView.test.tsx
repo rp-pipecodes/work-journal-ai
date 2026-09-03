@@ -208,10 +208,19 @@ describe('Standup Post section', () => {
     await waitFor(() => {
       expect(desktop.clipboard).toBe('The standup post the model wrote.')
     })
-    // Said twice: the live region beside the button and the toast.
+    // Said twice, and naming its subject in both: the live region beside the
+    // button — asserted scoped to the row, because a subject-less string
+    // would pass a document-wide search — and the toast, which is why the
+    // same words must be found exactly twice.
+    expect(
+      within(
+        screen.getByRole('button', { name: 'Copy post' })
+          .parentElement as HTMLElement,
+      ).getByRole('status').textContent,
+    ).toBe('Copied the standup post to the clipboard.')
     expect(
       await screen.findAllByText('Copied the standup post to the clipboard.'),
-    ).toBeTruthy()
+    ).toHaveLength(2)
   })
 
   it('copies the exact Standup Material with zero model calls and no Model Access', async () => {
@@ -236,11 +245,19 @@ describe('Standup Post section', () => {
     expect(desktop.clipboard).toContain('- #ops shipped the migration')
     expect(desktop.clipboard).toContain('## Completed yesterday')
     expect(desktop.clipboard).toContain('## Still to do')
+    // Naming its subject beside its own button — scoped to the row, the way
+    // the post's region is held to it — and said twice with the toast.
+    expect(
+      within(
+        screen.getByRole('button', { name: 'Copy material' })
+          .parentElement as HTMLElement,
+      ).getByRole('status').textContent,
+    ).toBe('Copied the standup material to the clipboard.')
     expect(
       await screen.findAllByText(
         'Copied the standup material to the clipboard.',
       ),
-    ).toBeTruthy()
+    ).toHaveLength(2)
     // No Model Access was read and no call was spent.
     expect(desktop.standupRequests).toEqual([])
   })
