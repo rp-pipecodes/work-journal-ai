@@ -8,12 +8,12 @@ import {
 } from './journal'
 import { fixedClock, openTestDatabase } from './testing/database'
 import {
-  buildStandupPostInput,
+  buildStandupMaterial,
   selectStandupPost,
   standupPostRefuses,
 } from './standup-post'
 
-// The Standup Post's input is deliberately tested at the Journal boundary:
+// The Standup Material is deliberately tested at the Journal boundary:
 // real SQL proves that the section is selecting the records the user sees,
 // while the clock makes yesterday and today's Task groups deterministic.
 
@@ -164,8 +164,8 @@ describe('selectStandupPost', () => {
   })
 })
 
-describe('buildStandupPostInput', () => {
-  it('sends yesterday’s Digest verbatim, #project prefixes and all, plus the two Task lists', async () => {
+describe('buildStandupMaterial', () => {
+  it('builds yesterday’s Digest verbatim, #project prefixes and all, plus the two Task lists', async () => {
     const { journal, clock } = await journalAt('2026-03-12T09:00:00')
 
     clock.set(new Date('2026-03-11T09:00:00'))
@@ -181,7 +181,7 @@ describe('buildStandupPostInput', () => {
     await journal.createTask('upcoming', { date: '2026-03-13', time: null })
 
     const selection = await selectStandupPost({ journal, clock })
-    const userContent = await buildStandupPostInput({ journal, selection })
+    const userContent = await buildStandupMaterial({ journal, selection })
 
     // The Notes half is exactly what the journal's Digest renders — the same
     // Markdown History would copy — and the Tasks are one bullet each.
@@ -196,13 +196,13 @@ describe('buildStandupPostInput', () => {
 - [ ] today (scheduled 2026-03-12 17:00)`)
   })
 
-  it('sends an empty yesterday alone as today’s Tasks', async () => {
+  it('builds an empty yesterday alone as today’s Tasks', async () => {
     const { journal, clock } = await journalAt('2026-03-12T09:00:00')
 
     await journal.createTask('today', { date: '2026-03-12', time: '17:00' })
 
     const selection = await selectStandupPost({ journal, clock })
-    const userContent = await buildStandupPostInput({ journal, selection })
+    const userContent = await buildStandupMaterial({ journal, selection })
 
     expect(userContent).toBe(`## Still to do
 - [ ] today (scheduled 2026-03-12 17:00)`)
@@ -233,14 +233,14 @@ describe('buildStandupPostInput', () => {
     })
 
     const selection = await selectStandupPost({ journal, clock })
-    const userContent = await buildStandupPostInput({ journal, selection })
+    const userContent = await buildStandupMaterial({ journal, selection })
 
     expect(userContent).toBe(`## Completed yesterday
 - [x] chase the invoice
 - [x] water the plants (occurrence 2026-03-11 09:00)`)
   })
 
-  it('sends yesterday alone when there is nothing still to do', async () => {
+  it('builds yesterday alone when there is nothing still to do', async () => {
     const { journal, clock } = await journalAt('2026-03-12T09:00:00')
 
     clock.set(new Date('2026-03-11T09:00:00'))
@@ -248,7 +248,7 @@ describe('buildStandupPostInput', () => {
     clock.set(new Date('2026-03-12T09:00:00'))
 
     const selection = await selectStandupPost({ journal, clock })
-    const userContent = await buildStandupPostInput({ journal, selection })
+    const userContent = await buildStandupMaterial({ journal, selection })
 
     expect(userContent).toBe('- a note')
   })
@@ -263,7 +263,7 @@ describe('buildStandupPostInput', () => {
     clock.set(new Date('2026-03-12T09:00:00'))
 
     const selection = await selectStandupPost({ journal, clock })
-    const userContent = await buildStandupPostInput({ journal, selection })
+    const userContent = await buildStandupMaterial({ journal, selection })
 
     // No Notes yesterday, but the completed Task stands on its own.
     expect(userContent).toBe(`## Completed yesterday
@@ -289,7 +289,7 @@ describe('buildStandupPostInput', () => {
     })
 
     const selection = await selectStandupPost({ journal, clock })
-    const userContent = await buildStandupPostInput({ journal, selection })
+    const userContent = await buildStandupMaterial({ journal, selection })
 
     // The checkbox is the occurrence's, and the slot is spelled the one way
     // the app spells a slot. The parent appears nowhere as completed.
@@ -310,7 +310,7 @@ describe('buildStandupPostInput', () => {
     clock.set(new Date('2026-03-12T09:00:00')) // …and the parent now stands overdue on today's.
 
     const selection = await selectStandupPost({ journal, clock })
-    const userContent = await buildStandupPostInput({ journal, selection })
+    const userContent = await buildStandupMaterial({ journal, selection })
 
     // The same Task Description twice is correct and deliberate: the kept
     // occurrence is work done, while the Task itself carries on.
