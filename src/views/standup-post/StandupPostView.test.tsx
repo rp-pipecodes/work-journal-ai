@@ -483,6 +483,87 @@ describe('Standup Post section', () => {
     expect(copies).toBe(1)
   })
 
+  it('stops claiming a post copy when Generate replaces the prose', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await standupPostAt()
+    await journalWithBothHalves(journal, clock)
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    await screen.findByRole('button', { name: 'Generate' })
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    await screen.findByText('The standup post the model wrote.')
+    await user.click(screen.getByRole('button', { name: 'Copy post' }))
+    await waitFor(() => {
+      expect(desktop.clipboard).toBe('The standup post the model wrote.')
+    })
+    expect(
+      within(
+        screen.getByRole('button', { name: 'Copy post' })
+          .parentElement as HTMLElement,
+      ).getByRole('status').textContent,
+    ).toBe('Copied the standup post to the clipboard.')
+
+    // A replacement post retires the claim with the prose it was about: the
+    // third retire path, beside a failed copy and the material's re-read.
+    desktop.standupPostResponse = {
+      state: 'generated',
+      markdown: 'The second post, replacing the first.',
+    }
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    await screen.findByText('The second post, replacing the first.')
+
+    expect(
+      within(
+        screen.getByRole('button', { name: 'Copy post' })
+          .parentElement as HTMLElement,
+      ).getByRole('status').textContent,
+    ).toBe('')
+  })
+
+  it('announces a repeat copy that lands while the first is still live', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await standupPostAt()
+    await journalWithBothHalves(journal, clock)
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    const copyMaterial = await screen.findByRole('button', {
+      name: 'Copy material',
+    })
+    await user.click(copyMaterial)
+    await waitFor(() => {
+      expect(desktop.clipboard).not.toBeNull()
+    })
+    const row = () =>
+      within(
+        screen.getByRole('button', { name: 'Copy material' })
+          .parentElement as HTMLElement,
+      ).getByRole('status')
+    expect(row().textContent).toBe(
+      'Copied the standup material to the clipboard.',
+    )
+
+    // A region announces on change: identical text is silence, exactly when
+    // the reader most needs telling. A repeat still live says it is a
+    // repeat — no re-read gets in between these two clicks.
+    await user.click(screen.getByRole('button', { name: 'Copy material' }))
+    await waitFor(() => {
+      expect(row().textContent).toBe(
+        'Copied the standup material to the clipboard. (2)',
+      )
+    })
+
+    // And the retire paths still retire the counted claim whole.
+    desktop.focus()
+    await waitFor(() => {
+      expect(
+        within(
+          screen.getByRole('button', { name: 'Copy material' })
+            .parentElement as HTMLElement,
+        ).getByRole('status').textContent,
+      ).toBe('')
+    })
+  })
+
   it('shows a pending state naming the model while the call is in flight', async () => {
     const user = userEvent.setup()
     const { journal, clock, desktop, settings } = await standupPostAt()
