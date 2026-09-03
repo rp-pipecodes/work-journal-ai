@@ -215,8 +215,12 @@ _Avoid_: Backup, dump, save as — Backup, below, is the lossless one: Export is
 A snapshot of the journal's SQLite file itself — every table and row as stored, migrations record included — distinct from Export, which is prose and carries no Note ID, no Captured At and no Task ID. Taken two ways: automatically at launch when the newest snapshot is older than a fixed interval, into a `backups` folder beside the journal, and on demand to wherever the user points a save dialog — the one path off this disk, since the automatic folder sits on the same disk as the journal and does not survive a failed disk. Holds no settings and no API Key; restoring one is not this surface's business.
 _Avoid_: Export, dump, save as, archive
 
+**Restore**:
+Replacing the live journal with an earlier whole taken as a Backup. The candidate is validated read-only before anything is staged — `quick_check`, the tables its version must hold, and a `_sqlx_migrations` version no newer than this build understands — and an older one is migrated forward on next launch. The replacement happens at startup before anything holds the file; the previous journal is kept as a timestamped rollback file beside the live one and never deleted, its `-wal` and `-shm` sidecars renamed alongside the journal they belong to, and the app restarts. Holds no settings and restores none: the API Key, Hotkeys and settings stay as they were.
+_Avoid_: Undo, import, merge, sync
+
 **Deletion**:
-Confirmed permanent removal of a Note or Task. There is no trash, no archive, no recovery, and no bulk deletion of Completed Tasks. Deleting an Imported Note also refuses its meeting so it is never imported again; deleting a Recurring Task also removes its completed Task Occurrence history and says so before confirmation.
+Confirmed permanent removal of a Note or Task. There is no trash, no archive, no recovery, and no bulk deletion of Completed Tasks. Deleting an Imported Note also refuses its meeting so it is never imported again; deleting a Recurring Task also removes its completed Task Occurrence history and says so before confirmation. Deletion stays permanent: a Restore returns the journal to an earlier whole, it does not undo one Note.
 
 ## Settings
 

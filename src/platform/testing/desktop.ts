@@ -56,6 +56,19 @@ export interface FakeDesktop extends Desktop {
   /** Whether a backup write fails, as it does when the disk refuses. */
   backupFails: boolean
   /**
+   * What the open dialog answers with: a path, or null for a cancelled one.
+   * Writable, so the cases — cancel, pick-then-stage, pick-then-refuse — are
+   * separately scriptable.
+   */
+  chosenRestoreCandidate: string | null
+  /** Every restore staged, most recent last. */
+  stagedRestores: string[]
+  /**
+   * Why staging refuses, as the Rust side's validation would say it. Null
+   * stages cleanly; set, staging throws it and stages nothing.
+   */
+  restoreError: string | null
+  /**
    * What the automatic backups look like; writable, as an emptied folder is.
    * Named `automaticBackupStatus` because the interface member of the same
    * shape on `Desktop` is the method that reads it.
@@ -224,6 +237,9 @@ export function fakeDesktop({
     chosenBackupLocation: null,
     backups: [],
     backupFails: false,
+    chosenRestoreCandidate: null,
+    stagedRestores: [],
+    restoreError: null,
     automaticBackupStatus: { count: 0, newestTakenAt: null },
     backupsRevealed: 0,
     revealFails: false,
@@ -472,6 +488,16 @@ export function fakeDesktop({
         throw new Error('The backups folder could not be opened.')
       }
       desktop.backupsRevealed += 1
+    },
+
+    chooseRestoreCandidate: async (): Promise<string | null> =>
+      desktop.chosenRestoreCandidate,
+
+    stageRestore: async (path): Promise<void> => {
+      if (desktop.restoreError !== null) {
+        throw new Error(desktop.restoreError)
+      }
+      desktop.stagedRestores.push(path)
     },
 
     generateStandupPost: async (request): Promise<StandupPostResponse> => {

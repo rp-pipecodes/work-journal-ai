@@ -147,7 +147,11 @@ const TASK_CREATION_HEIGHT: f64 = 219.0;
 const RESIDENT_WINDOW_WIDTH: f64 = 626.0;
 
 /// Relative, so plugin-sql resolves it inside the app's data directory and the
-/// journal survives a restart of the app and of the machine. Must match
+/// journal survives a restart of the app and of the machine. The file name
+/// after `sqlite:` must stay `backup::DATABASE_FILE_NAME` — the
+/// live/staged/rollback paths resolve from that one constant, and this URL
+/// and the preload entry below name the same file by hand (`concat!` takes
+/// only literals, so the URL cannot be built from it). Must match
 /// `DATABASE_URL` in `src/platform/desktop.ts`, as
 /// `src/platform/desktop-rust.test.ts` checks — and must match the one entry
 /// of `plugins.sql.preload` in `tauri.conf.json` and `tauri.dev.conf.json`,
@@ -208,7 +212,45 @@ pub fn run() {
         // The save dialog behind the manual backup — the destination goes
         // wherever the user says, which is the whole point of the manual one;
         // see docs/adr/0032-a-backup-is-a-sqlite-snapshot-taken-with-vacuum-into.md.
+        // The open dialog behind the restore needs no new dependency, only
+        // `dialog:allow-open` beside `dialog:allow-save`.
         .plugin(tauri_plugin_dialog::init())
+        // The staged restore, before plugin-sql opens: the only moment
+        // nothing holds the live journal. Registered ahead of the sql plugin
+        // so its setup runs first — see
+        // docs/adr/0033-a-restore-replaces-the-journal-at-startup-and-keeps-a-rollback.md.
+        .plugin(
+            tauri::plugin::Builder::new("restore")
+                .setup(
+                    |app: &tauri::AppHandle<tauri::Wry>,
+                     _api: tauri::plugin::PluginApi<tauri::Wry, ()>| {
+                    let config_dir = match app.path().app_config_dir() {
+                        Ok(directory) => directory,
+                        Err(error) => {
+                            log::error!("no restore this launch: {error}");
+                            return Ok(());
+                        }
+                    };
+                    match backup::apply_staged_restore(
+                        &config_dir,
+                        std::time::SystemTime::now(),
+                    ) {
+                        Ok(backup::ApplyOutcome::Absent) => {}
+                        Ok(backup::ApplyOutcome::Restored { rollback }) => match rollback {
+                            Some(path) => log::info!(
+                                "restored the journal from a staged backup, previous journal kept as {}",
+                                path.display()
+                            ),
+                            None => log::info!("restored the journal from a staged backup"),
+                        },
+                        Err(error) => {
+                            log::error!("the staged restore could not be applied: {error}")
+                        }
+                    }
+                    Ok(())
+                })
+                .build(),
+        )
         .plugin(
             tauri_plugin_sql::Builder::new()
                 .add_migrations(DATABASE_URL, migrations())
@@ -259,7 +301,8 @@ pub fn run() {
             generate_standup_post,
             automatic_backups,
             backup_journal,
-            reveal_backups
+            reveal_backups,
+            stage_restore
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -1341,6 +1384,32 @@ fn reveal_in_finder(directory: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Validates a restore candidate and stages it for the next launch — the
+/// second moment of the one gesture: the webview opened the open dialog,
+/// this validates and stages what it came back with.
+///
+/// The path arrives over IPC, so it is trusted for nothing: it must be an
+/// absolute path the dialog could have given, and Step 2's validation already
+/// refuses anything that is not a readable journal snapshot at a supported
+/// version. A refusal names which check failed and stages nothing. The
+/// parameter is named for what the webview sends — `path`, as `stageRestore`
+/// in `src/platform/desktop.ts` invokes it — because a mismatched argument
+/// name is refused before this body runs, and says nothing.
+/// `desktop-rust.test.ts` holds the pair together.
+#[tauri::command(async)]
+async fn stage_restore(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let candidate = std::path::Path::new(&path);
+    if !candidate.is_absolute() {
+        return Err("the candidate is not a path this dialog could have given".to_string());
+    }
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("there is nowhere to stage a restore to: {error}"))?;
+    backup::stage_restore(candidate, &config_dir).await?;
+    Ok(())
+}
+
 /// Whether an API Key is saved. The key itself never crosses back to the
 /// webview — see `src-tauri/src/keychain.rs`.
 ///
@@ -1865,4 +1934,21 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let _ = tray.with_inner_tray_icon(|inner| inner.set_show_menu_on_right_click(false));
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The database path is named once: the URL plugin-sql opens must stay
+    /// the `sqlite:` scheme plus `backup::DATABASE_FILE_NAME`, which the
+    /// live/staged/rollback paths resolve from. If they drift, a restore
+    /// renames into a file plugin-sql never opens — silently doing nothing.
+    #[test]
+    fn the_database_url_names_the_database_file() {
+        assert_eq!(
+            DATABASE_URL,
+            format!("sqlite:{}", backup::DATABASE_FILE_NAME)
+        );
+    }
 }
