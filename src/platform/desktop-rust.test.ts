@@ -356,27 +356,56 @@ describe('the commands that can block on a person', () => {
  * fake desktop passes every test, and pressing the button reports nothing.
  *
  * Both sides are read as source, as the shared strings above are: the
- * arguments `tauri-desktop.ts` sends, and the parameters each command
- * receives. Parameters this side never sends are named here so that adding
- * one is a deliberate act rather than a silent one.
+ * payload keys each `invoke` in `tauri-desktop.ts` actually sends, and the
+ * parameters each command receives. Nothing is asserted against a
+ * hand-maintained table — the webview's own call sites are the source of
+ * truth, so renaming a key there fails here.
  */
 describe('the arguments commands are invoked with', () => {
-  const desktopSource = read(DESKTOP_FILE)
+  // The call sites, not the contract: `desktop.ts` declares the `Desktop`
+  // surface but contains no `invoke` payloads — `tauri-desktop.ts` is where
+  // arguments are actually sent, and so where drift can hide.
+  const tauriSource = read('src/platform/tauri-desktop.ts')
 
   /**
-   * Every command whose arguments the webview sends, with what it sends.
-   * The payload's keys must be exactly these, and Rust's parameters — read
-   * back in camelCase — must match them one for one.
+   * The payload keys of every invoke that sends arguments, read straight
+   * out of `tauri-desktop.ts`. Shorthand (`{ path }`) and explicit
+   * (`{ path: value }`) both yield the key the payload carries; a payload
+   * this parser cannot read fails the accounting test below rather than
+   * passing silently.
    */
-  const invoked: Record<string, string[]> = {
-    journal_transaction: ['statements'],
-    reconcile_task_alerts: ['alerts'],
-    set_hotkey: ['action', 'hotkey'],
-    save_api_key: ['apiKey'],
-    export_journal: ['markdown', 'fileName'],
-    backup_journal: ['path'],
-    generate_standup_post: ['request'],
-    show_tray_count: ['title'],
+  function sentArguments(): Record<string, string[]> {
+    const sent: Record<string, string[]> = {}
+
+    for (const [, command, payload] of tauriSource.matchAll(
+      /invoke[^'\n]*'([a-z_]+)'(?:,\s*\{([^}]*)\})?/g,
+    )) {
+      if (payload === undefined) continue
+      const keys =
+        payload.trim() === ''
+          ? []
+          : payload.split(',').map((entry) => {
+              const key = entry.split(':')[0].trim()
+              if (!/^[a-zA-Z_$][\w$]*$/.test(key)) {
+                throw new Error(
+                  `the payload of '${command}' is not the flat list of ` +
+                    `identifiers this test reads — it saw "${entry.trim()}"`,
+                )
+              }
+              return key
+            })
+
+      const previous = sent[command]
+      if (previous !== undefined && JSON.stringify(previous) !== JSON.stringify(keys)) {
+        throw new Error(
+          `'${command}' is invoked with two different payloads — read ` +
+            'both call sites into this test rather than one',
+        )
+      }
+      sent[command] = keys
+    }
+
+    return sent
   }
 
   /** The parameter names of one Rust command, in snake_case as written. */
@@ -401,34 +430,50 @@ describe('the arguments commands are invoked with', () => {
   }
 
   it('sends every argument with the name the command receives', () => {
-    expect(Object.keys(invoked).length).toBeGreaterThan(0)
+    const sent = sentArguments()
+    expect(Object.keys(sent).length).toBeGreaterThan(0)
 
-    for (const [command, sent] of Object.entries(invoked)) {
+    for (const [command, keys] of Object.entries(sent)) {
       const parameters = rustParameters(command)
         .map((name) => name.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()))
 
       expect(
         parameters,
         `${command} receives [${parameters.join(', ')}] but the webview sends ` +
-          `[${sent.join(', ')}] — a name the command does not receive refuses ` +
+          `[${keys.join(', ')}] — a name the command does not receive refuses ` +
           'the call before its body runs',
-      ).toEqual(sent)
+      ).toEqual(keys)
     }
   })
 
   it('accounts for every command the webview invokes with arguments', () => {
-    // Read from `tauri-desktop.ts` itself, so a new invoke with a payload
-    // has to land in `invoked` above — checked, or named here — rather than
-    // appearing silently beside them.
-    const sent = [...desktopSource.matchAll(/invoke[^\n]*'([a-z_]+)'/g)].map(
-      ([, command]) => command,
-    )
-    const withPayload = sent.filter((command) =>
-      new RegExp(`'${command}'\\\\?,\\s*\\{`).test(desktopSource),
-    )
+    // Rust is the ledger, not the payload's shape: any command that takes
+    // arguments and is invoked from the webview must have had a literal
+    // payload parsed by `sentArguments`. Detecting payloads by seeing a
+    // `{` would let `invoke('cmd', buildPayload())` — a payload this test
+    // cannot read — pass in perfect silence.
+    const sent = sentArguments()
+    const names = [...new Set(
+      [...tauriSource.matchAll(/invoke[^'\n]*'([a-z_]+)'/g)].map(([, command]) => command),
+    )]
 
-    const unaccounted = withPayload.filter((command) => !(command in invoked))
-    expect(unaccounted, unaccounted.join('; ')).toEqual([])
+    const unparsed = names.filter(
+      (command) => !(command in sent) && rustParameters(command).length > 0,
+    )
+    expect(
+      unparsed,
+      `${unparsed.join('; ')} — takes arguments, but sentArguments parsed ` +
+        'no payload for it; the payload must be a literal this test can read',
+    ).toEqual([])
+
+    // And every `invoke` call site must have yielded a command name at all,
+    // so a dynamically-named command cannot slip past both checks above.
+    const callSites = [...tauriSource.matchAll(/\binvoke\s*[<(]/g)].length
+    expect(
+      names.length,
+      `${callSites - names.length} invoke call site(s) this test cannot read ` +
+        'a command name from — command names must be string literals',
+    ).toBe(callSites)
   })
 })
 
