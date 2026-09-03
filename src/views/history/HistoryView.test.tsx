@@ -386,8 +386,7 @@ describe('Escape', () => {
   })
 })
 
-/**
- * History as this file reads it: opened, with the header's two controls. */
+/** History as this file reads it: opened, with the header's two controls. */
 async function showFilter(captured: Array<{ at: string; body: string }>) {
   const opened = await showHistory(captured)
 

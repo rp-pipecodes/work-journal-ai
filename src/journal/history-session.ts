@@ -468,7 +468,13 @@ export function createHistorySession({
       correct('That Note could not be deleted.', (core) => core.delete(id)),
 
     async renameProject(from, to) {
-      const source = project
+      // The constraint this call starts under, held so a refusal can put it
+      // back — but only what this call itself moved, never a constraint the
+      // reader has narrowed to while the core was still answering.
+      const before = project
+      // What this call moved the constraint to, if it has; the guard on
+      // putting it back.
+      let movedTo: ProjectConstraint | null = null
       let problem: string | null = null
       try {
         // Both names are normalized by the core's own rule — a constraint is
@@ -484,7 +490,7 @@ export function createHistorySession({
         // session's, so the move is too — no view has to know that a rename
         // touched what it is reading.
         if (project.kind === 'named' && project.name === fromName) {
-          project = { kind: 'named', name: toName }
+          project = movedTo = { kind: 'named', name: toName }
         }
         if (!same) {
           const core = await journal
@@ -494,8 +500,9 @@ export function createHistorySession({
       } catch (error) {
         console.error('could not rename the Project', error)
         problem = 'That Project could not be renamed.'
-        // A refused rename leaves the constraint it was refused under.
-        project = source
+        // A refused rename leaves the constraint it was refused under —
+        // unless the reader has moved it meanwhile, which is theirs to move.
+        if (movedTo !== null && project === movedTo) project = before
       }
 
       // A refusal leaves the screen exactly as it was — a Search included —

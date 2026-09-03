@@ -765,6 +765,22 @@ describe('renameProject', () => {
     expect(await journal.projectsInUse()).toEqual(['habic'])
   })
 
+  it('refuses a source that is not a Project name, however many Notes it would move', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    await journal.capture('#habic shipped')
+
+    // Both names are asked of the same rule, whatever the target: a source
+    // that cannot be a Project is not a stream the record holds, and a
+    // message that said so per target would be the rule speaking twice.
+    for (const source of ['ha bic', '#habic', '']) {
+      await expect(journal.renameProject(source, 'work')).rejects.toThrow(
+        /project/i,
+      )
+    }
+
+    expect(await journal.projectsInUse()).toEqual(['habic'])
+  })
+
   it('refuses a source that is not in use, rather than renaming nothing', async () => {
     const { journal } = await journalAt('2026-03-12T09:30:00')
     await journal.capture('#habic shipped')
