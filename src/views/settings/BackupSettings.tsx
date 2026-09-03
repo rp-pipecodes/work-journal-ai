@@ -63,10 +63,12 @@ export default function BackupSettings({ desktop }: { desktop: Desktop }) {
    * One gesture, two operations: the picker first, then the write. A
    * cancelled dialog resolves to null and means the backup never happens —
    * quietly, because a cancelled save is not an error. The button reads
-   * "Backing up…" only for the write, not for the browse.
+   * "Backing up…" only for the write, and only from the moment the write
+   * begins: set after the picker resolves, never before it, because a
+   * dialog the user browses for minutes is not a backup in progress — and
+   * a disabled button behind the dialog would read as one.
    */
   function backUpNow() {
-    setBackingUp(true)
     void (async () => {
       try {
         const destination = await desktop.chooseBackupLocation()
@@ -75,6 +77,8 @@ export default function BackupSettings({ desktop }: { desktop: Desktop }) {
           return
         }
 
+        // The write is the moment the label covers.
+        setBackingUp(true)
         const backup = await desktop.backupJournal(destination)
         const said = `Backed up to ${backup.path}.`
         says.success(said)

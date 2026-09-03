@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { toast } from 'sonner'
 import {
   deferredStore,
@@ -845,10 +845,24 @@ describe('Backup', () => {
       releasePicker = resolve
     })
     desktop.chooseBackupLocation = () => picked.then(() => desktop.chosenBackupLocation)
+    // The write too, for the same reason: a write that resolves inside one
+    // batch never renders "Backing up…", good component or bad.
+    let releaseWrite = () => {}
+    const writing = new Promise<void>((resolve) => {
+      releaseWrite = resolve
+    })
+    const realBackup = desktop.backupJournal.bind(desktop)
+    desktop.backupJournal = (path) => writing.then(() => realBackup(path))
 
     showSettings(desktop)
 
     ;(await screen.findByRole('button', { name: 'Back up now' })).click()
+
+    // The update a regression would have queued — a component that sets
+    // Backing up… before the picker resolves — has to have had its chance to
+    // land before the assertion means anything: without this flush, the
+    // stale DOM passes both the good and the bad component alike.
+    await act(async () => {})
 
     // The dialog is up: not backing up yet, and the button is honest about it.
     expect(desktop.backups).toEqual([])
@@ -856,9 +870,12 @@ describe('Backup', () => {
 
     releasePicker()
 
-    // The write is the moment the label covers.
+    // The write is the moment the label covers: it is up while the gated
+    // write is in flight, and gone once it lands.
     await screen.findByRole('button', { name: 'Backing up…' })
+    releaseWrite()
     await expect.poll(() => desktop.backups).toHaveLength(1)
+    await screen.findByRole('button', { name: 'Back up now' })
   })
 
   it('says a cancelled dialog as cancelled, and writes nothing', async () => {
