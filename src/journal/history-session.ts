@@ -506,24 +506,10 @@ export function createHistorySession({
         return
       }
 
-      // The reader's own act on the Project axis ends a Search, as every
-      // other act on that axis does, and the list is re-read under the
-      // constraint as it now stands — moved to the target when this session
-      // was narrowed to the source, so the same stream is on screen under its
-      // new name rather than an empty list.
-      abandonWaitingTerm()
-      if (snapshot.filter !== null) {
-        const filter: Filter = { ...snapshot.filter, project }
-        show({
-          filter,
-          searching: false,
-          confirmation: null,
-          problem: null,
-        })
-        await read(filter)
-      } else {
-        show({ problem: null })
-      }
+      // The constraint may just have been moved to the target, and no list is
+      // on screen when the journal has yet to hold a Note; either way this is
+      // the ordinary act of narrowing, and everything it re-reads and ends.
+      await narrowTo(project)
     },
 
     copy() {
