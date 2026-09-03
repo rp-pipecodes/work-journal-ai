@@ -316,6 +316,26 @@ Daylight saving is macOS's to resolve, not the app's: the app registers the civi
 - [ ] Exporting twice leaves two files rather than overwriting the first.
 - [ ] Exporting an empty journal writes a file and says so, rather than failing.
 
+## Backup
+
+The snapshot items are checked with `sqlite3` (ships with macOS). A first launch means no `backups` folder in the app's data directory yet.
+
+- [ ] On a first launch after installing this build — no `backups` folder yet — a development build logs where the snapshot went, and `~/Library/Application Support/com.pipecodes.work-journal/backups/` holds exactly one file named `work-journal-…T….db`. The snapshot must appear without opening any window: launch, wait, and look — if opening Settings or History is what makes the file appear, the preload is broken again.
+- [ ] `sqlite3 "~/Library/Application Support/com.pipecodes.work-journal/backups/<that file>" "PRAGMA quick_check;"` says `ok`, and `.tables` lists `notes`, `tasks`, `task_occurrences`, `imported_meetings` and `_sqlx_migrations`.
+- [ ] The snapshot holds the journal: a Note captured before the launch reads back from the snapshot file, with its Project and Captured At.
+- [ ] Quitting and relaunching inside a minute creates no second snapshot — at most one per interval.
+- [ ] **Settings › Backup** names when the last automatic backup was taken, and that line agrees with the newest file in the folder.
+- [ ] **Back up now** opens a save dialog suggested in Downloads under the timestamped name; confirming writes the file there, and the toast and the line under the button both name the path.
+- [ ] Backing up over a name that is already taken — confirm the dialog's "Replace?" — does not refuse: the snapshot lands beside the taken file as `…-2.db`, the toast names that sibling, and the taken file is unchanged on disk.
+- [ ] `sqlite3 <the Downloads file> "SELECT COUNT(*) FROM notes;"` agrees with History, and the file opens standalone.
+- [ ] Cancelling the dialog writes nothing anywhere, says "Backup cancelled." in the toast, and reports no error.
+- [ ] The button reads **Backing up…** only while the write happens — with the dialog still open, the button still reads **Back up now**.
+- [ ] **Reveal backups** opens the `backups` folder in the Finder with it selected.
+- [ ] Copying a snapshot to a second machine (or restoring it in place, once #161 exists) is possible without the app: the file opens in `sqlite3` directly.
+- [ ] With 30 snapshots in `backups/` — made by hand, dated across days — the next launch takes one snapshot and prunes down to 30, removing only the oldest `work-journal-…db` files. A decoy file dropped in the folder (`keep-me.txt`, and one named `work-journal.db`) is still there afterwards, untouched.
+- [ ] With the app's Model Access configured, no file in `backups/` contains the API Key: `grep -c sk- <snapshot>` finds nothing, and the settings file is not among what any snapshot holds.
+- [ ] The release build takes its launch snapshot with nothing on screen: no window, no dialog, no error, whether or not the snapshot succeeded.
+
 ## Updates
 
 Needs two builds: the one installed, and a release tagged after it.

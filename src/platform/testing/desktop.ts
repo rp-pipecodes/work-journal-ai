@@ -4,7 +4,9 @@ import type { SettingsStore } from '../../settings/settings'
 import type { Theme } from '../../settings/theme'
 import type {
   AppIdentity,
+  AutomaticBackups,
   AvailableUpdate,
+  BackupResult,
   CalendarAccess,
   CalendarInfo,
   CaptureFit,
@@ -43,6 +45,26 @@ export interface FakeDesktop extends Desktop {
   loginItem: boolean
   /** Every export written, most recent last. */
   exported: Array<{ markdown: string; fileName: string }>
+  /**
+   * What the save dialog answers with: a path, or null for a cancelled one.
+   * Writable, so the three cases — cancel, pick-then-succeed,
+   * pick-then-fail — are separately scriptable.
+   */
+  chosenBackupLocation: string | null
+  /** Every backup written, most recent last. */
+  backups: string[]
+  /** Whether a backup write fails, as it does when the disk refuses. */
+  backupFails: boolean
+  /**
+   * What the automatic backups look like; writable, as an emptied folder is.
+   * Named `automaticBackupStatus` because the interface member of the same
+   * shape on `Desktop` is the method that reads it.
+   */
+  automaticBackupStatus: AutomaticBackups
+  /** How many times the backups folder was revealed. */
+  backupsRevealed: number
+  /** Whether revealing fails, as it does when the folder is gone. */
+  revealFails: boolean
   /** Every size the Capture window was asked to take, most recent last. */
   fits: CaptureFit[]
   /** What is beside the menu bar glyph; null until something is put there. */
@@ -199,6 +221,12 @@ export function fakeDesktop({
     stored,
     loginItem: false,
     exported: [],
+    chosenBackupLocation: null,
+    backups: [],
+    backupFails: false,
+    automaticBackupStatus: { count: 0, newestTakenAt: null },
+    backupsRevealed: 0,
+    revealFails: false,
     fits: [],
     trayTitle: null,
     clipboard: null,
@@ -419,6 +447,33 @@ export function fakeDesktop({
       return { path: `/tmp/${fileName}`, fileName }
     },
 
+    automaticBackups: async (): Promise<AutomaticBackups> =>
+      desktop.automaticBackupStatus,
+
+    chooseBackupLocation: async (): Promise<string | null> =>
+      desktop.chosenBackupLocation,
+
+    backupJournal: async (path): Promise<BackupResult> => {
+      if (desktop.backupFails) {
+        throw new Error('The snapshot could not be written.')
+      }
+      // Mirrors backup_journal's settlement: a path the dialog offered to
+      // replace is already occupied, so the write lands beside it — `-2`,
+      // `-3` — rather than on what is there. The result carries where the
+      // snapshot actually went, which is what the toast names.
+      const settled = desktop.backups.includes(path) ? nextSibling(path, desktop.backups) : path
+      desktop.backups.push(settled)
+      const fileName = settled.split('/').pop() ?? settled
+      return { path: settled, fileName }
+    },
+
+    revealBackups: async () => {
+      if (desktop.revealFails) {
+        throw new Error('The backups folder could not be opened.')
+      }
+      desktop.backupsRevealed += 1
+    },
+
     generateStandupPost: async (request): Promise<StandupPostResponse> => {
       desktop.standupRequests.push(request)
       return desktop.standupPostResponse
@@ -520,4 +575,18 @@ function subscribers<T>() {
       for (const handle of handlers) handle(value)
     },
   }
+}
+
+/// The next free sibling of a taken name — `name.ext` → `name-2.ext` — the
+/// same settlement `export.rs`'s `free_path` performs on the Rust side.
+function nextSibling(path: string, existing: string[]): string {
+  const dot = path.lastIndexOf('.')
+  const slash = path.lastIndexOf('/')
+  const stem = dot > slash ? path.slice(0, dot) : path
+  const extension = dot > slash ? path.slice(dot) : ''
+  let attempt = 2
+  while (existing.includes(`${stem}-${attempt}${extension}`)) {
+    attempt += 1
+  }
+  return `${stem}-${attempt}${extension}`
 }

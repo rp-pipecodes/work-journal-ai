@@ -58,8 +58,10 @@ fn plain_file_name(file_name: &str) -> io::Result<PathBuf> {
 /// The first name not already taken: `work-journal-2026-03-11.md`, then
 /// `work-journal-2026-03-11-2.md`, and so on — the name itself is
 /// `exportFileName`'s in `src/journal/journal.ts`. Exporting twice in one day
-/// leaves two files rather than one.
-fn free_path(directory: &Path, file_name: &Path) -> io::Result<PathBuf> {
+/// leaves two files rather than one. Shared with backup, whose save dialog
+/// has the same shape of question: a name the user chose, a directory it must
+/// not write over anything in.
+pub(crate) fn free_path(directory: &Path, file_name: &Path) -> io::Result<PathBuf> {
     let first = directory.join(file_name);
 
     if !first.exists() {

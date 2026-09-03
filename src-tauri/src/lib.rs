@@ -1,4 +1,5 @@
 mod alerts;
+mod backup;
 mod calendar;
 mod dock;
 mod export;
@@ -147,7 +148,12 @@ const RESIDENT_WINDOW_WIDTH: f64 = 626.0;
 
 /// Relative, so plugin-sql resolves it inside the app's data directory and the
 /// journal survives a restart of the app and of the machine. Must match
-/// `DATABASE_URL` in `src/platform/desktop.ts`, as `src/platform/desktop-rust.test.ts` checks.
+/// `DATABASE_URL` in `src/platform/desktop.ts`, as
+/// `src/platform/desktop-rust.test.ts` checks — and must match the one entry
+/// of `plugins.sql.preload` in `tauri.conf.json` and `tauri.dev.conf.json`,
+/// which is what opens the pool (and runs the migrations) before `setup`
+/// spawns the automatic snapshot. The two configs are JSON, which no test
+/// reads, so the preload entry says the same thing in words beside it.
 const DATABASE_URL: &str = "sqlite:work-journal.db";
 
 /// The two Entry Point items of the Tray Menu, held so that remapping either
@@ -199,6 +205,10 @@ pub fn run() {
         // docs/adr/0030-the-app-updates-itself-from-its-own-releases.md.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // The save dialog behind the manual backup — the destination goes
+        // wherever the user says, which is the whole point of the manual one;
+        // see docs/adr/0032-a-backup-is-a-sqlite-snapshot-taken-with-vacuum-into.md.
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_sql::Builder::new()
                 .add_migrations(DATABASE_URL, migrations())
@@ -246,7 +256,10 @@ pub fn run() {
             api_key_set,
             save_api_key,
             clear_api_key,
-            generate_standup_post
+            generate_standup_post,
+            automatic_backups,
+            backup_journal,
+            reveal_backups
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -307,6 +320,10 @@ pub fn run() {
             // delivered while Work Journal was not running arrives as the app
             // starts, and a delegate set any later would never hear it.
             watch_for_task_alerts(app.handle());
+
+            // The automatic snapshot, off the main thread and off the critical
+            // path: see take_automatic_snapshot.
+            take_automatic_snapshot(app.handle().clone());
 
             // Start at login is offered once, and only once: the app must
             // never add itself to the login items without being asked, and
@@ -1104,6 +1121,224 @@ fn export_journal(
         .map_err(|error| format!("there is nowhere to export to: {error}"))?;
 
     export::write(&directory, &file_name, &markdown).map_err(|error| error.to_string())
+}
+
+/// The plugin's already-open pool, for the one statement a backup runs. The
+/// same access `journal_transaction` has: there is no second connection to the
+/// file and no second copy of the migrations. The plugin keeps its pools
+/// behind an enum whose accessors are not published, so the variant is matched
+/// directly.
+async fn journal_pool(
+    databases: tauri::State<'_, DbInstances>,
+) -> Result<sqlx::SqlitePool, String> {
+    let databases = databases.0.read().await;
+    #[allow(unreachable_patterns)]
+    match databases
+        .get(DATABASE_URL)
+        .ok_or_else(|| "the journal database is not open".to_string())?
+    {
+        DbPool::Sqlite(pool) => Ok(pool.clone()),
+        _ => Err("the journal database is not SQLite".to_string()),
+    }
+}
+
+/// Where the automatic snapshots sit: beside the journal, in the directory
+/// plugin-sql resolves every relative `sqlite:` URL into — see
+/// docs/adr/0032-a-backup-is-a-sqlite-snapshot-taken-with-vacuum-into.md for
+/// why beside is still chosen, and what it buys and does not.
+fn backups_directory(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .app_config_dir()
+        .map(|directory| directory.join("backups"))
+        .map_err(|error| format!("there is nowhere to back up to: {error}"))
+}
+
+/// The automatic snapshot: at most one per interval, on the app's own launch.
+/// Spawned off the main thread against the pool the plugin already holds open,
+/// so there is no second connection and no ordering hazard with migrations —
+/// and so a slow disk never delays a window or a Tray Menu.
+///
+/// A failed snapshot is a log line and nothing else. The journal works
+/// exactly as before without one, and an error in front of the user on launch
+/// would teach them to dismiss the one dialog that must never be dismissed —
+/// see docs/adr/0032-a-backup-is-a-sqlite-snapshot-taken-with-vacuum-into.md.
+fn take_automatic_snapshot(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let pool = match journal_pool(app.state::<DbInstances>()).await {
+            Ok(pool) => pool,
+            // The config's sql `preload` opens the pool before setup runs, so
+            // an empty DbInstances here means the preload did not happen at
+            // all — worth a log line that names the cause, since a silent
+            // one would leave the journal running for years with no backup
+            // and nothing said about it.
+            Err(error) => {
+                log::error!("no automatic snapshot this launch: {error}");
+                return;
+            }
+        };
+
+        let directory = match backups_directory(&app) {
+            Ok(directory) => directory,
+            Err(error) => {
+                log::error!("no automatic snapshot this launch: {error}");
+                return;
+            }
+        };
+
+        let now = std::time::SystemTime::now();
+        let decision = backup::automatic(&directory, now);
+        if !decision.due {
+            return;
+        }
+
+        // Made before the snapshot is attempted, so the file is never asked
+        // to appear out of nowhere: VACUUM INTO refuses to create a directory
+        // on the way, and a snapshot refused for want of one is a launch that
+        // never backs up again.
+        if let Err(error) = std::fs::create_dir_all(&directory) {
+            log::error!("could not make the backups directory: {error}");
+            return;
+        }
+
+        let destination = directory.join(backup::snapshot_file_name(now));
+        if let Err(error) = backup::take_snapshot(&destination, &pool).await {
+            log::error!("could not take the automatic snapshot: {error}");
+            return;
+        }
+        log::info!("automatic snapshot written to {}", destination.display());
+
+        // Only after a snapshot is safely on disk: pruning first could take
+        // the newest copy there is.
+        for path in backup::prunable(&directory) {
+            if let Err(error) = std::fs::remove_file(&path) {
+                log::warn!("could not prune {}: {error}", path.display());
+            } else {
+                log::info!("pruned old snapshot {}", path.display());
+            }
+        }
+    });
+}
+
+/// What Settings says about the automatic backups: how many there are, and
+/// when the newest was taken — asked of the live directory rather than
+/// remembered, since the user can empty it.
+#[tauri::command(async)]
+fn automatic_backups(app: tauri::AppHandle) -> Result<backup::AutomaticBackups, String> {
+    let directory = backups_directory(&app)?;
+    Ok(backup::automatic_backups(&directory))
+}
+
+/// Writes the snapshot to the destination the save dialog just answered with —
+/// the second moment of the one gesture: the webview opened the dialog, this
+/// writes what it came back with.
+///
+/// The overwrite question belongs to the save dialog alone: it is the one
+/// that shows "Replace?" and the user answers it there. A name that is
+/// nevertheless taken by the time the write runs is not refused — refusing
+/// would turn the dialog's own confirmation into "Could not back up the
+/// journal." — but settled beside it, `-2.db`, `-3.db`, and so on, exactly
+/// as export does. Nothing on disk is ever replaced, renamed or deleted to
+/// make room for a backup, and `VACUUM INTO` could not overwrite a file
+/// even if asked to.
+///
+/// The destination arrives over IPC, so it is validated here rather than
+/// trusted: reined back to a plain, absolute file name, and settled inside a
+/// directory this side chose or the dialog confirmed. The parameter is named
+/// for what the webview sends — `path`, as `backupJournal` in
+/// `src/platform/desktop.ts` invokes it — because a mismatched argument name
+/// is refused before this body runs, and says nothing. `desktop-rust.test.ts`
+/// holds the pair together.
+#[tauri::command(async)]
+async fn backup_journal(
+    _app: tauri::AppHandle,
+    databases: tauri::State<'_, DbInstances>,
+    path: String,
+) -> Result<BackupResult, String> {
+    let chosen = std::path::Path::new(&path);
+    if !chosen.is_absolute() {
+        return Err("the destination is not a path this dialog could have given".to_string());
+    }
+    // The file name alone is what carries the name; the directory it sits in
+    // must be a directory the OS dialog, not the webview, chose.
+    let file_name = chosen
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+
+    let pool = journal_pool(databases).await?;
+
+    // Settle after the pool, before the write: the first free sibling of the
+    // chosen name in the chosen directory. In the common case the name is
+    // free and this is a no-op.
+    let directory = chosen
+        .parent()
+        .ok_or_else(|| "the destination has no directory".to_string())?;
+    let destination = backup::settle_destination(directory, &file_name)
+        .map_err(|error| error.to_string())?;
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    backup::take_snapshot(&destination, &pool).await?;
+
+    Ok(BackupResult {
+        path: destination.to_string_lossy().into_owned(),
+        file_name: destination
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    })
+}
+
+/// Where a manual backup ended up, so the app can say so rather than leaving
+/// the user to guess whether anything happened. Must match `BackupResult` in
+/// `src/platform/desktop.ts`.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupResult {
+    path: String,
+    file_name: String,
+}
+
+/// Shows the automatic backups folder in the Finder — the one place the
+/// snapshots the app takes on its own can be seen and copied by hand. A
+/// folder that does not exist yet is made rather than missed: the user asked
+/// to see it, and the first snapshot may still be a launch away.
+#[tauri::command(async)]
+fn reveal_backups(app: tauri::AppHandle) -> Result<(), String> {
+    let directory = backups_directory(&app)?;
+    if !directory.exists() {
+        std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    }
+
+    reveal_in_finder(&directory)
+}
+
+/// Asks macOS to show one folder in the Finder, selecting it — `NSWorkspace
+/// activateFileViewerSelectingURLs`, through the same shared workspace the
+/// rest of this file already talks to.
+#[cfg(target_os = "macos")]
+fn reveal_in_finder(directory: &std::path::Path) -> Result<(), String> {
+    use objc2::msg_send;
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::class;
+    use objc2_foundation::{NSArray, NSString, NSURL};
+
+    let path = NSString::from_str(&directory.to_string_lossy());
+    let url = NSURL::fileURLWithPath_isDirectory(&path, true);
+    let urls = NSArray::from_retained_slice(&[url]);
+
+    let workspace: Retained<AnyObject> = unsafe { msg_send![class!(NSWorkspace), sharedWorkspace] };
+    let _: () = unsafe { msg_send![&*workspace, activateFileViewerSelectingURLs: &*urls] };
+    Ok(())
+}
+
+/// Nowhere to reveal a Finder folder to, off macOS — the command answers
+/// without doing anything, as every other macOS-shaped ask in this file does.
+#[cfg(not(target_os = "macos"))]
+fn reveal_in_finder(directory: &std::path::Path) -> Result<(), String> {
+    let _ = directory;
+    Ok(())
 }
 
 /// Whether an API Key is saved. The key itself never crosses back to the

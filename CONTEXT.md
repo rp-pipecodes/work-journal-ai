@@ -209,7 +209,11 @@ _Avoid_: Digest, summary, daily log, AI note
 
 **Export**:
 Every Note and Task written to a Markdown file in separate sections, each appearing exactly once. Notes remain day-grouped and use a `#name` prefix when filed under a Project. Tasks are separated into Open and Completed and retain their Task Description, Scheduled For, recurrence rule, and completed Task Occurrence history. The way out of the SQLite file, so nothing kept here is locked in — which is why it ignores the Filter and Tasks View entirely, and why it is a core operation rather than a convenience.
-_Avoid_: Backup, dump, save as
+_Avoid_: Backup, dump, save as — Backup, below, is the lossless one: Export is the human-readable way out, not a snapshot of the database.
+
+**Backup**:
+A snapshot of the journal's SQLite file itself — every table and row as stored, migrations record included — distinct from Export, which is prose and carries no Note ID, no Captured At and no Task ID. Taken two ways: automatically at launch when the newest snapshot is older than a fixed interval, into a `backups` folder beside the journal, and on demand to wherever the user points a save dialog — the one path off this disk, since the automatic folder sits on the same disk as the journal and does not survive a failed disk. Holds no settings and no API Key; restoring one is not this surface's business.
+_Avoid_: Export, dump, save as, archive
 
 **Deletion**:
 Confirmed permanent removal of a Note or Task. There is no trash, no archive, no recovery, and no bulk deletion of Completed Tasks. Deleting an Imported Note also refuses its meeting so it is never imported again; deleting a Recurring Task also removes its completed Task Occurrence history and says so before confirmation.
@@ -217,7 +221,7 @@ Confirmed permanent removal of a Note or Task. There is no trash, no archive, no
 ## Settings
 
 **Settings**:
-What the user gets to decide about the app: the Note and Task Hotkeys, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars, and how to recover unavailable Task Alert Permission — plus Export and Update as its two actions rather than settings. A Main Window section, reached from the sidebar or named directly from the Tray Menu.
+What the user gets to decide about the app: the Note and Task Hotkeys, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars, and how to recover unavailable Task Alert Permission — plus Export, Backup and Update as its actions rather than settings. A Main Window section, reached from the sidebar or named directly from the Tray Menu.
 
 **Update**:
 Moving from the version running to a newer released one, without leaving the app: Settings looks for it, names the version found, and installs and restarts into it when the user presses again. Only when asked — the app never looks on its own schedule. The release it finds is the project's own latest, and the bundle is refused unless it is signed by the key this build was compiled to trust. First-time installation is still the DMG, and still needs the quarantine attribute cleared; an update does not, because the app unpacks it itself.
