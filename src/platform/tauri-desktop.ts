@@ -10,6 +10,7 @@ import { getVersion } from '@tauri-apps/api/app'
 import { invoke } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
 import { LogicalSize } from '@tauri-apps/api/dpi'
+import { downloadDir, join } from '@tauri-apps/api/path'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { save, type SaveDialogOptions } from '@tauri-apps/plugin-dialog'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
@@ -249,11 +250,18 @@ export function createTauriDesktop(): Desktop {
 
     // The picker and the write are two invocations, sequenced by the caller:
     // a `null` here means the user cancelled, and no backup call follows.
-    chooseBackupLocation: async () => {
-      // The Rust side already suggests the timestamped name and starts in
-      // Downloads; this passes its own options straight through so the
-      // dialog is the OS's and the defaults are decided in one place.
-      const options: SaveDialogOptions = {}
+    //
+    // The dialog is opened here rather than by a Rust command, for the same
+    // reason `exportJournal`'s filename is rendered by the journal core and
+    // this side only carries it across: the name a backup suggests is the
+    // name `backupJournal`'s own `snapshot_file_name` writes, so both ends
+    // read it from `desktop.ts` and cannot drift. The defaultPath carries
+    // the Downloads folder and the timestamped name together, so the common
+    // case is one confirm.
+    async chooseBackupLocation() {
+      const options: SaveDialogOptions = {
+        defaultPath: await join(await downloadDir(), backupFileName()),
+      }
       return save(options)
     },
 
@@ -299,4 +307,23 @@ export function createTauriDesktop(): Desktop {
 
     showTrayCount: (title) => invoke('show_tray_count', { title }),
   }
+}
+
+/**
+ * The filename the save dialog is offered, and the one the automatic
+ * snapshots are written under: the same format both ways, so the manual and
+ * the automatic backups read as one family in whatever folder they land in.
+ * It lives beside `backupJournal` rather than inside it so the dialog's
+ * suggestion and the command's validation read as one decision.
+ */
+function backupFileName(): string {
+  // UTC, second-precise: the same clock the automatic snapshot names itself
+  // by, so a name sorts with its own instant wherever the file ends up.
+  const instant = new Date()
+  const pad = (part: number) => String(part).padStart(2, '0')
+  const stamp =
+    `${instant.getUTCFullYear()}${pad(instant.getUTCMonth() + 1)}` +
+    `${pad(instant.getUTCDate())}T${pad(instant.getUTCHours())}` +
+    `${pad(instant.getUTCMinutes())}${pad(instant.getUTCSeconds())}`
+  return `work-journal-${stamp}.db`
 }

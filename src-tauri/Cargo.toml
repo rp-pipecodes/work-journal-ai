@@ -43,10 +43,7 @@ keyring = "4.2.0"
 # already manages.
 reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls"] }
 # The save dialog behind the manual backup — and #161's open dialog after it.
-# `sync` rides along on tokio for the one-shot the dialog's callback resolves;
-# see choose_backup_location in src-tauri/src/lib.rs.
 tauri-plugin-dialog = { version = "2.7.3" }
-tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }

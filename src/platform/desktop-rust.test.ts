@@ -298,9 +298,6 @@ describe('the commands that can block on a person', () => {
     // The two that already carry the rule, here so it reads as a rule.
     'request_calendar_access',
     'request_task_alert_permission',
-    // The save dialog is the system's, and the app must not sit frozen
-    // behind it while the user reads it.
-    'choose_backup_location',
   ]
 
   it('runs the backup status read off the main thread with its siblings', () => {
@@ -323,7 +320,6 @@ describe('the commands that can block on a person', () => {
 
     for (const command of [
       'automatic_backups',
-      'choose_backup_location',
       'backup_journal',
       'reveal_backups',
     ]) {
@@ -433,6 +429,51 @@ describe('the arguments commands are invoked with', () => {
 
     const unaccounted = withPayload.filter((command) => !(command in invoked))
     expect(unaccounted, unaccounted.join('; ')).toEqual([])
+  })
+})
+
+/**
+ * The manual backup's save dialog, checked where the drift actually happens:
+ * `tauri-desktop.ts` opens the dialog from the webview — there is no Rust
+ * command between the button and the OS — so the suggestion the user is
+ * offered lives entirely on this side. A dialog with no `defaultPath` offers
+ * no name and no folder, and the user meets it in whatever directory the OS
+ * last had open: ADR 0032's "the dialog is offered the timestamped name, in
+ * Downloads, so the common case is one confirm" quietly false. The test
+ * reads `tauri-desktop.ts` and holds the dialog to what the ADR says.
+ */
+describe('the manual backup save dialog', () => {
+  const tauriDesktopSource = read('src/platform/tauri-desktop.ts')
+
+  it('offers a defaultPath built from the Downloads folder and the backup name', () => {
+    const choose = tauriDesktopSource.match(
+      /async chooseBackupLocation\(\) \{([\s\S]*?)\n\s*\},/,
+    )?.[1]
+    expect(
+      choose,
+      'chooseBackupLocation is not where it is expected to be',
+    ).toBeTruthy()
+
+    // The suggestion is one path, assembled where it is used: the folder and
+    // the name together, as one `defaultPath`.
+    expect(choose).toContain('defaultPath')
+    expect(choose).toContain('downloadDir()')
+    expect(choose).toContain('backupFileName()')
+  })
+
+  it('names the backup by the same convention the snapshots use', () => {
+    // `work-journal-` + UTC second-precise stamp + `.db` — the format ADR
+    // 0032 names, and the one the automatic snapshots carry. A manual backup
+    // suggested under any other name would read as a different family of
+    // file from the ones the app makes on its own.
+    const name = tauriDesktopSource.match(/function backupFileName[^\n]*\{([\s\S]*?)\n\}/)?.[1]
+    expect(name, 'backupFileName is not where it is expected to be').toBeTruthy()
+    expect(name).toContain('work-journal-')
+    expect(name).toContain('.db')
+    // UTC: the stamp has to be the same instant the Rust side would have
+    // written, so a manual and an automatic backup taken in the same second
+    // agree letter for letter.
+    expect(name).toMatch(/getUTCFullYear\(|getUTCMonth\(|getUTCDate\(|getUTCHours\(|getUTCMinutes\(|getUTCSeconds\(/)
   })
 })
 

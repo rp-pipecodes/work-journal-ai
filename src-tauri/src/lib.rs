@@ -258,7 +258,6 @@ pub fn run() {
             clear_api_key,
             generate_standup_post,
             automatic_backups,
-            choose_backup_location,
             backup_journal,
             reveal_backups
         ])
@@ -1229,52 +1228,9 @@ fn automatic_backups(app: tauri::AppHandle) -> Result<backup::AutomaticBackups, 
     Ok(backup::automatic_backups(&directory))
 }
 
-/// Opens the save dialog and answers with the path the user chose, or `None`
-/// for a cancelled one. One moment of the one gesture — the destination is the
-/// user's choice, made here, and the write that follows is `backup_journal`'s
-/// moment, so the button that started both stays honest about which one it is
-/// waiting on. The dialog is offered the timestamped name, in Downloads, so
-/// the common case is one confirm. The callback resolves the command's
-/// channel: the dialog is the OS's, the app must not hold the main thread
-/// while it is up.
-#[tauri::command(async)]
-async fn choose_backup_location(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    let suggested = backup::snapshot_file_name(std::time::SystemTime::now());
-    let start = app
-        .path()
-        .download_dir()
-        .map_err(|error| format!("there is nowhere to suggest: {error}"))?;
-
-    // A one-shot is the whole contract: the dialog answers exactly once, with
-    // the path or nothing. tokio's sync feature is in the tree through the
-    // plugins' runtime; this names it directly for the first time.
-    let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
-
-    tauri_plugin_dialog::DialogExt::dialog(&app)
-        .file()
-        .set_directory(&start)
-        .set_file_name(suggested)
-        .save_file(move |destination| {
-            let chosen = destination.map(|file| match file {
-                tauri_plugin_dialog::FilePath::Path(path) => path.to_string_lossy().into_owned(),
-                // The URL form is what a mobile shell hands back; this app is
-                // desktop-only, and a path it could still name is kept.
-                tauri_plugin_dialog::FilePath::Url(url) => url.to_string(),
-            });
-            let _ = tx.send(chosen);
-        });
-
-    // The dialog lives on the main thread; the answer comes back on its own.
-    match rx.await {
-        // The folder was offered before the dialog opened; all that is left
-        // is what the user answered with.
-        Ok(chosen) => Ok(chosen),
-        Err(_) => Err("the dialog could not be shown".to_string()),
-    }
-}
-
 /// Writes the snapshot to the destination the save dialog just answered with —
-/// the second moment of the gesture begun in `choose_backup_location`.
+/// the second moment of the one gesture: the webview opened the dialog, this
+/// writes what it came back with.
 ///
 /// The destination arrives over IPC, so it is validated here rather than
 /// trusted: only a plain, absolute file name the dialog itself would have
