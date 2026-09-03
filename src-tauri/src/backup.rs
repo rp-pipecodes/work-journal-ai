@@ -11,6 +11,8 @@
 
 use serde::Serialize;
 use sqlx::SqlitePool;
+use crate::export::free_path;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -81,6 +83,25 @@ pub fn plain_destination(destination: &str) -> Option<String> {
         return Some(candidate.to_string_lossy().into_owned());
     }
     None
+}
+
+/// Where a manual backup actually goes. The save dialog owns the overwrite
+/// question — it shows "Replace?" and the user answers it — so by the time a
+/// destination arrives here, any collision it names has been confirmed.
+/// Rather than answer it again with a refusal, the name is settled to the
+/// first free sibling (`…-2.db`, `-3.db`, …) exactly as export does, and
+/// nothing that was on disk is ever replaced, renamed or deleted by a backup.
+/// The snapshot must not care where it landed: the toast reports the settled
+/// path, which is why `BackupResult` carries it back.
+pub fn settle_destination(directory: &Path, file_name: &str) -> io::Result<PathBuf> {
+    let plain =
+        plain_destination(file_name).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("not a plain file name: {file_name}"),
+            )
+        })?;
+    free_path(directory, Path::new(&plain))
 }
 
 /// The whole automatic pass: whether a snapshot is due given what is already
@@ -539,6 +560,39 @@ mod tests {
             plain_destination("work-journal-20260903T084500.db").as_deref(),
             Some("work-journal-20260903T084500.db")
         );
+    }
+
+    #[test]
+    fn a_taken_destination_settles_beside_rather_than_on_what_is_there() {
+        let directory = TempDir::new("settle-beside");
+        let taken = directory.path.join("work-journal-20260903T084500.db");
+        std::fs::write(&taken, "the file the dialog asked about replacing").unwrap();
+
+        let settled =
+            settle_destination(&directory.path, "work-journal-20260903T084500.db")
+                .expect("a taken name must settle beside, not refuse");
+
+        assert_eq!(
+            settled.file_name().unwrap().to_string_lossy(),
+            "work-journal-20260903T084500-2.db"
+        );
+        // The file the dialog's "Replace?" was about is still there, whole.
+        assert_eq!(
+            std::fs::read_to_string(&taken).unwrap(),
+            "the file the dialog asked about replacing"
+        );
+    }
+
+    #[test]
+    fn a_settlement_into_a_qualified_name_is_refused() {
+        let directory = TempDir::new("settle-refuses-paths");
+
+        for name in ["../escaped.db", "nested/notes.db", "  "] {
+            assert!(
+                settle_destination(&directory.path, name).is_err(),
+                "{name} should not be a file name to settle"
+            );
+        }
     }
 
     #[test]

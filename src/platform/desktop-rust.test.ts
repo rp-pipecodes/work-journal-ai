@@ -433,6 +433,47 @@ describe('the arguments commands are invoked with', () => {
 })
 
 /**
+ * The overwrite question is the save dialog's alone: it is the one that
+ * shows "Replace?" and the user answers it there. A command that answers
+ * it again — `path.exists()` and a hard error — turns the dialog's own
+ * confirmation into "Could not back up the journal." The contract instead
+ * settles the write beside whatever is there, exactly as export's
+ * `free_path` does, and carries the settled path back so the toast names
+ * where the snapshot actually went. Nothing on disk is ever replaced,
+ * renamed or deleted to make room for a backup.
+ */
+describe('the manual backup settles beside rather than refuses', () => {
+  /** The body of the backup_journal command, extracted whole. */
+  function commandBody(): string {
+    const body = rustSource.match(/async fn backup_journal\([\s\S]*?\n\}\n/)?.[0]
+    if (body === undefined) {
+      throw new Error('backup_journal is not a command in ' + RUST_FILE)
+    }
+    return body
+  }
+
+  it('settles the destination instead of refusing what the dialog confirmed', () => {
+    const body = commandBody()
+    expect(body).toContain('settle_destination')
+    // The refusal this replaces: a taken path answered with an error after
+    // the dialog had already asked the user about it.
+    expect(body).not.toContain('.exists()')
+  })
+
+  it('reports where the snapshot went, not where it was asked', () => {
+    const body = commandBody()
+    // BackupResult is built from the settled destination — otherwise the
+    // toast would name a file that is not the one holding the snapshot.
+    expect(body).toMatch(/path:\s*destination/)
+  })
+
+  it('mirrors the settlement in the testing desktop the webview tests run on', () => {
+    const fake = read('src/platform/testing/desktop.ts')
+    expect(fake).toContain('nextSibling(path, desktop.backups)')
+  })
+})
+
+/**
  * The manual backup's save dialog, checked where the drift actually happens:
  * `tauri-desktop.ts` opens the dialog from the webview — there is no Rust
  * command between the button and the OS — so the suggestion the user is

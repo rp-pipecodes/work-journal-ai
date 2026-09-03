@@ -65,6 +65,17 @@ snapshot is #161's problem; nothing here renames, replaces or deletes
   where and writing there are two Desktop operations (`chooseBackupLocation`,
   `backupJournal`), one gesture to the user and two moments to the app, the
   same split `installUpdate` and `restart` already make.
+- **The overwrite question is asked once, by the save dialog, and the answer
+  is never second-guessed with a refusal.** The dialog is the one that shows
+  "Replace?"; a command that then answers `path.exists()` with a hard error
+  would turn the user's own confirmation into "Could not back up the
+  journal." A name nevertheless taken by the time the write runs — or a
+  dialog whose Replace the user accepted — is settled beside, `-2.db`,
+  `-3.db`, exactly as export's `free_path` does, and `VACUUM INTO` could not
+  overwrite a file in any case without deleting it first, which a backup
+  must never do. Nothing on disk is replaced, renamed or deleted to make
+  room for a snapshot, and `BackupResult` carries the settled path so the
+  toast names the file that is really there.
 - **The filename carries its instant**: `work-journal-YYYYMMDDTHHMMSS.db`, UTC,
   parsed back to the instant it names — pruning reads it rather than the file
   system's mtime. The extension is `.db`; a backup is a SQLite file, not a

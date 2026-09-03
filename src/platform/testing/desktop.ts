@@ -454,9 +454,14 @@ export function fakeDesktop({
       if (desktop.backupFails) {
         throw new Error('The snapshot could not be written.')
       }
-      desktop.backups.push(path)
-      const fileName = path.split('/').pop() ?? path
-      return { path, fileName }
+      // Mirrors backup_journal's settlement: a path the dialog offered to
+      // replace is already occupied, so the write lands beside it — `-2`,
+      // `-3` — rather than on what is there. The result carries where the
+      // snapshot actually went, which is what the toast names.
+      const settled = desktop.backups.includes(path) ? nextSibling(path, desktop.backups) : path
+      desktop.backups.push(settled)
+      const fileName = settled.split('/').pop() ?? settled
+      return { path: settled, fileName }
     },
 
     revealBackups: async () => {
@@ -564,4 +569,18 @@ function subscribers<T>() {
       for (const handle of handlers) handle(value)
     },
   }
+}
+
+/// The next free sibling of a taken name — `name.ext` → `name-2.ext` — the
+/// same settlement `export.rs`'s `free_path` performs on the Rust side.
+function nextSibling(path: string, existing: string[]): string {
+  const dot = path.lastIndexOf('.')
+  const slash = path.lastIndexOf('/')
+  const stem = dot > slash ? path.slice(0, dot) : path
+  const extension = dot > slash ? path.slice(dot) : ''
+  let attempt = 2
+  while (existing.includes(`${stem}-${attempt}${extension}`)) {
+    attempt += 1
+  }
+  return `${stem}-${attempt}${extension}`
 }

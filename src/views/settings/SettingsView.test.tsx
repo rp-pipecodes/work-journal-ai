@@ -836,6 +836,27 @@ describe('Backup', () => {
     ])
   })
 
+  it('backs up beside the file the dialog asked about replacing, and says so', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    // The dialog offered to replace a path that is occupied — the user
+    // answered its "Replace?" — so the snapshot settles beside it and the
+    // result names where it actually went, not where it was asked.
+    desktop.backups.push('/Volumes/Offsite/work-journal-20260903T084500.db')
+    desktop.chosenBackupLocation = '/Volumes/Offsite/work-journal-20260903T084500.db'
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Back up now' })).click()
+
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Backed up to /Volumes/Offsite/work-journal-20260903T084500-2.db.')
+    expect(desktop.backups).toEqual([
+      '/Volumes/Offsite/work-journal-20260903T084500.db',
+      '/Volumes/Offsite/work-journal-20260903T084500-2.db',
+    ])
+  })
+
   it('reads Backing up… only while the write happens, not while the user browses', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
     desktop.chosenBackupLocation = '/tmp/work-journal-20260903T084500.db'

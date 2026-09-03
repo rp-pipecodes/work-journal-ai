@@ -325,6 +325,7 @@ The snapshot items are checked with `sqlite3` (ships with macOS). A first launch
 - [ ] Quitting and relaunching inside a minute creates no second snapshot — at most one per interval.
 - [ ] **Settings › Backup** names when the last automatic backup was taken, and that line agrees with the newest file in the folder.
 - [ ] **Back up now** opens a save dialog suggested in Downloads under the timestamped name; confirming writes the file there, and the toast and the line under the button both name the path.
+- [ ] Backing up over a name that is already taken — confirm the dialog's "Replace?" — does not refuse: the snapshot lands beside the taken file as `…-2.db`, the toast names that sibling, and the taken file is unchanged on disk.
 - [ ] `sqlite3 <the Downloads file> "SELECT COUNT(*) FROM notes;"` agrees with History, and the file opens standalone.
 - [ ] Cancelling the dialog writes nothing anywhere, says "Backup cancelled." in the toast, and reports no error.
 - [ ] The button reads **Backing up…** only while the write happens — with the dialog still open, the button still reads **Back up now**.

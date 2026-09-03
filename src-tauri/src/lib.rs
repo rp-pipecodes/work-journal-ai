@@ -1232,49 +1232,60 @@ fn automatic_backups(app: tauri::AppHandle) -> Result<backup::AutomaticBackups, 
 /// the second moment of the one gesture: the webview opened the dialog, this
 /// writes what it came back with.
 ///
-/// The destination arrives over IPC, so it is validated here rather than
-/// trusted: only a plain, absolute file name the dialog itself would have
-/// produced is written to, and only when nothing is already sitting there.
-/// The directory the name is taken relative to is made here, from the app's
-/// own paths — the webview names a file, this side decides everything else.
+/// The overwrite question belongs to the save dialog alone: it is the one
+/// that shows "Replace?" and the user answers it there. A name that is
+/// nevertheless taken by the time the write runs is not refused — refusing
+/// would turn the dialog's own confirmation into "Could not back up the
+/// journal." — but settled beside it, `-2.db`, `-3.db`, and so on, exactly
+/// as export does. Nothing on disk is ever replaced, renamed or deleted to
+/// make room for a backup, and `VACUUM INTO` could not overwrite a file
+/// even if asked to.
 ///
-/// A destination that is not absolute, or that would clobber a file the user
-/// was never asked about overwriting, is refused before any statement runs.
-/// The parameter is named for what the webview sends — `path`, as
-/// `backupJournal` in `src/platform/desktop.ts` invokes it — because a
-/// mismatched argument name is refused before this body runs, and says
-/// nothing. `desktop-rust.test.ts` holds the pair together.
+/// The destination arrives over IPC, so it is validated here rather than
+/// trusted: reined back to a plain, absolute file name, and settled inside a
+/// directory this side chose or the dialog confirmed. The parameter is named
+/// for what the webview sends — `path`, as `backupJournal` in
+/// `src/platform/desktop.ts` invokes it — because a mismatched argument name
+/// is refused before this body runs, and says nothing. `desktop-rust.test.ts`
+/// holds the pair together.
 #[tauri::command(async)]
 async fn backup_journal(
     _app: tauri::AppHandle,
     databases: tauri::State<'_, DbInstances>,
     path: String,
 ) -> Result<BackupResult, String> {
-    let destination = std::path::Path::new(&path);
-    if !destination.is_absolute() {
+    let chosen = std::path::Path::new(&path);
+    if !chosen.is_absolute() {
         return Err("the destination is not a path this dialog could have given".to_string());
     }
     // The file name alone is what carries the name; the directory it sits in
     // must be a directory the OS dialog, not the webview, chose.
-    let file_name = destination
+    let file_name = chosen
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
-    backup::plain_destination(&file_name)
-        .ok_or_else(|| "the destination is not a plain file name".to_string())?;
-    if destination.exists() {
-        return Err("there is already a file there".to_string());
-    }
 
     let pool = journal_pool(databases).await?;
+
+    // Settle after the pool, before the write: the first free sibling of the
+    // chosen name in the chosen directory. In the common case the name is
+    // free and this is a no-op.
+    let directory = chosen
+        .parent()
+        .ok_or_else(|| "the destination has no directory".to_string())?;
+    let destination = backup::settle_destination(directory, &file_name)
+        .map_err(|error| error.to_string())?;
     if let Some(parent) = destination.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    backup::take_snapshot(destination, &pool).await?;
+    backup::take_snapshot(&destination, &pool).await?;
 
     Ok(BackupResult {
-        path,
-        file_name,
+        path: destination.to_string_lossy().into_owned(),
+        file_name: destination
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default(),
     })
 }
 
