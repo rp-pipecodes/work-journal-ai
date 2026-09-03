@@ -127,10 +127,22 @@ export async function buildStandupPostInput({
     selection.completedTasks.length > 0 ||
     selection.completedOccurrences.length > 0
   ) {
+    // Work kept yesterday is one set, so the section reads newest completion
+    // first across both record types. Completed At is non-null on both sides
+    // by construction — `selectStandupPost` filters the Tasks, and the range
+    // read's query asks for completed occurrences only — so the fallback
+    // never fires and is spelled as the absence it is.
     const bullets = [
-      ...selection.completedOccurrences.map(occurrenceBullet),
-      ...selection.completedTasks.map((task) => taskBullet(task)),
-    ]
+      ...selection.completedOccurrences.map((completed) => ({
+        completedAt: completed.occurrence.completedAt ?? '',
+        bullet: occurrenceBullet(completed),
+      })),
+      ...selection.completedTasks.map((task) => ({
+        completedAt: task.completedAt ?? '',
+        bullet: taskBullet(task),
+      })),
+    ].sort((one, other) => (one.completedAt < other.completedAt ? 1 : -1))
+      .map((one) => one.bullet)
     parts.push(`## Completed yesterday\n${bullets.join('\n')}`)
   }
   if (selection.openTasks.length > 0) {

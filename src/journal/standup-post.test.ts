@@ -208,6 +208,38 @@ describe('buildStandupPostInput', () => {
 - [ ] today (scheduled 2026-03-12 17:00)`)
   })
 
+  it('reads Completed yesterday newest completion first across both record types', async () => {
+    // The occurrence is kept at 09:00 and the ordinary Task completed at
+    // 18:00 the same day, so the concatenation the section used before would
+    // read the occurrence first; the section is one set of work kept, and
+    // reads newest completion first whoever owns the record.
+    const { journal, clock } = await journalAt('2026-03-11T08:00:00')
+    const daily = await journal.createTask(
+      'water the plants',
+      { date: '2026-03-11', time: '09:00' },
+      { unit: 'day', interval: 1, weekdays: [] },
+    )
+
+    clock.set(new Date('2026-03-11T09:15:00'))
+    await journal.completeTask(daily.id)
+    clock.set(new Date('2026-03-11T18:00:00'))
+    const ordinary = await journal.createTask('chase the invoice')
+    await journal.completeTask(ordinary.id)
+
+    clock.set(new Date('2026-03-12T09:00:00'))
+    await journal.editTask(daily.id, {
+      description: 'water the plants',
+      schedule: { date: '2026-03-16', time: '09:00' },
+    })
+
+    const selection = await selectStandupPost({ journal, clock })
+    const userContent = await buildStandupPostInput({ journal, selection })
+
+    expect(userContent).toBe(`## Completed yesterday
+- [x] chase the invoice
+- [x] water the plants (occurrence 2026-03-11 09:00)`)
+  })
+
   it('sends yesterday alone when there is nothing still to do', async () => {
     const { journal, clock } = await journalAt('2026-03-12T09:00:00')
 

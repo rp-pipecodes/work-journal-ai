@@ -834,18 +834,19 @@ const SELECT_COMPLETED_OCCURRENCES_FOR_EXPORT = `
  * of Journal Days, so the bounds are the UTC instants of the range's own
  * local midnights — bound by the caller, below, because a Journal Day's
  * midnight is the local calendar's, not UTC's. The parent Task rides along
- * on the join, aliased throughout because the two tables name their columns
- * alike.
+ * on the join: only the Task's columns are aliased, because `id` and the
+ * recurrence columns are the ones the two tables name alike, and the
+ * occurrence columns read as themselves straight into `toOccurrence`.
  */
 const SELECT_COMPLETED_OCCURRENCES_IN_RANGE = `
   SELECT
-    o.id AS o_id,
-    o.task_id AS o_task_id,
-    o.scheduled_date AS o_scheduled_date,
-    o.scheduled_time AS o_scheduled_time,
-    o.completed_at AS o_completed_at,
-    o.created_at AS o_created_at,
-    o.advanced_from AS o_advanced_from,
+    o.id,
+    o.task_id,
+    o.scheduled_date,
+    o.scheduled_time,
+    o.completed_at,
+    o.created_at,
+    o.advanced_from,
     t.id AS t_id,
     t.description AS t_description,
     t.created_at AS t_created_at,
@@ -861,15 +862,12 @@ const SELECT_COMPLETED_OCCURRENCES_IN_RANGE = `
   ORDER BY o.completed_at DESC, o.id DESC
 `
 
-/** The joined row of the read above: an occurrence and its Task, aliased. */
-interface CompletedOccurrenceRow {
-  o_id: string
-  o_task_id: string
-  o_scheduled_date: string
-  o_scheduled_time: string | null
-  o_completed_at: string | null
-  o_created_at: string
-  o_advanced_from: string | null
+/**
+ * The joined row of the read above: the occurrence's own columns, plus the
+ * Task's beside them under their aliases. Extends `TaskOccurrenceRow` so the
+ * occurrence needs no remap — only the Task is lifted out by hand.
+ */
+interface CompletedOccurrenceRow extends TaskOccurrenceRow {
   t_id: string
   t_description: string
   t_created_at: string
@@ -1394,15 +1392,7 @@ export function createJournal({
           recurrence_weekdays: row.t_recurrence_weekdays,
           recurrence_anchor_date: row.t_recurrence_anchor_date,
         }),
-        occurrence: toOccurrence({
-          id: row.o_id,
-          task_id: row.o_task_id,
-          scheduled_date: row.o_scheduled_date,
-          scheduled_time: row.o_scheduled_time,
-          completed_at: row.o_completed_at,
-          created_at: row.o_created_at,
-          advanced_from: row.o_advanced_from,
-        }),
+        occurrence: toOccurrence(row),
       }))
     },
 
