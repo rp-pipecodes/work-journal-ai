@@ -939,6 +939,23 @@ describe('Backup', () => {
     await expect.poll(() => desktop.backupsRevealed).toBe(1)
   })
 
+  it('says so when revealing fails, in the toast and on the line', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.revealFails = true
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Reveal backups' })).click()
+
+    await expect
+      .poll(() => toasts().join(' | '))
+      .toBe('Could not reveal the backups.')
+    expect(backupStatus()).toBe('Could not reveal the backups.')
+    // The failure is the whole story: nothing was revealed.
+    expect(desktop.backupsRevealed).toBe(0)
+  })
+
   it('keeps its promise small: no Key, no Hotkeys, no settings, no safety claim', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
 

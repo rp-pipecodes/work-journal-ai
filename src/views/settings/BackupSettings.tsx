@@ -94,6 +94,20 @@ export default function BackupSettings({ desktop }: { desktop: Desktop }) {
     })()
   }
 
+  /**
+   * Revealing can fail like any other operation here — the folder may be
+   * gone, or the Finder refuse — so its failure is said the way the write's
+   * is: a toast where the user is looking, the line for after.
+   */
+  function revealBackups() {
+    void desktop.revealBackups().catch((error: unknown) => {
+      console.error('could not reveal the backups', error)
+      const said = 'Could not reveal the backups.'
+      says.failure(said)
+      setStatus(said)
+    })
+  }
+
   return (
     <SettingsGroup>
       <SettingsRow
@@ -109,11 +123,7 @@ export default function BackupSettings({ desktop }: { desktop: Desktop }) {
           >
             {backingUp ? 'Backing up…' : 'Back up now'}
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void desktop.revealBackups()}
-          >
+          <Button variant="outline" size="sm" onClick={revealBackups}>
             Reveal backups
           </Button>
         </div>

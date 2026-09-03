@@ -63,6 +63,8 @@ export interface FakeDesktop extends Desktop {
   automaticBackupStatus: AutomaticBackups
   /** How many times the backups folder was revealed. */
   backupsRevealed: number
+  /** Whether revealing fails, as it does when the folder is gone. */
+  revealFails: boolean
   /** Every size the Capture window was asked to take, most recent last. */
   fits: CaptureFit[]
   /** What is beside the menu bar glyph; null until something is put there. */
@@ -224,6 +226,7 @@ export function fakeDesktop({
     backupFails: false,
     automaticBackupStatus: { count: 0, newestTakenAt: null },
     backupsRevealed: 0,
+    revealFails: false,
     fits: [],
     trayTitle: null,
     clipboard: null,
@@ -465,6 +468,9 @@ export function fakeDesktop({
     },
 
     revealBackups: async () => {
+      if (desktop.revealFails) {
+        throw new Error('The backups folder could not be opened.')
+      }
       desktop.backupsRevealed += 1
     },
 

@@ -33,6 +33,7 @@ import {
   TASKS_SECTION,
   THEME_KEY,
 } from './desktop'
+import { backupFileName } from './tauri-desktop'
 
 const TEST_FILE = 'src/platform/desktop-rust.test.ts'
 const RUST_FILE = 'src-tauri/src/lib.rs'
@@ -549,17 +550,14 @@ describe('the manual backup save dialog', () => {
 
   it('names the backup by the same convention the snapshots use', () => {
     // `work-journal-` + UTC second-precise stamp + `.db` — the format ADR
-    // 0032 names, and the one the automatic snapshots carry. A manual backup
-    // suggested under any other name would read as a different family of
-    // file from the ones the app makes on its own.
-    const name = tauriDesktopSource.match(/function backupFileName[^\n]*\{([\s\S]*?)\n\}/)?.[1]
-    expect(name, 'backupFileName is not where it is expected to be').toBeTruthy()
-    expect(name).toContain('work-journal-')
-    expect(name).toContain('.db')
-    // UTC: the stamp has to be the same instant the Rust side would have
-    // written, so a manual and an automatic backup taken in the same second
-    // agree letter for letter.
-    expect(name).toMatch(/getUTCFullYear\(|getUTCMonth\(|getUTCDate\(|getUTCHours\(|getUTCMinutes\(|getUTCSeconds\(/)
+    // 0032 names, and the one the automatic snapshots carry. Asserted on the
+    // produced string for a known instant rather than on the body's words:
+    // a missing `T` or a wrong separator would otherwise read as fine. A
+    // manual backup suggested under any other name would read as a different
+    // family of file from the ones the app makes on its own.
+    expect(backupFileName(new Date(Date.UTC(2026, 8, 3, 8, 45, 0)))).toBe(
+      'work-journal-20260903T084500.db',
+    )
   })
 })
 

@@ -316,10 +316,9 @@ export function createTauriDesktop(): Desktop {
  * It lives beside `backupJournal` rather than inside it so the dialog's
  * suggestion and the command's validation read as one decision.
  */
-function backupFileName(): string {
+export function backupFileName(instant: Date = new Date()): string {
   // UTC, second-precise: the same clock the automatic snapshot names itself
   // by, so a name sorts with its own instant wherever the file ends up.
-  const instant = new Date()
   const pad = (part: number) => String(part).padStart(2, '0')
   const stamp =
     `${instant.getUTCFullYear()}${pad(instant.getUTCMonth() + 1)}` +
