@@ -404,6 +404,26 @@ export interface Journal {
    */
   editProject(id: string, project: string | null): Promise<Note>
   /**
+   * Changes one Project into another on every Note filed under it, in one
+   * operation. Correcting a typo, or renaming a stream of work — the filing of
+   * a whole stream is one decision, not one edit per Note. There is no
+   * registry to update and no Body text to rewrite: Projects are values on
+   * Notes, so the rename is the UPDATE, and the Notes are what carries it.
+   *
+   * Both names are normalized and validated by the same rules a single filing
+   * obeys. A target with Notes of its own is merged into: the streams become
+   * one, and no duplicate Project can outlive the operation. A target that is
+   * the source after normalization does nothing and marks nothing edited.
+   *
+   * Every moved Note receives the same Edited At instant — the rename is one
+   * decision about the stream, applied at one moment — and Captured At, Body
+   * and Journal Day are untouched. A source with no Notes under it is refused:
+   * a rename that moved nothing would report a correction the record never
+   * made, and with no registry there is nothing left of the name to be true
+   * about.
+   */
+  renameProject(from: string, to: string): Promise<void>
+  /**
    * Removes a Note permanently. There is no trash, no archive and no
    * `deleted_at` — the row is gone, and with it every Filter and Digest it
    * appeared in.
@@ -981,6 +1001,18 @@ const UPDATE_PROJECT = `
   UPDATE notes SET project = ?, edited_at = ? WHERE id = ?
 `
 
+/**
+ * The whole of a Project rename: one statement, because the Project is a value
+ * on the Note and not a row anywhere else. There is no registry to update and
+ * no Body text to rewrite — see docs/adr/0007-project-is-first-class-filing.md
+ * — so renaming a stream is this, and merging two streams is this too: every
+ * Note under the source is filed under the target, and nothing distinguishes
+ * a merged Note from a filed one afterwards.
+ */
+const UPDATE_PROJECT_EVERYWHERE = `
+  UPDATE notes SET project = ?, edited_at = ? WHERE project = ?
+`
+
 const DELETE_NOTE = `
   DELETE FROM notes WHERE id = ?
 `
@@ -1078,6 +1110,18 @@ const SELECT_PROJECTS_IN_USE = `
   FROM notes
   WHERE project IS NOT NULL
   ORDER BY project ASC
+`
+
+/**
+ * Whether a Project still has Notes under it, counted rather than read: a
+ * rename refuses a source that has none, so a caller never reports a rename
+ * that moved nothing — and with no registry, the Notes are the only place the
+ * answer lives.
+ */
+const COUNT_NOTES_UNDER_PROJECT = `
+  SELECT COUNT(*) AS count
+  FROM notes
+  WHERE project = ?
 `
 
 /**
@@ -1227,6 +1271,29 @@ export function createJournal({
       await driver.execute(UPDATE_PROJECT, [next, editedAt, id])
 
       return { ...note, project: next, editedAt }
+    },
+
+    async renameProject(from, to) {
+      // Both names are asked of the same rule a single filing obeys, and the
+      // target first: refusing a nonsense name before reading anything keeps
+      // the journal exactly as it was.
+      const target = projectName(to)
+      const source = projectName(from)
+
+      // The same Project, however it was spelled: a rename to itself moves no
+      // Note and marks none edited, like filing a Note under its own Project.
+      if (target === source) return
+
+      const [row] = await driver.select<{ count: number }>(
+        COUNT_NOTES_UNDER_PROJECT,
+        [source],
+      )
+      if (row === undefined || row.count === 0) {
+        throw new Error(`No Notes are filed under ${formatProject(source)}.`)
+      }
+
+      const editedAt = clock.now().toISOString()
+      await driver.execute(UPDATE_PROJECT_EVERYWHERE, [target, editedAt, source])
     },
 
     async delete(id) {
@@ -3261,8 +3328,13 @@ export function isProjectName(project: string): boolean {
   }
 }
 
-/** The same rule for a name that is definitely one: a Project, or an error. */
-function projectName(project: string): string {
+/**
+ * The same rule for a name that is definitely one: a Project, or an error.
+ * Exported because a caller can hold a Project by name — a Filter narrowed to
+ * one — and has to compare it with a name the way the record stores it, which
+ * is a rule of the record's and not of the caller's.
+ */
+export function projectName(project: string): string {
   const name = project.trim().toLowerCase()
   if (name === '' || !/^[a-z0-9_-]+$/.test(name)) {
     throw new Error(`Not a Project: ${project}.`)
