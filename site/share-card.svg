@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <!-- The social share card for og:image: the page's light palette on a dark
+       ground, so it holds up wherever it is pasted. The PNG under the page is
+       rendered from this at exactly 1200x630. -->
+  <rect width="1200" height="630" fill="#161513"/>
+
+  <!-- The mark, drawn in the page's ink at its light value. -->
+  <g fill="#ece8e2">
+    <circle cx="228" cy="163" r="18"/>
+    <rect x="276" y="146" width="172" height="34" rx="17"/>
+    <circle cx="228" cy="239" r="18"/>
+    <rect x="276" y="222" width="140" height="34" rx="17"/>
+    <circle cx="228" cy="315" r="18" opacity="0.4"/>
+  </g>
+  <rect x="276" y="296" width="32" height="40" rx="11" fill="#e0913a"/>
+
+  <text x="210" y="447" fill="#ece8e2" font-family="-apple-system, 'Helvetica Neue', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="64" font-weight="700" letter-spacing="-1.5">Work Journal</text>
+
+  <text x="210" y="512" fill="#9a938a" font-family="-apple-system, 'Helvetica Neue', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="28">A local-first log of short work notes — and the tasks that go with them.</text>
+</svg>
