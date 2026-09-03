@@ -278,6 +278,7 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 
 Requires the release build: macOS will not hold a notification for a binary with no bundle. Run these on a machine whose notification settings for Work Journal you are willing to change.
 
+- [ ] `codesign -dv --verbose=2 "src-tauri/target/release/bundle/macos/Work Journal.app"` reports `Identifier=com.pipecodes.work-journal` and an `Info.plist entries` count, rather than a generated `app-*` identifier and `Info.plist=not bound`.
 - [ ] Creating the first Task with a date **and** a time from the Task Creation window raises the macOS notification prompt after the window has gone, in front of whatever is on screen.
 - [ ] Saving the first Task with a date **and** a time raises the macOS notification prompt — and nothing raised it at first launch, before any Task had a time.
 - [ ] Allowing it leaves the Task exactly as saved; **Settings › Task Alerts** then reads **Allowed**.
