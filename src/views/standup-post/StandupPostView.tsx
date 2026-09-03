@@ -51,18 +51,31 @@ export default function StandupPostView({
   // latter so a replacement post can say so. Nothing else about a call is
   // kept, and nothing here is persisted.
   const [post, setPost] = useState<{ markdown: string; model: string } | null>(null)
+  // The material copy's confirmation, said twice — a toast for whoever is
+  // looking, and a live region for whoever is not — and naming its subject:
+  // with two Copy actions on this screen, an unqualified "Copied" would not
+  // say which of the two things landed on the clipboard. The claim is held as
+  // the selection it was made for, so it retires itself the moment the
+  // session pushes another: focus, wake, a journal or Task change, and the
+  // midnight rollover all re-read the selection, and a claim about material
+  // that re-read may have replaced is not true anymore.
+  const [materialClaim, setMaterialClaim] = useState<StandupPostSelection | null>(
+    null,
+  )
+  // The material claim is true of exactly the selection it was made for.
+  const materialCopied =
+    state.state === 'ready' &&
+    materialClaim !== null &&
+    materialClaim === state.selection
   // The model being asked, while a call is in flight. Naming it is the whole
   // point: ten silent seconds read as broken without it.
   const [pending, setPending] = useState<string | null>(null)
   // Why there is no post, when there is not — one of the few kinds the call
   // answers with, rendered as one line. A previous post stays on screen.
   const [failure, setFailure] = useState<StandupFailure | null>(null)
-  // Each copy's own confirmation, said twice — a toast for whoever is looking,
-  // and a live region for whoever is not — and each naming its subject: with
-  // two Copy actions on this screen, an unqualified "Copied" would not say
-  // which of the two things landed on the clipboard. One boolean each, never a
-  // shared one, so a material copy cannot light up beside the post.
-  const [copiedMaterial, setCopiedMaterial] = useState(false)
+  // The post copy's confirmation, the same two ways. It is view state with no
+  // session behind it — the prose lives here — so it is a boolean, retired
+  // when Generate replaces the prose or a later copy fails.
   const [copiedPost, setCopiedPost] = useState(false)
   const says = useOnScreenToast()
   // A call is in flight, before the pending state has reached the button: a
@@ -149,6 +162,9 @@ export default function StandupPostView({
         says.success('Copied the standup post to the clipboard.')
       },
       (error: unknown) => {
+        // A later copy that fails retires the earlier claim: the line beside
+        // the button may not go on saying the opposite of the toast.
+        setCopiedPost(false)
         console.error('could not copy the standup post', error)
         says.failure('Could not copy the standup post.')
       },
@@ -172,9 +188,15 @@ export default function StandupPostView({
         selection: state.selection,
       })
       await desktop.copyToClipboard(material)
-      setCopiedMaterial(true)
+      // Claimed for this very selection: any re-read retires it by
+      // construction, since a new one is a new object.
+      setMaterialClaim(state.selection)
       says.success('Copied the standup material to the clipboard.')
     } catch (error) {
+      // A later copy that fails retires the earlier claim, as the post's
+      // does — the line beside the button may not go on saying the opposite
+      // of the toast.
+      setMaterialClaim(null)
       console.error('could not copy the standup material', error)
       says.failure('Could not copy the standup material.')
     }
@@ -253,7 +275,7 @@ export default function StandupPostView({
                 aria-live="polite"
                 className="type-meta text-muted-foreground"
               >
-                {copiedMaterial
+                {materialCopied
                   ? 'Copied the standup material to the clipboard.'
                   : ''}
               </span>

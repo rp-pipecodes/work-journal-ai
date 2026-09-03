@@ -289,6 +289,115 @@ describe('Standup Post section', () => {
     ).toBe('')
   })
 
+  it('stops claiming a material copy the moment the section re-reads the selection', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await standupPostAt()
+    await journalWithBothHalves(journal, clock)
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    const copyMaterial = await screen.findByRole('button', {
+      name: 'Copy material',
+    })
+    await user.click(copyMaterial)
+    await waitFor(() => {
+      expect(desktop.clipboard).not.toBeNull()
+    })
+    expect(
+      within(copyMaterial.parentElement as HTMLElement).getByRole('status')
+        .textContent,
+    ).toBe('Copied the standup material to the clipboard.')
+
+    // Focus is the routine case: alt-tab away and back re-reads the
+    // selection, and a claim about material that re-read may have replaced
+    // must not outlive it. A journal change and a midnight rollover reach
+    // the same listener.
+    desktop.focus()
+    await waitFor(() => {
+      expect(
+        within(
+          screen.getByRole('button', { name: 'Copy material' })
+            .parentElement as HTMLElement,
+        ).getByRole('status').textContent,
+      ).toBe('')
+    })
+  })
+
+  it('stops claiming a material copy when the next one fails', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await standupPostAt()
+    await journalWithBothHalves(journal, clock)
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    const copyMaterial = await screen.findByRole('button', {
+      name: 'Copy material',
+    })
+    await user.click(copyMaterial)
+    await waitFor(() => {
+      expect(desktop.clipboard).not.toBeNull()
+    })
+    desktop.copyToClipboard = async () => {
+      throw new Error('the clipboard refused')
+    }
+
+    await user.click(
+      screen.getByRole('button', { name: 'Copy material' }),
+    )
+
+    // The toast says the copy failed; the line beside the button may not go
+    // on saying the opposite.
+    await waitFor(() => {
+      if (
+        !document.body.textContent?.includes(
+          'Could not copy the standup material.',
+        )
+      ) {
+        throw new Error('the failed copy was not said')
+      }
+    })
+    expect(
+      within(
+        screen.getByRole('button', { name: 'Copy material' })
+          .parentElement as HTMLElement,
+      ).getByRole('status').textContent,
+    ).toBe('')
+  })
+
+  it('stops claiming a post copy when the next one fails', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await standupPostAt()
+    await journalWithBothHalves(journal, clock)
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    await screen.findByRole('button', { name: 'Generate' })
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    await screen.findByText('The standup post the model wrote.')
+    await user.click(screen.getByRole('button', { name: 'Copy post' }))
+    await waitFor(() => {
+      expect(desktop.clipboard).toBe('The standup post the model wrote.')
+    })
+    desktop.copyToClipboard = async () => {
+      throw new Error('the clipboard refused')
+    }
+
+    await user.click(screen.getByRole('button', { name: 'Copy post' }))
+
+    await waitFor(() => {
+      if (
+        !document.body.textContent?.includes(
+          'Could not copy the standup post.',
+        )
+      ) {
+        throw new Error('the failed copy was not said')
+      }
+    })
+    expect(
+      within(
+        screen.getByRole('button', { name: 'Copy post' })
+          .parentElement as HTMLElement,
+      ).getByRole('status').textContent,
+    ).toBe('')
+  })
+
   it('keeps Copy material working after a generation failure', async () => {
     const user = userEvent.setup()
     const { journal, clock, desktop, settings } = await standupPostAt()
