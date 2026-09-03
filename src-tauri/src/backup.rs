@@ -382,12 +382,14 @@ pub async fn stage_restore(candidate: &Path, config_dir: &Path) -> Result<PathBu
 /// the staged file into the exact path plugin-sql will open, leaving the
 /// rollback file in place. The restored file has its own history, and the old
 /// journal's WAL applied to it is the corruption case, so no sidecar ever
-/// outlives the journal it belonged to — but none is ever deleted either.
-/// Renames only, no copies, so a half-written journal is never the live one.
-/// An absent staged file is the ordinary path and costs nothing, as are
-/// missing sidecars. If any step fails, every rename already made is undone,
-/// the journal is left as it was, and the failure is answered as an error
-/// for the caller to log.
+/// outlives the journal it belonged to: sidecars travel with the rollback
+/// when there is one, and orphans of a missing live journal — a WAL without
+/// its main file is unrecoverable — are removed before the staged file takes
+/// the live path. Renames only, no copies, so a half-written journal is never
+/// the live one. An absent staged file is the ordinary path and costs
+/// nothing, as are missing sidecars. If any step fails, every rename already
+/// made is undone, the journal is left as it was, and the failure is answered
+/// as an error for the caller to log.
 pub fn apply_staged_restore(
     config_dir: &Path,
     now: SystemTime,
@@ -411,20 +413,41 @@ pub fn apply_staged_restore(
 
     // Each sidecar moved, so a later failure can move every one back.
     let mut moved_sidecars: Vec<(PathBuf, PathBuf)> = Vec::new();
-    if let Some(rollback) = &rollback {
-        for kind in ["wal", "shm"] {
-            let from = sidecar_path(&live, kind);
-            let to = sidecar_path(rollback, kind);
-            match std::fs::rename(&from, &to) {
-                Ok(()) => moved_sidecars.push((from, to)),
-                // A journal in rollback-journal mode leaves none behind.
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => {
-                    undo_restore(&live, &rollback, &moved_sidecars);
-                    return Err(format!(
-                        "the stale {} sidecar could not be kept with its journal: {error}",
-                        from.display()
-                    ));
+    match &rollback {
+        Some(rollback) => {
+            for kind in ["wal", "shm"] {
+                let from = sidecar_path(&live, kind);
+                let to = sidecar_path(rollback, kind);
+                match std::fs::rename(&from, &to) {
+                    Ok(()) => moved_sidecars.push((from, to)),
+                    // A journal in rollback-journal mode leaves none behind.
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        undo_restore(&live, rollback, &moved_sidecars);
+                        return Err(format!(
+                            "the stale {} sidecar could not be kept with its journal: {error}",
+                            from.display()
+                        ));
+                    }
+                }
+            }
+        }
+        // No live journal, so no rollback — but orphans must not survive to
+        // meet the staged file: a stale WAL replaying onto it restores the
+        // old data under a healthy `quick_check`. A WAL without its main
+        // file is unrecoverable, so removing loses nothing.
+        None => {
+            for kind in ["wal", "shm"] {
+                let orphan = sidecar_path(&live, kind);
+                match std::fs::remove_file(&orphan) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(format!(
+                            "the orphan {} sidecar could not be removed: {error}",
+                            orphan.display()
+                        ));
+                    }
                 }
             }
         }
@@ -433,7 +456,7 @@ pub fn apply_staged_restore(
     if let Err(error) = std::fs::rename(&staged, &live) {
         // The staged file is still where it was; put the live journal — and
         // any sidecar already moved — back where each was too.
-        if let Some(rollback) = &rollback {
+        if let Some(rollback) = rollback.as_ref() {
             undo_restore(&live, rollback, &moved_sidecars);
         }
         return Err(format!(
@@ -1485,6 +1508,41 @@ mod tests {
         assert!(!rollback_path(&config.path, now).exists());
     });
 
+    async_test!(orphan_sidecars_do_not_survive_a_restore_without_a_live_journal, {
+        // Narrow but real: the main file gone with its `-wal` still beside
+        // the live path. Left there, the old WAL replays onto the restored
+        // file — the restore silently does not happen and `quick_check`
+        // still says ok.
+        let config = TempDir::new("restore-orphans");
+        let live = live_database_path(&config.path);
+        assert!(!live.exists());
+        let wal = PathBuf::from(format!("{}-wal", live.display()));
+        let shm = PathBuf::from(format!("{}-shm", live.display()));
+        std::fs::write(&wal, "orphan wal").unwrap();
+        std::fs::write(&shm, "orphan shm").unwrap();
+
+        let elsewhere = TempDir::new("restore-orphans-candidate");
+        let candidate = healthy_candidate(&elsewhere, "candidate.db", "the earlier journal").await;
+        let candidate_bytes = candidate_bytes(&candidate);
+        stage_restore(&candidate, &config.path)
+            .await
+            .expect("staging must succeed");
+
+        let outcome = apply_staged_restore(&config.path, SystemTime::now())
+            .expect("apply must succeed");
+        let rollback = match outcome {
+            ApplyOutcome::Restored { rollback } => rollback,
+            ApplyOutcome::Absent => panic!("a staged file was present"),
+        };
+
+        // No live journal, so nothing to keep — but the orphans are gone all
+        // the same, and the live path holds the staged bytes whole.
+        assert!(rollback.is_none());
+        assert!(!wal.exists(), "the orphan -wal must be gone");
+        assert!(!shm.exists(), "the orphan -shm must be gone");
+        assert_eq!(std::fs::read(&live).unwrap(), candidate_bytes);
+    });
+
     async_test!(an_older_snapshot_is_migrated_forward_after_replacement, {
         let config = TempDir::new("restore-migrate");
         let live = live_database_path(&config.path);
@@ -1575,6 +1633,11 @@ mod tests {
         // `expected_tables` is checked against hand-written DDL everywhere
         // else; this pins it against the production schema instead, so a
         // migration that adds a table without teaching the check fails here.
+        // The helper below hardcodes one entry per migration file, and
+        // `.take()` truncates silently — so a seventh migration would compare
+        // a v6 schema against `expected_tables(7)` and pass exactly when the
+        // guard is needed. The lengths move together or this fails first.
+        assert_eq!(REAL_MIGRATIONS.len(), crate::migrations().len());
         let directory = TempDir::new("restore-real-tables");
         let journal = real_journal_file(&directory, "journal.db", "the journal").await;
         let url = format!("sqlite:{}?mode=ro", journal.display());

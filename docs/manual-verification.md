@@ -348,6 +348,7 @@ The destructive path. Run these against a release build with a journal holding N
 - [ ] Choosing a corrupt file (a snapshot truncated by hand, or random bytes renamed to `.db`) refuses with the check that failed, stages nothing, and leaves the journal untouched.
 - [ ] Choosing a newer snapshot (one whose `_sqlx_migrations` holds a version newer than this build) refuses with the version it needs, stages nothing, and leaves the journal untouched.
 - [ ] After a restore, a file named `work-journal-rollback-…T….db` sits beside `work-journal.db`; `sqlite3 <that file> "PRAGMA quick_check;"` says `ok`, and it opens standalone with the replaced journal in it.
+- [ ] With `work-journal.db` deleted but `work-journal.db-wal` left behind, restoring still yields the backup's rows: the orphan sidecar is gone from the folder, and the row counts agree with the backup rather than the old journal.
 - [ ] Task Alerts reflect the restored Tasks rather than the replaced ones: a Task with a time restored from the backup alerts at its minute, and nothing arrives for a Task that only existed after the backup.
 - [ ] The API Key, Hotkeys, Theme, Start at Login answer and Model Access are exactly as they were before the restore.
 
