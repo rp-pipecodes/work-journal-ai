@@ -12,10 +12,10 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import WindowTitleBar from '@/components/WindowTitleBar'
+import SearchField from '@/components/SearchField'
 import { useOffScreen } from '@/components/on-screen-context'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
@@ -492,39 +492,6 @@ function TaskGroupSection({
       </h2>
       <ol className="flex flex-col gap-1">{children}</ol>
     </section>
-  )
-}
-
-/**
- * What the reader is looking for, anywhere in the journal — across the Open
- * and Completed lists at once. The field holds the term the session holds, so
- * clearing the Search with Escape empties it without the view keeping a second
- * copy of the truth — and the debounce, the two-character threshold and which
- * read may land are the session's, not this input's.
- */
-function SearchField({
-  term,
-  onType,
-}: {
-  term: string
-  onType: (term: string) => void
-}) {
-  return (
-    // The one control that gives way when the window is narrow: the lists and
-    // New Task are fixed things, a field is just as usable half as wide. It
-    // gives way down to a readable width and then takes a row of its own,
-    // rather than shrinking until nothing can be typed into it.
-    <label className="relative flex min-w-32 flex-1 basis-40 items-center">
-      <span className="sr-only">Search</span>
-      <SearchIcon className="pointer-events-none absolute left-2 size-3 text-muted-foreground" />
-      <Input
-        type="search"
-        value={term}
-        onChange={(event) => onType(event.target.value)}
-        placeholder="Search"
-        className="h-6 w-full min-w-0 pl-6 type-meta [&::-webkit-search-cancel-button]:hidden"
-      />
-    </label>
   )
 }
 
