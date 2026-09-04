@@ -88,6 +88,8 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
     "UNNotificationResponse",
     "UNNotification",
     "UNNotificationSound",
+    "UNNotificationAction",
+    "UNNotificationCategory",
 ] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]

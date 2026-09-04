@@ -8,7 +8,7 @@ mod hotkey;
 mod keychain;
 mod standup;
 
-use alerts::{Permission, TaskAlert};
+use alerts::{Permission, TaskAlert, TaskAlertCompletion};
 use calendar::{Access, CalendarEvent, CalendarInfo};
 use dock::{Dock, Presence};
 use export::ExportedFile;
@@ -133,6 +133,13 @@ const SECTION_REQUESTED_EVENT: &str = "main://section";
 /// `src/platform/desktop.ts`, as `src/platform/desktop-rust.test.ts` checks.
 const TASK_ALERT_OPENED_EVENT: &str = "task-alert://opened";
 
+/// The user chose Complete on a Task Alert. Carried to the Capture window,
+/// where the Task Alerts session processes it — never to the Main Window,
+/// which is what the default click is for. Must match
+/// `TASK_ALERT_COMPLETED_EVENT` in `src/platform/desktop.ts`, as
+/// `src/platform/desktop-rust.test.ts` checks.
+const TASK_ALERT_COMPLETED_EVENT: &str = "task-alert://completed";
+
 /// The resting height of each resident window: the panel its view draws, plus
 /// the transparent gutter the view's own drop shadow needs on every side. They
 /// differ because a Task may say when it is meant to be done and how often it
@@ -184,6 +191,17 @@ struct RequestedSection(Mutex<Option<String>>);
 /// it opens. Taken rather than read: an Alert opens the window once.
 #[derive(Default)]
 struct OpenedTaskAlert(Mutex<Option<String>>);
+
+/// The Complete action the user chose, waiting for the Capture window to claim
+/// it.
+///
+/// The event alone is not enough, for the same reason the click above keeps
+/// one of these: a choice made while Work Journal was not running arrives
+/// before the Capture window is listening. It is kept here instead, and the
+/// window asks for it as it starts. Taken rather than read: a Complete
+/// processes once.
+#[derive(Default)]
+struct CompletedTaskAlert(Mutex<Option<TaskAlertCompletion>>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -290,6 +308,8 @@ pub fn run() {
             todays_calendar_events,
             requested_section,
             opened_task_alert,
+            focus_task_alert,
+            completed_task_alert,
             task_alert_permission,
             request_task_alert_permission,
             reconcile_task_alerts,
@@ -348,6 +368,7 @@ pub fn run() {
             // Nothing has been clicked yet, but a click can arrive before any
             // window exists — so somewhere to keep it has to.
             app.manage(OpenedTaskAlert::default());
+            app.manage(CompletedTaskAlert::default());
             app.manage(RequestedSection::default());
 
             // Whoever is in front when a Capture begins, kept so that putting
@@ -1555,42 +1576,83 @@ fn open_notification_settings() -> Result<(), String> {
     alerts::open_settings()
 }
 
-/// Listens for clicks on Task Alerts, and turns each one into a Main Window
+/// Listens for Task Alert responses. A default click turns into a Main Window
 /// showing Tasks View focused on that Task. The identifier is passed through
 /// untouched: which Task it names is the journal's to say, in `taskIdOfAlert`.
+/// A Complete choice is instead written down and announced to the Capture
+/// window, where the Task Alerts session processes it — no window is opened
+/// for it here.
 ///
 /// The click is split in two: the section is the Main Window's to switch to,
 /// and the Task is Tasks View's to single out.
 fn watch_for_task_alerts(app: &tauri::AppHandle) {
-    let handle = app.clone();
+    let opened_handle = app.clone();
+    let completed_handle = app.clone();
 
     alerts::watch_for_clicks(alerts::Clicks {
         opened: Box::new(move |identifier| {
-            // Written down first, and always: a Tasks View built by this very
-            // click has no webview yet and would never hear the event, so it
-            // asks for this as it opens instead.
-            if let Some(pending) = handle.try_state::<OpenedTaskAlert>() {
+            show_task_alert(&opened_handle, identifier);
+        }),
+        completed: Box::new(move |completion| {
+            let handle = &completed_handle;
+            // Written down first, and always: a choice made while Work Journal
+            // was not running arrives before the Capture window is listening,
+            // so it asks for this as it starts instead.
+            if let Some(pending) = handle.try_state::<CompletedTaskAlert>() {
                 if let Ok(mut waiting) = pending.0.lock() {
-                    *waiting = Some(identifier.clone());
+                    *waiting = Some(completion.clone());
                 }
             }
 
-            open_main_window(&handle, Some(TASKS_SECTION));
-
-            // And announced too, for the window that was already open and has
-            // long since asked. Addressed rather than broadcast: only Tasks
-            // View has anything to do with it.
+            // And announced too, for the window already listening. Addressed
+            // rather than broadcast: only the Capture window processes these.
+            // No window is opened: the action is foreground-free, and the
+            // session decides whether anything needs showing.
             if let Err(error) = handle.emit_to(
-                MAIN_WINDOW,
-                TASK_ALERT_OPENED_EVENT,
-                TaskAlertOpened {
-                    task_id: identifier,
-                },
+                CAPTURE_WINDOW,
+                TASK_ALERT_COMPLETED_EVENT,
+                completion,
             ) {
-                log::warn!("could not pass on the Task Alert: {error}");
+                log::warn!("could not pass on the Task Alert completion: {error}");
             }
         }),
     });
+}
+
+/// Turns an Alert naming a Task into a Main Window showing Tasks View focused
+/// on it. The identifier passes through untouched: which Task it names is the
+/// journal's to say, in `taskIdOfAlert`.
+///
+/// Said both ways every time, exactly as a section is: written down for a
+/// window that has yet to ask — one this call is about to build, or one still
+/// starting up — and announced for one already open and listening.
+///
+/// The click is split in two: the section is the Main Window's to switch to,
+/// and the Task is Tasks View's to single out.
+fn show_task_alert(app: &tauri::AppHandle, identifier: String) {
+    // Written down first, and always: a Tasks View built by this very click
+    // has no webview yet and would never hear the event, so it asks for this
+    // as it opens instead.
+    if let Some(pending) = app.try_state::<OpenedTaskAlert>() {
+        if let Ok(mut waiting) = pending.0.lock() {
+            *waiting = Some(identifier.clone());
+        }
+    }
+
+    open_main_window(app, Some(TASKS_SECTION));
+
+    // And announced too, for the window that was already open and has long
+    // since asked. Addressed rather than broadcast: only Tasks View has
+    // anything to do with it.
+    if let Err(error) = app.emit_to(
+        MAIN_WINDOW,
+        TASK_ALERT_OPENED_EVENT,
+        TaskAlertOpened {
+            task_id: identifier,
+        },
+    ) {
+        log::warn!("could not pass on the Task Alert: {error}");
+    }
 }
 
 /// The Task Alert that opened this window, if one did — asked for by Tasks View
@@ -1598,6 +1660,29 @@ fn watch_for_task_alerts(app: &tauri::AppHandle) {
 /// window opened for any other reason must not inherit the last click.
 #[tauri::command]
 fn opened_task_alert(pending: tauri::State<'_, OpenedTaskAlert>) -> Option<String> {
+    pending.0.lock().ok()?.take()
+}
+
+/// Opens Tasks View focused on the Task a stale Complete action was about —
+/// the Capture window's doing, which is how a background choice opens a window
+/// at all. The identifier passes through untouched, exactly as a click does.
+///
+/// The parameter is named for what the webview sends — `alertId`, as
+/// `focusTaskAlert` in `src/platform/desktop.ts` invokes it — because a
+/// mismatched argument name is refused before this body runs, and says
+/// nothing. `desktop-rust.test.ts` holds the pair together.
+#[tauri::command]
+fn focus_task_alert(app: tauri::AppHandle, alert_id: String) {
+    show_task_alert(&app, alert_id);
+}
+
+/// The Complete action waiting to be claimed, if one was chosen — asked for by
+/// the Capture window as it starts. Taken rather than read: a Complete
+/// processes once, however it arrived.
+#[tauri::command]
+fn completed_task_alert(
+    pending: tauri::State<'_, CompletedTaskAlert>,
+) -> Option<TaskAlertCompletion> {
     pending.0.lock().ok()?.take()
 }
 

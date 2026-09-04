@@ -18,13 +18,24 @@
  * the one place that lives as long as the app — see
  * docs/adr/0002-capture-window-is-hidden-never-closed.md.
  *
+ * It also processes Complete actions chosen on Task Alerts: the delivered slot
+ * is checked against the journal, and only a Task still Open at that exact
+ * slot is completed. Anything else opens Tasks View on the Task for review
+ * and changes nothing.
+ *
  * Nothing here ever prompts. Permission is asked for in context when the first
  * timed Task is saved, which is a thing the user did; a background
  * reconciliation that raised a dialog would be the app nagging.
  */
 
-import type { Desktop } from '@/platform/desktop'
-import { taskAlerts, type Clock, type Journal } from './journal'
+import type { Desktop, TaskAlertCompletion } from '@/platform/desktop'
+import {
+  taskAlerts,
+  taskIdOfAlert,
+  type Clock,
+  type CompletionAtSlot,
+  type Journal,
+} from './journal'
 
 /**
  * How often the pending requests are checked against the journal while the app
@@ -68,6 +79,10 @@ export function createTaskAlertsSession({
   // run ends, which is what makes "rescheduled on every change" true rather
   // than true within fifteen minutes.
   let askedAgain = false
+  // Responses already handled. One Complete arrives twice when the app was not
+  // running — written down for the cold launch and announced to a window
+  // already listening — and a retried delivery must never complete twice.
+  const seenCompletions = new Set<string>()
 
   /**
    * One reconciliation, and then another if anything asked while it ran. Every
@@ -135,6 +150,81 @@ export function createTaskAlertsSession({
     }
   }
 
+  /**
+   * One Complete chosen on a Task Alert: the guarded completion, or Tasks View
+   * opened on the Task when the banner outlived its slot. Never throws: a
+   * banner is an ordinary copy of a schedule that may have moved, and a
+   * failure here must not take the reconciliation with it.
+   */
+  async function completeFromAlert(
+    response: TaskAlertCompletion,
+  ): Promise<void> {
+    const delivered = `${response.alertId} ${response.date} ${response.time}`
+    if (seenCompletions.has(delivered)) return
+    seenCompletions.add(delivered)
+
+    // Which Task the Alert named — the journal's to say, not this session's.
+    const taskId = taskIdOfAlert(response.alertId)
+    if (taskId === null) {
+      console.error(
+        'could not complete the Task its Alert asked for',
+        response.alertId,
+      )
+      return
+    }
+
+    let outcome: CompletionAtSlot
+    try {
+      const core = await journal
+      outcome = await core.completeTaskAt(taskId, {
+        date: response.date,
+        time: response.time,
+      })
+    } catch (error) {
+      // No mutation happened and none is claimed — but the failure is not
+      // silent either. Tasks View opens on the Alert's Task for review, and a
+      // Task that turns out not to exist simply isn't singled out.
+      console.error('could not complete the Task its Alert asked for', error)
+      try {
+        await desktop.focusTaskAlert(response.alertId)
+      } catch (focusError) {
+        console.error(
+          'could not open the Task its Alert asked for',
+          focusError,
+        )
+      }
+      return
+    }
+
+    if (outcome.outcome === 'completed') {
+      // Said the way every Task change is said: the reconciliation listening
+      // above then replaces or removes the pending Alert.
+      try {
+        await desktop.announceTasksChanged()
+      } catch (error) {
+        console.error('could not announce the Task', error)
+      }
+      return
+    }
+
+    if (outcome.task === null) {
+      // Deleted since the banner was delivered: nothing to review.
+      console.error(
+        'could not complete the Task its Alert asked for',
+        response.alertId,
+      )
+      return
+    }
+
+    // Stale: the Task moved, and the banner must not move with it. No
+    // mutation — Tasks View opens on it instead, for review.
+    try {
+      await desktop.focusTaskAlert(response.alertId)
+    } catch (error) {
+      console.error('could not open the Task its Alert asked for', error)
+    }
+  }
+
   return {
     async start() {
       running = true
@@ -147,6 +237,22 @@ export function createTaskAlertsSession({
         // across sleep, so this is about the journal having moved on rather
         // than about the OS having forgotten.
         desktop.onSystemWoke(() => void reconcile()),
+        // A Complete chosen on a Task Alert. Subscribed before the
+        // cold-launch read below, so a response arriving in between is
+        // deduplicated rather than missed or doubled.
+        desktop.onTaskAlertCompleted((response) => {
+          // The choice is written down as well as announced — the Rust side
+          // cannot know a window is listening. This window was, so it claims
+          // what was written down too. Otherwise a session restarted
+          // in-process would reclaim it and open a review nobody asked for.
+          void desktop.completedTaskAlert().catch((error: unknown) => {
+            console.error(
+              'could not claim the Task Alert completion',
+              error,
+            )
+          })
+          void completeFromAlert(response)
+        }),
       ])
 
       if (!running) {
@@ -159,6 +265,17 @@ export function createTaskAlertsSession({
       // the app was not running, and whatever the OS lost when it was
       // reinstalled or its permission was turned back on.
       await reconcile()
+
+      // A Complete chosen while the app was not running, waiting to be
+      // claimed. Read only after subscribing above.
+      let pending: TaskAlertCompletion | null = null
+      try {
+        pending = await desktop.completedTaskAlert()
+      } catch (error) {
+        console.error('could not read the Task Alert completion', error)
+      }
+      if (pending !== null) await completeFromAlert(pending)
+
       interval = setInterval(() => void reconcile(), RECONCILE_INTERVAL_MS)
     },
 

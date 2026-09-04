@@ -15,6 +15,7 @@ import type {
   MainSection,
   StandupPostRequest,
   StandupPostResponse,
+  TaskAlertCompletion,
   TaskAlertPermission,
   Unlisten,
 } from '../desktop'
@@ -126,6 +127,14 @@ export interface FakeDesktop extends Desktop {
   sectionsClaimed: number
   /** The user clicks a Task Alert. */
   openTaskAlert(taskId: string): void
+  /** The user chooses Complete on a Task Alert. */
+  completeTaskAlert(completion: TaskAlertCompletion): void
+  /**
+   * The Complete action waiting to be claimed by the Capture window it is
+   * addressed to — what a choice made while the app was not running leaves
+   * behind. Null when nothing chose one.
+   */
+  pendingTaskAlertCompletion: TaskAlertCompletion | null
   /**
    * The Alert waiting to be claimed by the window it opened — what a click
    * that built the window leaves behind. Null when the window was opened any
@@ -228,6 +237,7 @@ export function fakeDesktop({
   const closeRequested = subscribers<void>()
   const sectionRequested = subscribers<MainSection>()
   const taskAlertOpened = subscribers<string>()
+  const taskAlertCompleted = subscribers<TaskAlertCompletion>()
   const taskAlertsReconciled = subscribers<boolean>()
 
   const desktop: FakeDesktop = {
@@ -263,6 +273,7 @@ export function fakeDesktop({
     pendingSection: null,
     sectionsClaimed: 0,
     pendingTaskAlert: null,
+    pendingTaskAlertCompletion: null,
     apiKey,
     keychainRefuses,
     availableUpdate: null,
@@ -382,6 +393,7 @@ export function fakeDesktop({
     },
 
     onTaskAlertOpened: async (handle) => taskAlertOpened.add(handle),
+    onTaskAlertCompleted: async (handle) => taskAlertCompleted.add(handle),
     announceTaskAlertsReconciled: async (held) =>
       taskAlertsReconciled.announce(held),
     onTaskAlertsReconciled: async (handle) => taskAlertsReconciled.add(handle),
@@ -398,6 +410,26 @@ export function fakeDesktop({
       const waiting = desktop.pendingTaskAlert
       desktop.pendingTaskAlert = null
       return waiting
+    },
+    completeTaskAlert: (completion) => {
+      // Both, exactly as the Rust side does it: written down for a Capture
+      // window that has yet to ask — a choice made while the app was not
+      // running — and announced for one already listening. Whichever claims
+      // it, it is claimed once. The default-click handoff is untouched.
+      desktop.pendingTaskAlertCompletion = completion
+      taskAlertCompleted.announce(completion)
+    },
+    completedTaskAlert: async () => {
+      // Handed over exactly once, as the real one is.
+      const waiting = desktop.pendingTaskAlertCompletion
+      desktop.pendingTaskAlertCompletion = null
+      return waiting
+    },
+    focusTaskAlert: async (alertId) => {
+      // A stale Complete opens for review through the very same delivery a
+      // click uses: written down for a Tasks View about to be built, and
+      // announced for one already on screen.
+      desktop.openTaskAlert(alertId)
     },
     openNotificationSettings: async () => {
       desktop.notificationSettingsOpened += 1
