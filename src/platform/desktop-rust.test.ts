@@ -33,6 +33,7 @@ import {
   TASKS_SECTION,
   THEME_KEY,
 } from './desktop'
+import { backupFileName } from './tauri-desktop'
 
 const TEST_FILE = 'src/platform/desktop-rust.test.ts'
 const RUST_FILE = 'src-tauri/src/lib.rs'
@@ -300,6 +301,41 @@ describe('the commands that can block on a person', () => {
     'request_task_alert_permission',
   ]
 
+  it('runs the backup status read off the main thread with its siblings', () => {
+    // The automatic-backups read reaches the file system, so it rides the
+    // same async shape as the commands beside it.
+    const declaration = rustSource.match(
+      /#\[tauri::command\(async\)\]\s*fn automatic_backups\b/,
+    )
+    expect(declaration).toBeTruthy()
+  })
+
+  it('carries every backup command the desktop surface names', () => {
+    // The webview calls these by name; a rename on either side is a Settings
+    // button that answers nothing. Each must be both declared as a command
+    // and listed in the invoke handler.
+    const handler = rustSource.match(
+      /invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\)/,
+    )?.[1]
+    expect(handler, 'the invoke handler could not be read').toBeTruthy()
+
+    for (const command of [
+      'automatic_backups',
+      'backup_journal',
+      'reveal_backups',
+      'stage_restore',
+    ]) {
+      expect(
+        rustSource.match(new RegExp(`fn ${command}\\b`)),
+        `${command} is not a command in ${RUST_FILE}`,
+      ).toBeTruthy()
+      expect(
+        handler,
+        `${command} is not registered in the invoke handler`,
+      ).toContain(command)
+    }
+  })
+
   it.each(BLOCKING_COMMANDS)('runs %s off the main thread', (command) => {
     // An `async fn` command is off the main thread by its very shape; the
     // attribute is what a sync body needs, and is what the declaration is
@@ -310,6 +346,280 @@ describe('the commands that can block on a person', () => {
 
     expect(declaration, `${command} is not a command in ${RUST_FILE}`).toBeTruthy()
     expect(declaration?.[1]).toBe('#[tauri::command(async)]')
+  })
+})
+
+/**
+ * The argument names a command is invoked with, checked both ways. Tauri
+ * matches the keys of the webview's invoke payload against the command's
+ * parameter names — snake_case on the Rust side reads as camelCase in the
+ * payload — and a name that matches nothing refuses the call before the
+ * command's body runs. Silent is the cruelty of it: the build passes, the
+ * fake desktop passes every test, and pressing the button reports nothing.
+ *
+ * Both sides are read as source, as the shared strings above are: the
+ * payload keys each `invoke` in `tauri-desktop.ts` actually sends, and the
+ * parameters each command receives. Nothing is asserted against a
+ * hand-maintained table — the webview's own call sites are the source of
+ * truth, so renaming a key there fails here.
+ */
+describe('the arguments commands are invoked with', () => {
+  // The call sites, not the contract: `desktop.ts` declares the `Desktop`
+  // surface but contains no `invoke` payloads — `tauri-desktop.ts` is where
+  // arguments are actually sent, and so where drift can hide.
+  const tauriSource = read('src/platform/tauri-desktop.ts')
+
+  /**
+   * The payload keys of every invoke that sends arguments, read straight
+   * out of `tauri-desktop.ts`. Shorthand (`{ path }`) and explicit
+   * (`{ path: value }`) both yield the key the payload carries; a payload
+   * this parser cannot read fails the accounting test below rather than
+   * passing silently.
+   */
+  function sentArguments(): Record<string, string[]> {
+    const sent: Record<string, string[]> = {}
+
+    for (const [, command, payload] of tauriSource.matchAll(
+      /invoke[^'\n]*'([a-z_]+)'(?:,\s*\{([^}]*)\})?/g,
+    )) {
+      if (payload === undefined) continue
+      const keys =
+        payload.trim() === ''
+          ? []
+          : payload.split(',').map((entry) => {
+              const key = entry.split(':')[0].trim()
+              if (!/^[a-zA-Z_$][\w$]*$/.test(key)) {
+                throw new Error(
+                  `the payload of '${command}' is not the flat list of ` +
+                    `identifiers this test reads — it saw "${entry.trim()}"`,
+                )
+              }
+              return key
+            })
+
+      const previous = sent[command]
+      if (previous !== undefined && JSON.stringify(previous) !== JSON.stringify(keys)) {
+        throw new Error(
+          `'${command}' is invoked with two different payloads — read ` +
+            'both call sites into this test rather than one',
+        )
+      }
+      sent[command] = keys
+    }
+
+    return sent
+  }
+
+  /** The parameter names of one Rust command, in snake_case as written. */
+  function rustParameters(command: string): string[] {
+    const signature = rustSource.match(
+      new RegExp(`(?:async )?fn ${command}\\b([\\s\\S]*?)\\) ->`),
+    )?.[1]
+    if (signature === undefined) {
+      throw new Error(`${command} is not a command in ${RUST_FILE}`)
+    }
+
+    return [...signature.matchAll(/[(,]\s*(?:mut )?([a-z_][a-z0-9_]*):/gm)]
+      .map(([, name]) => name)
+      // Handled by Tauri itself — the app handle, injected state, the
+      // window — are not part of the payload the webview sends, and never
+      // have been: `journal_transaction`'s `databases` and `set_hotkey`'s
+      // `hotkeys` ride in the command's context, not its arguments.
+      .filter((name) => !['app', '_app', 'window', 'state'].includes(name))
+      // State's generic is a type, not a name; `databases` and `hotkeys`
+      // are `State<'_, T>` parameters and are dropped here with their kind.
+      .filter((name) => !new RegExp(`${name}:\\s*tauri::State`).test(signature))
+  }
+
+  it('sends every argument with the name the command receives', () => {
+    const sent = sentArguments()
+    expect(Object.keys(sent).length).toBeGreaterThan(0)
+
+    for (const [command, keys] of Object.entries(sent)) {
+      const parameters = rustParameters(command)
+        .map((name) => name.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()))
+
+      expect(
+        parameters,
+        `${command} receives [${parameters.join(', ')}] but the webview sends ` +
+          `[${keys.join(', ')}] — a name the command does not receive refuses ` +
+          'the call before its body runs',
+      ).toEqual(keys)
+    }
+  })
+
+  it('accounts for every command the webview invokes with arguments', () => {
+    // Rust is the ledger, not the payload's shape: any command that takes
+    // arguments and is invoked from the webview must have had a literal
+    // payload parsed by `sentArguments`. Detecting payloads by seeing a
+    // `{` would let `invoke('cmd', buildPayload())` — a payload this test
+    // cannot read — pass in perfect silence.
+    const sent = sentArguments()
+    const names = [...new Set(
+      [...tauriSource.matchAll(/invoke[^'\n]*'([a-z_]+)'/g)].map(([, command]) => command),
+    )]
+
+    const unparsed = names.filter(
+      (command) => !(command in sent) && rustParameters(command).length > 0,
+    )
+    expect(
+      unparsed,
+      `${unparsed.join('; ')} — takes arguments, but sentArguments parsed ` +
+        'no payload for it; the payload must be a literal this test can read',
+    ).toEqual([])
+
+    // And every `invoke` call site must have yielded a command name at all,
+    // so a dynamically-named command cannot slip past both checks above.
+    const callSites = [...tauriSource.matchAll(/\binvoke\s*[<(]/g)].length
+    expect(
+      names.length,
+      `${callSites - names.length} invoke call site(s) this test cannot read ` +
+        'a command name from — command names must be string literals',
+    ).toBe(callSites)
+  })
+})
+
+/**
+ * The overwrite question is the save dialog's alone: it is the one that
+ * shows "Replace?" and the user answers it there. A command that answers
+ * it again — `path.exists()` and a hard error — turns the dialog's own
+ * confirmation into "Could not back up the journal." The contract instead
+ * settles the write beside whatever is there, exactly as export's
+ * `free_path` does, and carries the settled path back so the toast names
+ * where the snapshot actually went. Nothing on disk is ever replaced,
+ * renamed or deleted to make room for a backup.
+ */
+describe('the manual backup settles beside rather than refuses', () => {
+  /** The body of the backup_journal command, extracted whole. */
+  function commandBody(): string {
+    const body = rustSource.match(/async fn backup_journal\([\s\S]*?\n\}\n/)?.[0]
+    if (body === undefined) {
+      throw new Error('backup_journal is not a command in ' + RUST_FILE)
+    }
+    return body
+  }
+
+  it('settles the destination instead of refusing what the dialog confirmed', () => {
+    const body = commandBody()
+    expect(body).toContain('settle_destination')
+    // The refusal this replaces: a taken path answered with an error after
+    // the dialog had already asked the user about it.
+    expect(body).not.toContain('.exists()')
+  })
+
+  it('reports where the snapshot went, not where it was asked', () => {
+    const body = commandBody()
+    // BackupResult is built from the settled destination — otherwise the
+    // toast would name a file that is not the one holding the snapshot.
+    expect(body).toMatch(/path:\s*destination/)
+  })
+
+  it('mirrors the settlement in the testing desktop the webview tests run on', () => {
+    const fake = read('src/platform/testing/desktop.ts')
+    expect(fake).toContain('nextSibling(path, desktop.backups)')
+  })
+})
+
+/**
+ * The manual backup's save dialog, checked where the drift actually happens:
+ * `tauri-desktop.ts` opens the dialog from the webview — there is no Rust
+ * command between the button and the OS — so the suggestion the user is
+ * offered lives entirely on this side. A dialog with no `defaultPath` offers
+ * no name and no folder, and the user meets it in whatever directory the OS
+ * last had open: ADR 0032's "the dialog is offered the timestamped name, in
+ * Downloads, so the common case is one confirm" quietly false. The test
+ * reads `tauri-desktop.ts` and holds the dialog to what the ADR says.
+ */
+describe('the manual backup save dialog', () => {
+  const tauriDesktopSource = read('src/platform/tauri-desktop.ts')
+
+  it('offers a defaultPath built from the Downloads folder and the backup name', () => {
+    const choose = tauriDesktopSource.match(
+      /async chooseBackupLocation\(\) \{([\s\S]*?)\n\s*\},/,
+    )?.[1]
+    expect(
+      choose,
+      'chooseBackupLocation is not where it is expected to be',
+    ).toBeTruthy()
+
+    // The suggestion is one path, assembled where it is used: the folder and
+    // the name together, as one `defaultPath`.
+    expect(choose).toContain('defaultPath')
+    expect(choose).toContain('downloadDir()')
+    expect(choose).toContain('backupFileName()')
+  })
+
+  it('names the backup by the same convention the snapshots use', () => {
+    // `work-journal-` + UTC second-precise stamp + `.db` — the format ADR
+    // 0032 names, and the one the automatic snapshots carry. Asserted on the
+    // produced string for a known instant rather than on the body's words:
+    // a missing `T` or a wrong separator would otherwise read as fine. A
+    // manual backup suggested under any other name would read as a different
+    // family of file from the ones the app makes on its own.
+    expect(backupFileName(new Date(Date.UTC(2026, 8, 3, 8, 45, 0)))).toBe(
+      'work-journal-20260903T084500.db',
+    )
+  })
+})
+
+/**
+ * The restore's open dialog and staged apply, checked where the drift
+ * actually happens. Choosing a candidate opens the dialog from the webview
+ * with no Rust command between the button and the OS, so the filter lives
+ * entirely on this side; staging validates on the Rust side and the startup
+ * hook applies before plugin-sql opens. A dialog with no filter offers every
+ * file, and a hook registered after the sql plugin opens onto the journal it
+ * was meant to replace.
+ */
+describe('the restore from a backup', () => {
+  const tauriDesktopSource = read('src/platform/tauri-desktop.ts')
+
+  it('opens the candidate dialog filtered to the backup extension', () => {
+    const choose = tauriDesktopSource.match(
+      /async chooseRestoreCandidate\(\) \{([\s\S]*?)\n\s*\},/,
+    )?.[1]
+    expect(
+      choose,
+      'chooseRestoreCandidate is not where it is expected to be',
+    ).toBeTruthy()
+
+    // No path is ever hand-typed: the dialog filters to the backup
+    // extension, offers one file, and a cancelled dialog answers null.
+    expect(choose).toContain('filters')
+    expect(choose).toContain("'db'")
+    expect(choose).toContain('multiple: false')
+  })
+
+  it('stages through the command the Rust side validates', () => {
+    expect(tauriDesktopSource).toContain("invoke('stage_restore'")
+  })
+
+  it('registers the staged apply before plugin-sql opens', () => {
+    // The only moment nothing holds the live journal is before the sql
+    // plugin's setup connects the pool and runs the migrations. The restore
+    // plugin's setup must run first, which registration order decides.
+    const restoreAt = rustSource.indexOf('Builder::new("restore")')
+    const sqlAt = rustSource.indexOf('tauri_plugin_sql::Builder::new()')
+    expect(restoreAt).toBeGreaterThan(-1)
+    expect(sqlAt).toBeGreaterThan(-1)
+    expect(
+      restoreAt,
+      'the restore hook must be registered before plugin-sql',
+    ).toBeLessThan(sqlAt)
+    expect(rustSource).toContain('apply_staged_restore')
+  })
+
+  it('grants the open dialog beside the save dialog and nothing more', () => {
+    const capabilities = read('src-tauri/capabilities/default.json')
+    expect(capabilities).toContain('dialog:allow-open')
+    expect(capabilities).toContain('dialog:allow-save')
+  })
+
+  it('mirrors the staging in the testing desktop the webview tests run on', () => {
+    const fake = read('src/platform/testing/desktop.ts')
+    expect(fake).toContain('chooseRestoreCandidate')
+    expect(fake).toContain('stageRestore')
+    expect(fake).toContain('stagedRestores')
   })
 })
 

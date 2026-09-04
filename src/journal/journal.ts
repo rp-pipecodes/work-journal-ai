@@ -1991,7 +1991,7 @@ export function describeExport(
   return `Exported ${counted.join(' and ')} to ${path}.`
 }
 
-function plural(count: number, thing: string): string {
+export function plural(count: number, thing: string): string {
   return `${count} ${thing}${count === 1 ? '' : 's'}`
 }
 
@@ -2003,7 +2003,7 @@ function plural(count: number, thing: string): string {
  * output — pasted into a thread or a prompt — and a heading whose shape depends
  * on the machine that produced it is worse than one that is merely British.
  */
-function formatDigestDay(journalDay: string): string {
+export function formatDigestDay(journalDay: string): string {
   return new Intl.DateTimeFormat('en-GB', {
     weekday: 'short',
     day: 'numeric',
@@ -2221,6 +2221,30 @@ export function formatJournalDay(journalDay: string): string {
     year: 'numeric',
     timeZone: 'UTC',
   }).format(new Date(journalDay))
+}
+
+/**
+ * A day range in words, for the one control that carries the Filter's day
+ * axis — and for the headings of the renderings built from that axis.
+ *
+ * A range reads as a range rather than as two dates side by side: the reader's
+ * own locale decides how the ends join, and everything the two ends share —
+ * the month, the year — is said once. In UTC for the same reason
+ * `formatJournalDay` is: a Journal Day is a `YYYY-MM-DD` label, which parses
+ * as UTC midnight and would otherwise read as the previous evening.
+ */
+const RANGE_DAYS = new Intl.DateTimeFormat(undefined, {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+
+export function formatDayRange(from: string, to: string): string {
+  // A range whose ends are equal is one day, and says so once.
+  if (from === to) return RANGE_DAYS.format(new Date(from))
+
+  return RANGE_DAYS.formatRange(new Date(from), new Date(to))
 }
 
 /**

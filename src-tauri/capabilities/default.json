@@ -12,6 +12,8 @@
     "sql:default",
     "sql:allow-execute",
     "store:default",
-    "clipboard-manager:allow-write-text"
+    "clipboard-manager:allow-write-text",
+    "dialog:allow-save",
+    "dialog:allow-open"
   ]
 }

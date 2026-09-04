@@ -327,6 +327,127 @@ describe('Copy Digest', () => {
   })
 })
 
+describe('Copy Review Material', () => {
+  it('copies the Filter’s Notes and completed work, naming which copy landed', async () => {
+    const user = userEvent.setup()
+    const { desktop, core, clock } = await showHistory([
+      { at: '2026-03-09T10:00:00', body: 'Monday' },
+    ])
+
+    clock.set(new Date('2026-03-09T11:00:00'))
+    const kept = await core.createTask('kept Monday')
+    await core.completeTask(kept.id)
+
+    await user.click(screen.getByRole('button', { name: /copy review material/i }))
+
+    const said = await screen.findByRole('status')
+    await vi.waitFor(() => expect(said.textContent).toContain('Review Material'))
+    expect(desktop.clipboard).toContain('Monday')
+    expect(desktop.clipboard).toContain('## Completed')
+    expect(desktop.clipboard).toContain('kept Monday')
+
+    // The same words the live region carries, up on screen as a toast.
+    const toast = await vi.waitFor(() => {
+      const found = document.querySelector('[data-sonner-toast]')
+      if (found === null) throw new Error('no toast')
+      return found
+    })
+    expect(toast.textContent).toContain(said.textContent)
+  })
+
+  it('is a second action beside Copy Digest, labelled so the two cannot be confused', async () => {
+    await showHistory([{ at: '2026-03-09T10:00:00', body: 'Monday' }])
+
+    expect(
+      screen.getByRole('button', { name: /copy digest/i }),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: /copy review material/i }),
+    ).toBeTruthy()
+  })
+
+  it('is disabled with the reason under a named Project', async () => {
+    const user = userEvent.setup()
+    const { project } = await showFilter([
+      { at: '2026-03-09T10:00:00', body: '#alpha Monday' },
+    ])
+
+    await user.click(project())
+    await user.click(await screen.findByRole('option', { name: '#alpha' }))
+
+    const copy = screen.getByRole('button', {
+      name: /copy review material/i,
+    }) as HTMLButtonElement
+    expect(copy.disabled).toBe(true)
+    // The rule is readable rather than hidden: the disabled action states it.
+    expect(copy.parentElement?.getAttribute('title')).toContain(
+      'Review Material covers completed work, which has no Project.',
+    )
+    // …and said, to whoever is listening rather than looking: a title on a
+    // wrapper is announced to nobody, so the rule is described to the button.
+    expect(ruleSaidTo(copy)).toContain(
+      'Review Material covers completed work, which has no Project.',
+    )
+  })
+
+  it('is disabled with the reason under Unfiled', async () => {
+    const user = userEvent.setup()
+    const { project } = await showFilter([
+      { at: '2026-03-09T10:00:00', body: '#alpha Monday' },
+    ])
+
+    await user.click(project())
+    await user.click(await screen.findByRole('option', { name: 'Unfiled' }))
+
+    const copy = screen.getByRole('button', {
+      name: /copy review material/i,
+    }) as HTMLButtonElement
+    expect(copy.disabled).toBe(true)
+    expect(copy.parentElement?.getAttribute('title')).toContain(
+      'Review Material covers completed work, which has no Project.',
+    )
+    expect(ruleSaidTo(copy)).toContain(
+      'Review Material covers completed work, which has no Project.',
+    )
+  })
+
+  it('writes nothing for an empty range, saying so', async () => {
+    const user = userEvent.setup()
+    const { days, desktop } = await showFilter([
+      { at: '2026-03-09T10:00:00', body: 'Monday' },
+    ])
+
+    await user.click(days())
+    await user.click(await dayCell('2026-03-10'))
+    await user.click(await dayCell('2026-03-11'))
+
+    await user.click(
+      screen.getByRole('button', { name: /copy review material/i }),
+    )
+
+    const said = await screen.findByRole('status')
+    await vi.waitFor(() =>
+      expect(said.textContent).toContain(
+        'No Notes or completed work to copy.',
+      ),
+    )
+    expect(desktop.clipboard).toBeNull()
+  })
+
+  it('is not offered while a Search is showing', async () => {
+    const user = userEvent.setup()
+    await showFilter([{ at: '2026-03-09T10:00:00', body: 'Monday' }])
+
+    await user.type(within(header()).getByLabelText('Search'), 'Mon')
+
+    await vi.waitFor(() => {
+      expect(
+        screen.queryByRole('button', { name: /copy review material/i }),
+      ).toBeNull()
+    })
+  })
+})
+
 describe('every filter control', () => {
   it('says what it is to a screen reader', async () => {
     await showFilter([{ at: '2026-03-09T10:00:00', body: 'Monday' }])
@@ -441,6 +562,20 @@ async function showOffScreenable() {
 /** The Filter's header, which is the whole of what this file is about. */
 function header(): HTMLElement {
   return screen.getByRole('banner')
+}
+
+/**
+ * What a screen reader makes of the nodes a control's description points at:
+ * the description is the AT contract, so the assertion reads what it resolves
+ * to rather than which DOM structure carries it.
+ */
+function ruleSaidTo(control: HTMLElement): string {
+  const described = control.getAttribute('aria-describedby')?.split(' ') ?? []
+  return described
+    .map((id) => document.getElementById(id)?.textContent ?? '')
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 /** The record's refusals are the subject here, not noise on the console. */

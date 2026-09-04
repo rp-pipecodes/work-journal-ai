@@ -171,7 +171,7 @@ The one window the journal is read and configured in: History, Tasks View, Setti
 _Avoid_: Main view, dashboard, home, shell
 
 **History**:
-The Main Window section where Notes are read back — everything the Filter describes, under the Journal Day each Note is filed under. Where a Note is reworded, refiled, deleted, and where a Digest is copied. The retrospective axis of the journal, which is why Tasks View is a section beside it rather than part of it.
+The Main Window section where Notes are read back — everything the Filter describes, under the Journal Day each Note is filed under. Where a Note is reworded, refiled, deleted, and where a Digest or Review Material is copied. The retrospective axis of the journal, which is why Tasks View is a section beside it rather than part of it.
 _Avoid_: Journal view, timeline, feed, Notes list
 
 **Filter**:
@@ -203,21 +203,33 @@ The Digest of the previous calendar day, on the clipboard from the Tray Menu. Th
 The complete lossless Markdown of yesterday, and the second thing in the app that is a rendering rather than prose. Yesterday's Digest verbatim, plus the work kept yesterday and the Open Tasks that are Overdue or scheduled for today — a superset of Yesterday's Digest rather than a rival account of the same day. Lossless like a Digest: every record it names is in the journal exactly as written, which is why it goes to the clipboard on one action while a Standup Post must be read first. It is what a Standup Post is written from, and what the user pastes instead when there is no Model Access, the endpoint is down, or the prose came back wrong — so it costs nothing and never waits. Read back only in the Standup Post section, one click past the Tray Menu: the Tray keeps the floor and the door, and a third item there would turn two that already look redundant into three.
 _Avoid_: Digest, prompt, input, context, summary
 
+**Review Material**:
+The Filter's Notes and the work completed in the Filter's days as one lossless Markdown document, and the third thing in the app that is a rendering rather than prose. The Filter's Digest verbatim — `#project` prefixes and all — plus the Completed Tasks and completed Task Occurrences day-grouped oldest-first under the same headings, under one top-level heading naming the range. Retrospective only: never Open Tasks, which belong to Standup Material. Offered only under Project Any, since a Task is never filed under a Project — under a named Project or Unfiled the action is present but disabled, stating the rule. Copied from History with no Model Access, no network and no waiting, and what a Review Brief is written from. A range with neither Notes nor completions copies nothing, while a range whose only content is completed work copies.
+_Avoid_: Packet, export, report, summary
+
 **Standup Post**:
 The prose a model writes from what the user did and what they still owe, for them to read and then paste into the chat group they owe a written work log every morning. Not a Digest and never called one: a Digest renders every Note in the Filter mechanically and losslessly, while a Standup Post is written, lossy, and may be wrong — which is why it is read in its own Main Window section before it is copied rather than going silently to the clipboard. The first thing in the app that crosses the retrospective and prospective axes, reading what History holds and what Tasks View holds at once: yesterday's Notes and the work kept yesterday on one side, the Open Tasks that are Overdue or scheduled for today on the other. Work kept yesterday is both ordinary Completed Tasks and Task Occurrences completed yesterday — a Recurring Task's kept occurrence is work done and belongs here, while the Recurring Task itself continues and appears among today's Open Tasks, so the same Task Description reads twice on purpose. Always about yesterday — the previous calendar day, exactly as in Yesterday's Digest, because two Tray Menu items meaning different days by the same word would be worse than a Monday corrected by hand — and never about the Filter, which belongs to History and may have been left anywhere. An empty yesterday no longer means nothing to say, since today's Tasks stand on their own; only a day with neither half refuses, and it refuses without spending a call. Written on the user's word rather than on arriving: the Tray Menu opens the section on what it is about to send, and one action spends the call. Nothing is kept — a Standup Post lives as long as the Main Window that showed it, so what is not copied is regenerated. It never replaces Yesterday's Digest, which is what still works with no Model Access, no network and no waiting.
 _Avoid_: Digest, summary, daily log, AI note
 
 **Export**:
 Every Note and Task written to a Markdown file in separate sections, each appearing exactly once. Notes remain day-grouped and use a `#name` prefix when filed under a Project. Tasks are separated into Open and Completed and retain their Task Description, Scheduled For, recurrence rule, and completed Task Occurrence history. The way out of the SQLite file, so nothing kept here is locked in — which is why it ignores the Filter and Tasks View entirely, and why it is a core operation rather than a convenience.
-_Avoid_: Backup, dump, save as
+_Avoid_: Backup, dump, save as — Backup, below, is the lossless one: Export is the human-readable way out, not a snapshot of the database.
+
+**Backup**:
+A snapshot of the journal's SQLite file itself — every table and row as stored, migrations record included — distinct from Export, which is prose and carries no Note ID, no Captured At and no Task ID. Taken two ways: automatically at launch when the newest snapshot is older than a fixed interval, into a `backups` folder beside the journal, and on demand to wherever the user points a save dialog — the one path off this disk, since the automatic folder sits on the same disk as the journal and does not survive a failed disk. Holds no settings and no API Key; restoring one is not this surface's business.
+_Avoid_: Export, dump, save as, archive
+
+**Restore**:
+Replacing the live journal with an earlier whole taken as a Backup. The candidate is validated read-only before anything is staged — `quick_check`, the tables its version must hold, and a `_sqlx_migrations` version no newer than this build understands — and an older one is migrated forward on next launch. The replacement happens at startup before anything holds the file; the previous journal is kept as a timestamped rollback file beside the live one and never deleted, its `-wal` and `-shm` sidecars renamed alongside the journal they belong to, and the app restarts. Holds no settings and restores none: the API Key, Hotkeys and settings stay as they were.
+_Avoid_: Undo, import, merge, sync
 
 **Deletion**:
-Confirmed permanent removal of a Note or Task. There is no trash, no archive, no recovery, and no bulk deletion of Completed Tasks. Deleting an Imported Note also refuses its meeting so it is never imported again; deleting a Recurring Task also removes its completed Task Occurrence history and says so before confirmation.
+Confirmed permanent removal of a Note or Task. There is no trash, no archive, no recovery, and no bulk deletion of Completed Tasks. Deleting an Imported Note also refuses its meeting so it is never imported again; deleting a Recurring Task also removes its completed Task Occurrence history and says so before confirmation. Deletion stays permanent: a Restore returns the journal to an earlier whole, it does not undo one Note.
 
 ## Settings
 
 **Settings**:
-What the user gets to decide about the app: the Note and Task Hotkeys, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars, and how to recover unavailable Task Alert Permission — plus Export and Update as its two actions rather than settings. A Main Window section, reached from the sidebar or named directly from the Tray Menu.
+What the user gets to decide about the app: the Note and Task Hotkeys, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars, and how to recover unavailable Task Alert Permission — plus Export, Backup and Update as its actions rather than settings. A Main Window section, reached from the sidebar or named directly from the Tray Menu.
 
 **Update**:
 Moving from the version running to a newer released one, without leaving the app: Settings looks for it, names the version found, and installs and restarts into it when the user presses again. Only when asked — the app never looks on its own schedule. The release it finds is the project's own latest, and the bundle is refused unless it is signed by the key this build was compiled to trust. First-time installation is still the DMG, and still needs the quarantine attribute cleared; an update does not, because the app unpacks it itself.

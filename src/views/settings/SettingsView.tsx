@@ -6,6 +6,7 @@ import WindowTitleBar from '@/components/WindowTitleBar'
 import type { Journal } from '@/journal/journal'
 import type { AppIdentity, Desktop } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
+import BackupSettings from './BackupSettings'
 import ExportSettings from './ExportSettings'
 import HotkeySettings from './HotkeySettings'
 import MeetingImportSettings from './MeetingImportSettings'
@@ -136,6 +137,12 @@ export default function SettingsView({
         <Separator />
 
         <ExportSettings desktop={desktop} journal={journal} />
+        <Separator />
+
+        {/* Beside Export, which it is deliberately not: Export is the
+            human-readable way out, Backup the snapshot — see the two
+            entries in CONTEXT.md and ADR 0032. */}
+        <BackupSettings desktop={desktop} />
         <Separator />
 
         {/* Last, beside the version in the footer: both are about the build

@@ -37,7 +37,7 @@ export async function showHistory(
   captured: Array<{ at: string; body: string }>,
   { hotkey, refuseHotkeyStatus = false }: HotkeyAnswer = {},
 ) {
-  const { driver, core, notes } = await journalHolding(captured)
+  const { driver, core, clock, notes } = await journalHolding(captured)
 
   const desktop = fakeDesktop({ driver, hotkey })
   if (refuseHotkeyStatus) {
@@ -46,7 +46,7 @@ export async function showHistory(
   render(<HistoryView desktop={desktop} journal={Promise.resolve(core)} />)
   await firstListShown(captured.length)
 
-  return { desktop, core, notes }
+  return { desktop, core, clock, notes }
 }
 
 /**

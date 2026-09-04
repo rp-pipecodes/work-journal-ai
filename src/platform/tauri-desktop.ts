@@ -10,7 +10,14 @@ import { getVersion } from '@tauri-apps/api/app'
 import { invoke } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
 import { LogicalSize } from '@tauri-apps/api/dpi'
+import { downloadDir, join } from '@tauri-apps/api/path'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import {
+  open,
+  save,
+  type OpenDialogOptions,
+  type SaveDialogOptions,
+} from '@tauri-apps/plugin-dialog'
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { relaunch } from '@tauri-apps/plugin-process'
@@ -39,6 +46,8 @@ import {
   TASKS_CHANGED_EVENT,
   THEME_CHANGED_EVENT,
   type AvailableUpdate,
+  type AutomaticBackups,
+  type BackupResult,
   type CalendarAccess,
   type CalendarInfo,
   type Desktop,
@@ -242,6 +251,51 @@ export function createTauriDesktop(): Desktop {
     exportJournal: (markdown, fileName) =>
       invoke<ExportedFile>('export_journal', { markdown, fileName }),
 
+    automaticBackups: () => invoke<AutomaticBackups>('automatic_backups'),
+
+    // The picker and the write are two invocations, sequenced by the caller:
+    // a `null` here means the user cancelled, and no backup call follows.
+    //
+    // The dialog is opened here rather than by a Rust command, for the same
+    // reason `exportJournal`'s filename is rendered by the journal core and
+    // this side only carries it across: the name a backup suggests is the
+    // name `backupJournal`'s own `snapshot_file_name` writes, so both ends
+    // read it from `desktop.ts` and cannot drift. The defaultPath carries
+    // the Downloads folder and the timestamped name together, so the common
+    // case is one confirm.
+    async chooseBackupLocation() {
+      const options: SaveDialogOptions = {
+        defaultPath: await join(await downloadDir(), backupFileName()),
+      }
+      return save(options)
+    },
+
+    backupJournal: (path) => invoke<BackupResult>('backup_journal', { path }),
+
+    revealBackups: () => invoke('reveal_backups'),
+
+    // The picker and the stage are two invocations, sequenced by the caller:
+    // a `null` here means the user cancelled, and no stage call follows.
+    //
+    // The dialog is opened here rather than by a Rust command, for the same
+    // reason `chooseBackupLocation` opens its own: the file the user is
+    // offered is chosen on this side, and a cancelled dialog is a frontend
+    // outcome rather than an error. Filtered to the backup extension, so the
+    // common case is one confirm — and no path is ever hand-typed.
+    async chooseRestoreCandidate() {
+      const options: OpenDialogOptions = {
+        filters: [{ name: 'Work Journal backup', extensions: ['db'] }],
+        multiple: false,
+        directory: false,
+      }
+      const chosen = await open(options)
+      if (chosen === null) return null
+      if (Array.isArray(chosen)) return chosen[0] ?? null
+      return chosen
+    },
+
+    stageRestore: (path) => invoke('stage_restore', { path }),
+
     // The Key stays in the Keychain: only what the model needs to hear crosses
     // to Rust, and the answer comes back as one shape, success or failure.
     generateStandupPost: (request: StandupPostRequest) =>
@@ -280,4 +334,22 @@ export function createTauriDesktop(): Desktop {
 
     showTrayCount: (title) => invoke('show_tray_count', { title }),
   }
+}
+
+/**
+ * The filename the save dialog is offered, and the one the automatic
+ * snapshots are written under: the same format both ways, so the manual and
+ * the automatic backups read as one family in whatever folder they land in.
+ * It lives beside `backupJournal` rather than inside it so the dialog's
+ * suggestion and the command's validation read as one decision.
+ */
+export function backupFileName(instant: Date = new Date()): string {
+  // UTC, second-precise: the same clock the automatic snapshot names itself
+  // by, so a name sorts with its own instant wherever the file ends up.
+  const pad = (part: number) => String(part).padStart(2, '0')
+  const stamp =
+    `${instant.getUTCFullYear()}${pad(instant.getUTCMonth() + 1)}` +
+    `${pad(instant.getUTCDate())}T${pad(instant.getUTCHours())}` +
+    `${pad(instant.getUTCMinutes())}${pad(instant.getUTCSeconds())}`
+  return `work-journal-${stamp}.db`
 }

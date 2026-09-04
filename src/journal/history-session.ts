@@ -17,6 +17,7 @@
 
 import {
   ANY_PROJECT,
+  constraintOf,
   decideArrival,
   describeCopiedDigest,
   groupByJournalDay,
@@ -29,6 +30,14 @@ import {
   type Note,
   type ProjectConstraint,
 } from './journal'
+import {
+  buildReviewMaterial,
+  describeCopiedReviewMaterial,
+  NOTHING_TO_REVIEW,
+  REVIEW_PROJECT_RULE,
+  reviewRefuses,
+  selectReviewCompletions,
+} from './review'
 
 /**
  * What History has to show, once the core has been asked. One arm at a time,
@@ -171,6 +180,18 @@ export interface HistorySession {
    * docs/adr/0012-the-os-writes-the-clipboard.md.
    */
   copy(): void
+  /**
+   * The Filter's Notes and the work completed in its days on the clipboard, as
+   * one lossless document — see `review.ts`. Async because completions are
+   * read when asked for rather than held: the ticket check below is what keeps
+   * a read that lands after the Filter moved from copying the wrong days.
+   *
+   * Refuses under a named Project or Unfiled — completed work has no Project —
+   * and refuses an empty range, in both cases writing nothing. Each
+   * confirmation names which of the two copies landed, so the two actions
+   * cannot be confused.
+   */
+  copyReviewMaterial(): Promise<void>
 }
 
 export function createHistorySession({
@@ -205,6 +226,11 @@ export function createHistorySession({
   // The Filter as Markdown, kept ready for a copy. Read from the core with the
   // list, so what gets copied is never the list on screen.
   let digest: Digest | null = null
+  // The Filter that Digest was read for. A move names the new Filter at once
+  // while the read that draws it is still in flight, so the held Digest can
+  // belong to the Filter the reader just left — a copy is of what was drawn,
+  // and this is how it knows what that was.
+  let digestFilter: Filter | null = null
   // A term waiting out its debounce, and how to abandon it: the reader typed
   // another character, or the Filter moved out from under it.
   let waiting: { cancel: () => void } | null = null
@@ -234,6 +260,7 @@ export function createHistorySession({
       ])
       if (latestRead !== ticket) return
       digest = rendered
+      digestFilter = filter
       show({
         projects,
         history: { state: 'notes', days: groupByJournalDay(notes) },
@@ -535,6 +562,55 @@ export function createHistorySession({
           show({ confirmation: 'Could not copy.' })
         },
       )
+    },
+
+    async copyReviewMaterial() {
+      // The copy is of what was drawn: the held Digest, and the Filter it
+      // was read for — the same Digest `copy()` would write, so the two can
+      // never disagree about the Filter's Notes. Completions are the only
+      // fresh read, taken for those same days.
+      const held = digest
+      const filter = digestFilter
+      if (held === null || filter === null) return
+
+      // Completed work has no Project: the action is disabled in the view,
+      // and refused here for anything that asks regardless.
+      if (constraintOf(filter).kind !== 'any') {
+        show({ confirmation: REVIEW_PROJECT_RULE })
+        return
+      }
+
+      const ticket = latestRead
+      let completions
+      try {
+        const core = await journal
+        completions = await selectReviewCompletions({ journal: core, filter })
+      } catch (error) {
+        console.error('could not read Review Material', error)
+        if (latestRead === ticket && digest === held) {
+          show({ confirmation: 'Could not copy Review Material.' })
+        }
+        return
+      }
+      // A read that lands after the Filter moved must not copy the wrong
+      // days: the move's own read holds the newer ticket, and a landed read
+      // replaces the held Digest — either way what was drawn is gone.
+      if (latestRead !== ticket || digest !== held) return
+
+      const selection = { filter, digest: held, ...completions }
+      if (reviewRefuses(selection)) {
+        show({ confirmation: NOTHING_TO_REVIEW })
+        return
+      }
+
+      const material = buildReviewMaterial(selection)
+      try {
+        await clipboard(material.markdown)
+        show({ confirmation: describeCopiedReviewMaterial(material) })
+      } catch (error) {
+        console.error('could not copy Review Material', error)
+        show({ confirmation: 'Could not copy Review Material.' })
+      }
     },
   }
 }
