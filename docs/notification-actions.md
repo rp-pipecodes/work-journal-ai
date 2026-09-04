@@ -28,10 +28,11 @@ worked example rather than an Apple rule.
   from buttons to "Options", and nothing states how long a Temporary banner
   stays on screen or whether hovering holds it open.
 
-Confidence: **high that a single action is reachable without a submenu; low on
-everything about timing.** The residual risk is not "the button is buried" — it
-is "the banner is gone before the user's pointer arrives." A short hands-on
-spike is still worth it, and only needs to answer the timing question.
+Confidence: **high that a single action is reachable without a submenu.** The
+timing half was the residual risk — "the banner is gone before the user's
+pointer arrives" — and it has since been measured rather than left open: an
+un-hovered Temporary banner lasts ~4.5s, and hovering holds it open
+indefinitely. See "Measured on this machine".
 
 ## 1. One action: button or submenu?
 
@@ -205,10 +206,10 @@ Every gap hit while writing this, so the next reader does not re-run the search:
 
 1. **The rule for when macOS collapses actions into "Options."** Apple shows one
    example of each outcome and states no threshold.
-2. **The Temporary banner's on-screen duration.** No number anywhere in Apple's
-   developer docs, HIG, or User Guide.
-3. **Whether hovering pauses or cancels a Temporary banner's dismissal.** Never
-   stated.
+2. ~~**The Temporary banner's on-screen duration.**~~ Still undocumented by
+   Apple, but measured here — see "Measured on this machine" below.
+3. ~~**Whether hovering pauses or cancels a Temporary banner's dismissal.**~~
+   Still unstated by Apple, but measured here.
 4. **Whether "Options" and the Notification Centre chevron are the same
    control.**
 5. **Whether macOS renders `UNNotificationAction.icon`.** Declared for macOS,
@@ -221,6 +222,32 @@ Every gap hit while writing this, so the next reader does not re-run the search:
    WWDC18 "What's New in User Notifications" (session 710) — is no longer listed
    in Apple's WWDC18 video index and its transcript was not retrievable. No
    reachable WWDC session addresses macOS action layout.
+
+## Measured on this machine
+
+Gaps 2 and 3 above are the two that decided whether a Complete action was worth
+building, and Apple documents neither. Both were measured directly on macOS 26
+(Work Journal 0.9.0, Alert Style "Temporary", a real scheduled Task Alert), by
+sampling the screen every 0.4s across the delivery.
+
+| | Un-hovered | Pointer held on the banner |
+|---|---|---|
+| Scheduled for | 10:43:00 | 10:48:00 |
+| Banner appears | 10:43:00.6 | 10:48:00.4 |
+| Last seen | 10:43:04.9 | 10:48:39.8 |
+| On screen | **~4.5s** | **>=39s, never dismissed** |
+
+**Hovering holds a Temporary banner open indefinitely.** The ~4.5s dismissal is
+a countdown the pointer cancels, not a hard limit — so an action button is
+reachable at leisure once the pointer arrives, and the only real deadline is the
+~4.5s to get there.
+
+Hovering also reveals a control area: a Close (X) button appears at the banner's
+top-left. With no `UNNotificationCategory` registered, that is the only control
+there. It is where a registered action's button would appear.
+
+Both numbers are one machine, one macOS version, and Apple guarantees neither.
+Treat them as evidence that the interaction works, not as a contract.
 
 ## The iOS trap
 
@@ -241,6 +268,11 @@ revised. Do not read presentation guarantees out of it:
   on a Mac is not described.
 
 ## What a spike would need to settle
+
+**Settled** — see "Measured on this machine". What follows is what was open
+before that measurement, kept because the reasoning still applies if Apple
+changes the behaviour.
+
 
 Register one `UNNotificationCategory` with exactly one non-destructive,
 optionless action, attach it to a Task Alert, and answer, in order:
