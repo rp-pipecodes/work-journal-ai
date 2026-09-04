@@ -505,6 +505,19 @@ export interface Journal {
   /** The commitments that were kept, most recently completed first. */
   completedTasks(): Promise<Task[]>
   /**
+   * A Search: the Tasks anywhere in the journal whose Task Description
+   * contains the term, newest created first. It spans the Open and Completed
+   * lists at once, because not knowing whether a Task is still open is most
+   * of the reason for looking — see
+   * docs/adr/0036-search-is-one-term-and-its-destination-is-what-changes.md.
+   *
+   * Matching is a case-insensitive substring of the Task Description and
+   * nothing more: the whole term is one substring, and no other column is
+   * looked at. The same escaped `LIKE` as `notesMatching`, and the same known
+   * limit on non-ASCII case folding — `MIGRAÇÃO` does not match `migração`.
+   */
+  tasksMatching(term: string): Promise<Task[]>
+  /**
    * Every Task Occurrence whose completion falls on a Journal Day in the
    * range, newest completion first, each paired with the Task it belongs to.
    * A Recurring Task is never completed by this — what it kept is its
@@ -739,6 +752,18 @@ const SELECT_COMPLETED_TASKS = `
   ${SELECT_TASKS}
   WHERE completed_at IS NOT NULL
   ORDER BY completed_at DESC, id DESC
+`
+
+/**
+ * Both states together, newest created first: a Search spans the Open and
+ * Completed lists, which have an order each, so neither survives it. The
+ * Task Description is the only column looked at, with the same escaped `LIKE`
+ * as `SELECT_NOTES_MATCHING` — see `escapeForLike`.
+ */
+const SELECT_TASKS_MATCHING = `
+  ${SELECT_TASKS}
+  WHERE description LIKE ? ESCAPE '\\'
+  ORDER BY created_at DESC, id DESC
 `
 
 /** Oldest first, both states together: the order an export reads in. */
@@ -1476,6 +1501,13 @@ export function createJournal({
 
     async completedTasks() {
       const rows = await driver.select<TaskRow>(SELECT_COMPLETED_TASKS, [])
+      return rows.map(toTask)
+    },
+
+    async tasksMatching(term) {
+      const rows = await driver.select<TaskRow>(SELECT_TASKS_MATCHING, [
+        `%${escapeForLike(term)}%`,
+      ])
       return rows.map(toTask)
     },
 

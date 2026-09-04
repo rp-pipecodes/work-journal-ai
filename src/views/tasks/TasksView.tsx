@@ -6,6 +6,7 @@ import {
   PlusIcon,
   RepeatIcon,
   RotateCcwIcon,
+  SearchIcon,
   Trash2Icon,
   TriangleAlertIcon,
   type LucideIcon,
@@ -14,6 +15,7 @@ import WindowTitleBar from '@/components/WindowTitleBar'
 import { useOffScreen } from '@/components/on-screen-context'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
@@ -38,6 +40,7 @@ import {
   formatScheduledFor,
   formatSlot,
   formatTaskCompletedAt,
+  isOpen,
   msUntilNextJournalDay,
   scheduleOf,
   slotOf,
@@ -105,7 +108,8 @@ export default function TasksView({
       onChange: setSnapshot,
     }),
   )
-  const { showing, tasks, problem, alertRefusal, alertProblem } = snapshot
+  const { showing, tasks, term, searching, problem, alertRefusal, alertProblem } =
+    snapshot
 
   // The one Task being changed in the Editor, and the one waiting on a
   // confirmed deletion. Both are single, and both are about this screen rather
@@ -231,8 +235,8 @@ export default function TasksView({
   }, [desktop, session])
 
   // Escape belongs to whatever has taken the screen over: the Editor first,
-  // then the deletion, and the Main Window when neither has. Dismissing that
-  // window closes it — it is not kept resident.
+  // then the deletion, then a Search, and the Main Window when none has.
+  // Dismissing that window closes it — it is not kept resident.
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
     if (event.key !== 'Escape') return
 
@@ -242,6 +246,12 @@ export default function TasksView({
       return
     }
     if (deleting !== null) return
+
+    if (searching) {
+      // Clears the results and empties the field; the window stays open.
+      void session.search('')
+      return
+    }
 
     void desktop.closeWindow()
   }
@@ -262,6 +272,16 @@ export default function TasksView({
   function confirmDelete(task: Task) {
     setDeleting(null)
     void session.delete(task.id)
+  }
+
+  /**
+   * Answering a Search result focuses the Task where it already sits,
+   * switching to the Completed list first if that is where it lives — the
+   * same singling-out a clicked Task Alert performs.
+   */
+  function answerResult(task: Task) {
+    setFocused(task.id)
+    void session.show(isOpen(task) ? 'open' : 'completed')
   }
 
   const list = tasks.state === 'tasks' ? tasks.tasks : []
@@ -329,6 +349,11 @@ export default function TasksView({
           </ToggleGroupItem>
         </ToggleGroup>
 
+        <SearchField
+          term={term}
+          onType={(typed) => void session.search(typed)}
+        />
+
         {/* One of the Task Entry Points, and it reaches the very same resident
             window the Hotkey and the Tray Menu do — never a second creation
             surface inside this one. */}
@@ -383,6 +408,26 @@ export default function TasksView({
               heading="No Completed Tasks yet"
             />
           )}
+        {tasks.state === 'results' && tasks.tasks.length === 0 && (
+          <EmptyState
+            icon={SearchIcon}
+            heading={`No Tasks say “${tasks.term}”.`}
+          />
+        )}
+
+        {/* A Search replaces the list outright: exactly one of them is on
+            screen, and the groups do not survive it. */}
+        {tasks.state === 'results' && tasks.tasks.length > 0 && (
+          <ol className="flex flex-col gap-1">
+            {tasks.tasks.map((task) => (
+              <TaskResultLine
+                key={task.id}
+                task={task}
+                onShow={() => answerResult(task)}
+              />
+            ))}
+          </ol>
+        )}
 
         {/* Open Tasks are grouped by where they sit relative to today;
             Completed Tasks are one list, newest kept first, because a
@@ -447,6 +492,62 @@ function TaskGroupSection({
       </h2>
       <ol className="flex flex-col gap-1">{children}</ol>
     </section>
+  )
+}
+
+/**
+ * What the reader is looking for, anywhere in the journal — across the Open
+ * and Completed lists at once. The field holds the term the session holds, so
+ * clearing the Search with Escape empties it without the view keeping a second
+ * copy of the truth — and the debounce, the two-character threshold and which
+ * read may land are the session's, not this input's.
+ */
+function SearchField({
+  term,
+  onType,
+}: {
+  term: string
+  onType: (term: string) => void
+}) {
+  return (
+    // The one control that gives way when the window is narrow: the lists and
+    // New Task are fixed things, a field is just as usable half as wide. It
+    // gives way down to a readable width and then takes a row of its own,
+    // rather than shrinking until nothing can be typed into it.
+    <label className="relative flex min-w-32 flex-1 basis-40 items-center">
+      <span className="sr-only">Search</span>
+      <SearchIcon className="pointer-events-none absolute left-2 size-3 text-muted-foreground" />
+      <Input
+        type="search"
+        value={term}
+        onChange={(event) => onType(event.target.value)}
+        placeholder="Search"
+        className="h-6 w-full min-w-0 pl-6 type-meta [&::-webkit-search-cancel-button]:hidden"
+      />
+    </label>
+  )
+}
+
+/**
+ * One Search result: what the Task says, and the state it is in. The whole
+ * row is the way in, because answering a result has exactly one meaning —
+ * focus the Task where it already sits. The Tasks are not changeable here: a
+ * result is a signpost to a list, and the list is where the Task lives.
+ */
+function TaskResultLine({ task, onShow }: { task: Task; onShow: () => void }) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onShow}
+        className="flex w-full gap-3 rounded-md px-2 py-1 text-left type-body outline-none hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/30"
+      >
+        <span className="flex-1">{task.description}</span>
+        <span className="shrink-0 pt-px type-meta text-muted-foreground">
+          {isOpen(task) ? 'Open' : 'Completed'}
+        </span>
+      </button>
+    </li>
   )
 }
 

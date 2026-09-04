@@ -1,8 +1,9 @@
 /**
  * Managing what you owe, as a session rather than a screen: which of the two
- * lists is showing, the Tasks it resolves to, which of the four groups each one
- * falls in, and what a change to any of them re-reads. Every sequencing rule of
- * Tasks View lives here — which of two overlapping reads may reach the view,
+ * lists is showing — or the Search that has taken the screen over —, the Tasks
+ * it resolves to, which of the four groups each one falls in, and what a
+ * change to any of them re-reads. Every sequencing rule of Tasks View lives
+ * here — which of two overlapping reads may reach the view,
  * what a refused change says, when the OS is asked to allow Task Alerts — so
  * Tasks View is JSX over a snapshot.
  *
@@ -41,10 +42,15 @@ import {
 export type TasksTab = 'open' | 'completed'
 
 /**
- * What Tasks View has to show, once the core has been asked. The Open list
- * carries its groups with it — the same Tasks, in the same order, said in the
- * four groups the window opens on. The Completed list has none: it is one list,
- * newest kept first.
+ * What Tasks View has to show, once the core has been asked. One arm at a
+ * time, which is what makes the screen either a list or a Search's results
+ * and never both — see
+ * docs/adr/0036-search-is-one-term-and-its-destination-is-what-changes.md.
+ * The Open list carries its groups with it — the same Tasks, in the same
+ * order, said in the four groups the window opens on. The Completed list has
+ * none: it is one list, newest kept first. A Search's results have none
+ * either: the groups are a shape for the whole of the Open list, not for an
+ * arbitrary subset of it.
  */
 export type TasksState =
   | { state: 'loading' }
@@ -62,12 +68,35 @@ export type TasksState =
        */
       occurrences: Record<string, TaskOccurrence[]>
     }
+  | { state: 'results'; term: string; tasks: Task[] }
   | { state: 'unreadable' }
+
+/**
+ * How long a term has to stand still before it is asked of the journal. Short
+ * enough to feel like typing, long enough that a word is one read rather than
+ * seven. The same threshold as History's Search — one term, one feel.
+ */
+export const SEARCH_DEBOUNCE_MS = 150
+
+/**
+ * The shortest term worth asking about. One character matches most of a
+ * journal, which is a slower way of showing the reader nothing. The same
+ * threshold as History's Search.
+ */
+export const SEARCH_MIN_TERM_LENGTH = 2
 
 /** Everything Tasks View renders, and the only thing it renders. */
 export interface TasksSnapshot {
   showing: TasksTab
   tasks: TasksState
+  /** What the reader has typed into the search field, and what it shows. */
+  term: string
+  /**
+   * Whether a Search has taken the screen over — true from the keystroke that
+   * reaches two characters until the term is cleared or the list moves, and
+   * true whether or not the term matched anything. What Escape belongs to.
+   */
+  searching: boolean
   /**
    * A change the record refused, said in the app's voice rather than the
    * error's. Nothing until one fails, and gone again the moment one succeeds —
@@ -93,6 +122,8 @@ export interface TasksSnapshot {
 export const openingTasksSnapshot: TasksSnapshot = {
   showing: 'open',
   tasks: { state: 'loading' },
+  term: '',
+  searching: false,
   problem: null,
   alertRefusal: null,
   alertProblem: null,
@@ -103,14 +134,28 @@ export interface TasksSession {
   snapshot(): TasksSnapshot
   /** The first read: the Open Tasks, which is where Tasks View opens. */
   open(): Promise<void>
-  /** The other list, or back again. Nothing else narrows either one. */
+  /**
+   * The other list, or back again. Nothing else narrows either one. Also how
+   * a Search ends: answering a result is this with the Task singled out, so
+   * it inherits everything a move already does. The term stays in the field,
+   * so asking again costs no retyping.
+   */
   show(tab: TasksTab): Promise<void>
   /**
    * The Tasks are no longer what they were, and not because of anything this
    * window did: one was created in the Task Creation window, or changed in
-   * another Tasks View. Re-reads whichever list is showing.
+   * another Tasks View. Re-reads whichever list is showing — unless a Search
+   * is up, which holds still whatever arrives underneath it.
    */
   refresh(): Promise<void>
+  /**
+   * The term as it now reads, after every keystroke. Nothing is asked of the
+   * journal until it has stood still for `SEARCH_DEBOUNCE_MS` and is at least
+   * `SEARCH_MIN_TERM_LENGTH` long; a shorter term takes the results off the
+   * screen and gives the list back. Resolves once the term it was given has
+   * either landed or been overtaken, so a test can await it.
+   */
+  search(term: string): Promise<void>
   /**
    * How the reconciliation the capture window runs went. It is headless, so it
    * says it here: a failure never rolls a Task back, but the user is the only
@@ -184,6 +229,9 @@ export function createTasksSession({
   // Reads can overlap — a completion while a tab change is still in flight —
   // and only the newest one may reach the view.
   let latestRead = 0
+  // A term waiting out its debounce, and how to abandon it: the reader typed
+  // another character, or the list moved out from under it.
+  let waiting: { cancel: () => void } | null = null
 
   function show(change: Partial<TasksSnapshot>): void {
     snapshot = { ...snapshot, ...change }
@@ -227,6 +275,46 @@ export function createTasksSession({
     }
   }
 
+  /** A term that will never be asked for now, let go of without asking. */
+  function abandonWaitingTerm(): void {
+    waiting?.cancel()
+    waiting = null
+  }
+
+  /** One settled term, asked of the whole journal — both lists at once. */
+  async function run(term: string): Promise<void> {
+    const ticket = ++latestRead
+    try {
+      const core = await journal
+      const tasks = await core.tasksMatching(term)
+      // Newest read wins as everywhere else, and a result may only land while
+      // it is still the term in the field: the reader typed on, or the list
+      // moved, and either way this answers a question nobody is asking.
+      if (latestRead !== ticket || !isStillAsking(term)) return
+      show({ tasks: { state: 'results', term, tasks } })
+    } catch (error) {
+      giveUp(error, ticket)
+    }
+  }
+
+  /**
+   * Whether the question a read went to answer is still the one on screen: the
+   * reader has neither typed on nor moved lists since it was asked.
+   */
+  function isStillAsking(term: string): boolean {
+    return snapshot.searching && snapshot.term === term
+  }
+
+  /**
+   * The screen back to the list it never stopped having. A Search still in
+   * flight needs nothing done to it: the term has already changed, which is
+   * what keeps it from landing.
+   */
+  function stopShowingResults(): Promise<void> {
+    if (snapshot.tasks.state !== 'results') return Promise.resolve()
+    return read(snapshot.showing)
+  }
+
   /**
    * One change to the record, then the list as it now reads. A refused change
    * leaves a list that looks exactly as it would if the user had never asked,
@@ -249,6 +337,10 @@ export function createTasksSession({
     // Said whether or not it changed: a change that worked clears the one
     // before it, so no problem outlives the list it was about.
     show({ problem })
+    // A change made here ends a Search the way moving lists does: what was
+    // asked for is the list, and the results answered a question it has now
+    // moved past. The term stays in the field.
+    if (snapshot.searching) show({ searching: false })
     await read(snapshot.showing)
 
     return problem === null
@@ -288,12 +380,50 @@ export function createTasksSession({
 
     async show(tab) {
       // A problem is about the list it was raised over, and this is a
-      // different one.
-      show({ showing: tab, problem: null })
+      // different one. Answering a result and moving lists are both this, so
+      // both end the Search; the term stays in the field either way.
+      abandonWaitingTerm()
+      show({ showing: tab, searching: false, problem: null })
       await read(tab)
     },
 
-    refresh: () => read(snapshot.showing),
+    async refresh() {
+      // A Search is the reader's question, and it is answered as it was asked:
+      // results hold still whatever arrives underneath them.
+      if (snapshot.searching) return
+
+      await read(snapshot.showing)
+    },
+
+    /**
+     * A term as the reader typed it. The field is answered at once so typing
+     * never lags, but the journal is asked only once the term has stood still —
+     * and the list keeps whatever it is showing until that read lands, so
+     * there is no loading state to flash between keystrokes.
+     */
+    search(term: string): Promise<void> {
+      abandonWaitingTerm()
+      const showing = term.length >= SEARCH_MIN_TERM_LENGTH
+      show({ term, searching: showing })
+
+      if (!showing) return stopShowingResults()
+
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          waiting = null
+          void run(term).then(resolve)
+        }, SEARCH_DEBOUNCE_MS)
+
+        waiting = {
+          cancel: () => {
+            clearTimeout(timer)
+            // The term it was given has been overtaken, which is as settled as
+            // it is ever going to get.
+            resolve()
+          },
+        }
+      })
+    },
 
     reconciled(held) {
       show({ alertProblem: held ? null : ALERTS_NOT_HELD })
