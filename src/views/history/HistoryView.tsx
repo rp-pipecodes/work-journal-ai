@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { Combobox as ComboboxPrimitive } from '@base-ui/react/combobox'
 import ProjectChip from '@/components/ProjectChip'
+import SearchField from '@/components/SearchField'
 import WindowTitleBar from '@/components/WindowTitleBar'
 import { useOffScreen } from '@/components/on-screen-context'
 import { useOnScreenToast } from '@/components/on-screen-toast'
@@ -1035,39 +1036,6 @@ function ProjectConstraintField({
         </Tooltip>
       )}
     </span>
-  )
-}
-
-/**
- * What the reader is looking for, anywhere in the journal. The field holds the
- * term the session holds, so clearing the Search with Escape empties it
- * without the view keeping a second copy of the truth — and the debounce, the
- * two-character threshold and which read may land are the session's, not this
- * input's.
- */
-function SearchField({
-  term,
-  onType,
-}: {
-  term: string
-  onType: (term: string) => void
-}) {
-  return (
-    // The one control that gives way when the window is narrow: the Filter and
-    // the Digest are fixed things, a field is just as usable half as wide. It
-    // gives way down to a readable width and then takes a row of its own,
-    // rather than shrinking until nothing can be typed into it.
-    <label className="relative flex min-w-32 flex-1 basis-40 items-center">
-      <span className="sr-only">Search</span>
-      <SearchIcon className="pointer-events-none absolute left-2 size-3 text-muted-foreground" />
-      <Input
-        type="search"
-        value={term}
-        onChange={(event) => onType(event.target.value)}
-        placeholder="Search"
-        className="h-6 w-full min-w-0 pl-6 type-meta [&::-webkit-search-cancel-button]:hidden"
-      />
-    </label>
   )
 }
 

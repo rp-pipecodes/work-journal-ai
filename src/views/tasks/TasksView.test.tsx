@@ -90,6 +90,11 @@ function tab(name: 'Open' | 'Completed'): HTMLElement {
   return screen.getByRole('button', { name })
 }
 
+/** What the reader is looking for, anywhere in the journal. */
+function searchBox(): HTMLInputElement {
+  return screen.getByPlaceholderText('Search') as HTMLInputElement
+}
+
 /**
  * A Task scheduled without a time offers an action rather than an empty time
  * field, so setting one is asking for it first — see ScheduleFields.
@@ -530,8 +535,107 @@ describe('a reconciliation the OS refused', () => {
   })
 })
 
-describe('a clicked Task Alert', () => {
-  it('singles out the Task even when the click built the window', async () => {
+describe('searching the Tasks', () => {
+  it('searches both lists at once, each result labelled with the state it is in', async () => {
+    const { core, created } = await showTasks(['planned the migration'])
+    await core.completeTask(created[0].id)
+    await core.createTask('ran the migration')
+    await screen.findByText('planned the migration')
+
+    fireEvent.change(searchBox(), { target: { value: 'migration' } })
+
+    await screen.findByText('ran the migration')
+    expect(
+      screen.getByText('ran the migration').closest('li')?.textContent,
+    ).toContain('Open')
+    expect(
+      screen.getByText('planned the migration').closest('li')?.textContent,
+    ).toContain('Completed')
+    // The groups are a shape for the whole of the Open list, not for this.
+    expect(groupHeadings()).toEqual([])
+  })
+
+  it('answers a Completed result in the Completed list, with that Task singled out', async () => {
+    const { core, created } = await showTasks([
+      'renew the cert',
+      'chase the invoice',
+    ])
+    await core.completeTask(created[0].id)
+    await screen.findByText('renew the cert')
+
+    fireEvent.change(searchBox(), { target: { value: 'renew' } })
+    fireEvent.click(
+      await screen.findByRole('button', { name: /renew the cert/ }),
+    )
+
+    await expect
+      .poll(() =>
+        screen
+          .queryByText('renew the cert')
+          ?.closest('li')
+          ?.getAttribute('aria-current'),
+      )
+      .toBe('true')
+    await screen.findByRole('checkbox', {
+      name: 'Reopen “renew the cert”',
+    })
+    // The term stays in the field, so asking again costs no retyping.
+    expect(searchBox().value).toBe('renew')
+  })
+
+  it('answers an Open result without leaving the Open list', async () => {
+    await showTasks(['renew the cert', 'chase the invoice'])
+    await screen.findByText('renew the cert')
+
+    fireEvent.change(searchBox(), { target: { value: 'chase' } })
+    fireEvent.click(
+      await screen.findByRole('button', { name: /chase the invoice/ }),
+    )
+
+    await expect
+      .poll(() =>
+        screen
+          .queryByText('chase the invoice')
+          ?.closest('li')
+          ?.getAttribute('aria-current'),
+      )
+      .toBe('true')
+    await screen.findByRole('checkbox', {
+      name: 'Complete “chase the invoice”',
+    })
+  })
+
+  it('says so when no Task says the term', async () => {
+    await showTasks(['renew the cert'])
+    await screen.findByText('renew the cert')
+
+    fireEvent.change(searchBox(), { target: { value: 'migration' } })
+
+    await screen.findByRole('heading', { name: 'No Tasks say “migration”.' })
+  })
+
+  it('leaves the Search on Escape and shows the list again, without closing the window', async () => {
+    const { desktop } = await showTasks(['renew the cert'])
+    let closed = 0
+    desktop.closeWindow = async () => {
+      closed += 1
+    }
+    await screen.findByText('renew the cert')
+
+    fireEvent.change(searchBox(), { target: { value: 'renew' } })
+    await expect.poll(groupHeadings).toEqual([])
+
+    fireEvent.keyDown(document.activeElement ?? document.body, {
+      key: 'Escape',
+    })
+
+    await expect.poll(groupHeadings).toEqual(['Unscheduled'])
+    expect(closed).toBe(0)
+    expect(searchBox().value).toBe('')
+  })
+})
+
+describe('a clicked Task Alert', () => {  it('singles out the Task even when the click built the window', async () => {
     const { driver, close } = await openTestDatabase()
     openDatabases.push(close)
     const core = createJournal({

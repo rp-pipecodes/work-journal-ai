@@ -6,6 +6,7 @@ import {
   type TasksSession,
   type TasksSnapshot,
 } from './tasks-session'
+import { SEARCH_DEBOUNCE_MS } from './search'
 import { fixedClock, openTestDatabase } from './testing/database'
 import { ALERT_REFUSED } from './task-alerts'
 import { fakeDesktop, type FakeDesktop } from '../platform/testing/desktop'
@@ -21,7 +22,13 @@ afterEach(() => {
 
 async function tasksSession(
   descriptions: string[] = [],
-  { alertPermission = 'granted' as FakeDesktop['alertPermission'] } = {},
+  {
+    alertPermission = 'granted' as FakeDesktop['alertPermission'],
+    journal = (core: Journal) => core,
+  }: {
+    alertPermission?: FakeDesktop['alertPermission']
+    journal?: (core: Journal) => Journal
+  } = {},
 ) {
   const { driver, close } = await openTestDatabase()
   openDatabases.push(close)
@@ -40,7 +47,7 @@ async function tasksSession(
   const desktop = fakeDesktop({ driver, alertPermission })
   void desktop.onTasksChanged(() => announced.push(1))
   const session: TasksSession = createTasksSession({
-    journal: Promise.resolve(core),
+    journal: Promise.resolve(journal(core)),
     desktop,
     clock,
     onChange: (next) => {
@@ -73,6 +80,40 @@ function descriptionsOf(snapshot: TasksSnapshot): string[] {
   return snapshot.tasks.state === 'tasks'
     ? snapshot.tasks.tasks.map((task) => task.description)
     : []
+}
+
+/** The descriptions of a Search's results, in the order they are shown. */
+function resultsOf(snapshot: TasksSnapshot): string[] {
+  if (snapshot.tasks.state !== 'results') {
+    throw new Error(`Tasks are ${snapshot.tasks.state}, not results`)
+  }
+  return snapshot.tasks.tasks.map((task) => task.description)
+}
+
+/** A read held open until a test lets it through, keyed by the term asked for. */
+function gate() {
+  const held = new Map<string, Array<() => void>>()
+
+  return {
+    /** From now on, a read of this term waits to be released. */
+    hold(key: string) {
+      held.set(key, [])
+    },
+    reached(key: string) {
+      const queue = held.get(key)
+      if (queue === undefined) return Promise.resolve()
+      return new Promise<void>((resolve) => queue.push(resolve))
+    },
+    release(key: string) {
+      for (const resolve of held.get(key) ?? []) resolve()
+      held.delete(key)
+    },
+  }
+}
+
+/** Long enough for one debounced search to be asked for, and no longer. */
+function afterDebounce() {
+  return new Promise((resolve) => setTimeout(resolve, SEARCH_DEBOUNCE_MS + 10))
 }
 
 describe('opening Tasks View', () => {
@@ -580,5 +621,216 @@ describe('a Recurring Task in the session', () => {
     })
 
     expect(now().problem).toBe('That Task could not be saved.')
+  })
+})
+
+describe('searching the Tasks', () => {
+  it('shows matching Tasks across both lists, newest created first, whatever tab is showing', async () => {
+    const { session, core, clock, created, now } = await tasksSession([
+      'planned the migration',
+    ])
+    clock.set(new Date('2026-03-13T09:00:00'))
+    await core.createTask('ran the migration')
+    await core.completeTask(created[0].id)
+
+    await session.open()
+    await session.search('migration')
+
+    expect(resultsOf(now())).toEqual([
+      'ran the migration',
+      'planned the migration',
+    ])
+    // The tab is where it was: a Search is a way in, not a narrowing.
+    expect(now().showing).toBe('open')
+  })
+
+  it('asks nothing of the journal for a term of one character', async () => {
+    const asked: string[] = []
+    const { session, now } = await tasksSession(['Friday'], {
+      journal: (core) => ({
+        ...core,
+        tasksMatching(term) {
+          asked.push(term)
+          return core.tasksMatching(term)
+        },
+      }),
+    })
+
+    await session.open()
+    await session.search('F')
+
+    expect(asked).toEqual([])
+    expect(descriptionsOf(now())).toEqual(['Friday'])
+    expect(now().searching).toBe(false)
+  })
+
+  it('is showing a Search even when nothing matched', async () => {
+    const { session, now } = await tasksSession(['Friday'])
+
+    await session.open()
+    await session.search('migration')
+
+    expect(now().tasks).toMatchObject({
+      state: 'results',
+      term: 'migration',
+      tasks: [],
+    })
+    expect(now().searching).toBe(true)
+  })
+
+  it('holds the list still while a search is in flight, rather than loading', async () => {
+    const slow = gate()
+    const { session, now } = await tasksSession(['Friday'], {
+      journal: (core) => ({
+        ...core,
+        async tasksMatching(term) {
+          const tasks = await core.tasksMatching(term)
+          await slow.reached(term)
+          return tasks
+        },
+      }),
+    })
+
+    await session.open()
+    slow.hold('Fri')
+    const searching = session.search('Fri')
+    await afterDebounce()
+
+    expect(descriptionsOf(now())).toEqual(['Friday'])
+
+    slow.release('Fri')
+    await searching
+
+    expect(resultsOf(now())).toEqual(['Friday'])
+  })
+
+  it('lets only the newest of two overlapping searches reach the view', async () => {
+    const slow = gate()
+    const { session, now } = await tasksSession(
+      ['the migration', 'the tray menu'],
+      {
+        journal: (core) => ({
+          ...core,
+          async tasksMatching(term) {
+            const tasks = await core.tasksMatching(term)
+            await slow.reached(term)
+            return tasks
+          },
+        }),
+      },
+    )
+
+    await session.open()
+    slow.hold('migration')
+    slow.hold('tray')
+
+    // The reader kept typing: the first term is asked for first and answers
+    // last, and must not land on top of the term they settled on.
+    const stale = session.search('migration')
+    await afterDebounce()
+    const fresh = session.search('tray')
+    slow.release('tray')
+    await fresh
+    slow.release('migration')
+    await stale
+
+    expect(resultsOf(now())).toEqual(['the tray menu'])
+    expect(now().term).toBe('tray')
+  })
+
+  it('goes back to the list when the term drops below two characters', async () => {
+    const { session, now } = await tasksSession(['Friday'])
+
+    await session.open()
+    await session.search('Fri')
+    await session.search('')
+
+    expect(descriptionsOf(now())).toEqual(['Friday'])
+    expect(now().term).toBe('')
+    expect(now().searching).toBe(false)
+  })
+
+  it('switching lists ends the Search but keeps the term in the field', async () => {
+    const { session, now } = await tasksSession(['Friday'])
+
+    await session.open()
+    await session.search('Fri')
+    await session.show('completed')
+
+    expect(now().showing).toBe('completed')
+    expect(now().tasks.state).toBe('tasks')
+    expect(now().searching).toBe(false)
+    expect(now().term).toBe('Fri')
+  })
+
+  it('holds the results still when the Tasks change elsewhere', async () => {
+    const { session, core, clock, now } = await tasksSession([
+      'ran the migration',
+    ])
+
+    await session.open()
+    await session.search('migration')
+
+    clock.set(new Date('2026-03-13T14:00:00'))
+    await core.createTask('the migration again')
+    await session.refresh()
+
+    expect(resultsOf(now())).toEqual(['ran the migration'])
+  })
+
+  it('leaves the results alone when the day is looked at again', async () => {
+    const { session, clock, now } = await tasksSession(['ran the migration'])
+
+    await session.open()
+    await session.search('migration')
+
+    clock.set(new Date('2026-03-10T00:01:00'))
+    session.regroup()
+
+    expect(resultsOf(now())).toEqual(['ran the migration'])
+  })
+
+  it('ends the Search when a change made here shows the list as it now reads', async () => {
+    const { session, created, now } = await tasksSession(['renew it'])
+
+    await session.open()
+    await session.search('renew')
+
+    await session.save(created[0].id, {
+      description: 'renewed it',
+      schedule: null,
+    })
+
+    expect(now().searching).toBe(false)
+    expect(now().term).toBe('renew')
+    expect(descriptionsOf(now())).toEqual(['renewed it'])
+  })
+
+  it('lands a change made while the search debounce is still waiting', async () => {
+    const slow = gate()
+    const { session, created, now } = await tasksSession(['alpha', 'beta'], {
+      journal: (core) => ({
+        ...core,
+        async openTasks() {
+          const tasks = await core.openTasks()
+          await slow.reached('read')
+          return tasks
+        },
+      }),
+    })
+
+    await session.open()
+    slow.hold('read')
+    const searching = session.search('al')
+    // The list — with its checkboxes — is still on screen while the term
+    // waits out its debounce, so completing a Task right now is one ordinary
+    // click, and its re-read is still in flight when the timer fires.
+    const completing = session.complete(created[0].id)
+    await afterDebounce()
+    slow.release('read')
+    await completing
+    await searching
+
+    expect(descriptionsOf(now())).toEqual(['beta'])
   })
 })

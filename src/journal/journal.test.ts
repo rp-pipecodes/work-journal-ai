@@ -1201,6 +1201,70 @@ describe('notesMatching', () => {
   })
 })
 
+describe('tasksMatching', () => {
+  it('finds a Task whose Task Description contains the term, whatever the case', async () => {
+    const { journal } = await journalAt('2026-03-13T09:00:00')
+
+    await journal.createTask('the MIGRATION went wrong')
+
+    expect(
+      (await journal.tasksMatching('migration')).map((task) => task.description),
+    ).toEqual(['the MIGRATION went wrong'])
+  })
+
+  it('reads across the Open and Completed lists together, newest created first', async () => {
+    const { journal, clock } = await journalAt('2026-03-09T09:00:00')
+
+    const kept = await journal.createTask('planned the migration')
+    clock.set(local('2026-03-13T09:00:00'))
+    await journal.createTask('ran the migration')
+    await journal.completeTask(kept.id)
+
+    // One search spans both lists: not knowing whether the Task is still open
+    // is most of the reason for looking.
+    expect(
+      (await journal.tasksMatching('migration')).map((task) => task.description),
+    ).toEqual(['ran the migration', 'planned the migration'])
+  })
+
+  it('returns nothing when no Task Description contains the term', async () => {
+    const { journal } = await journalAt('2026-03-13T09:00:00')
+
+    await journal.createTask('shipped the tray menu')
+
+    expect(await journal.tasksMatching('migration')).toEqual([])
+  })
+
+  it('matches a term in the middle of a word, as a substring does', async () => {
+    const { journal } = await journalAt('2026-03-13T09:00:00')
+
+    await journal.createTask('rewrote the digest grouping')
+
+    expect(
+      (await journal.tasksMatching('grat')).map((task) => task.description),
+    ).toEqual([])
+    expect(
+      (await journal.tasksMatching('roup')).map((task) => task.description),
+    ).toEqual(['rewrote the digest grouping'])
+  })
+
+  it('reads a wildcard as the character it is, not as a pattern', async () => {
+    const { journal, clock } = await journalAt('2026-03-13T09:00:00')
+
+    await journal.createTask('cut the queue by 50%')
+    clock.set(local('2026-03-13T11:00:00'))
+    await journal.createTask('nothing to do with it')
+
+    expect(
+      (await journal.tasksMatching('50%')).map((task) => task.description),
+    ).toEqual(['cut the queue by 50%'])
+    // A bare wildcard would otherwise match every Task in the journal.
+    expect((await journal.tasksMatching('%')).map((task) => task.description)).toEqual(
+      ['cut the queue by 50%'],
+    )
+  })
+})
+
 describe('digest', () => {
   it('renders one bullet per Note, oldest first and without timestamps', async () => {
     const { journal, clock } = await journalAt('2026-03-13T09:00:00')

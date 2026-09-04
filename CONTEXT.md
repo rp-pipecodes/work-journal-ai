@@ -68,7 +68,7 @@ Remove the recurrence rule from a Recurring Task while retaining its current Tas
 _Avoid_: End series, cancel repeat
 
 **Tasks View**:
-The Main Window section for creating and managing Tasks. Tasks are organized prospectively by state and schedule and Notes retrospectively by Journal Day, so Tasks View and History answer different questions — but they are sections of one window and are never on screen at once. Opens on Open Tasks grouped as Overdue, Today, Upcoming, and Unscheduled; Completed Tasks are a separate view, with no arbitrary filters or Search. A checkbox completes a Task immediately without confirmation; Recurring Tasks advance and expose Undo Completion while safe. Scheduled groups sort earliest first, Unscheduled sorts newest Task Created At first, and Completed sorts newest Task Completed At first. Every Task surface observes the same journal state immediately, and group membership refreshes at local midnight and whenever the app wakes or regains focus.
+The Main Window section for creating and managing Tasks. Tasks are organized prospectively by state and schedule and Notes retrospectively by Journal Day, so Tasks View and History answer different questions — but they are sections of one window and are never on screen at once. Opens on Open Tasks grouped as Overdue, Today, Upcoming, and Unscheduled; Completed Tasks are a separate view, with no arbitrary filters. A checkbox completes a Task immediately without confirmation; Recurring Tasks advance and expose Undo Completion while safe. Scheduled groups sort earliest first, Unscheduled sorts newest Task Created At first, and Completed sorts newest Task Completed At first. Every Task surface observes the same journal state immediately, and group membership refreshes at local midnight and whenever the app wakes or regains focus.
 _Avoid_: Task History, Notes filter
 
 **Task Editor**:
@@ -182,7 +182,7 @@ A named civil-time range that sets the day axis of the Filter once and is forgot
 _Avoid_: Quick range, date chip, relative filter, rolling window
 
 **Search**:
-A way of moving the day axis of the Filter, never of narrowing it: the Notes anywhere in the journal whose Body contains what the reader typed, each labelled with the day it is filed under. Body only — not Project names. Answering one takes History to that day in full; the Project constraint is left as it was. What is on screen is always a Filter and nothing else.
+A way of finding a record anywhere in the journal by what its own text says, and taking the reader to where that record already lives — never of narrowing what is on screen: the Notes anywhere in the journal whose Body contains what the reader typed, each labelled with the day it is filed under, and the Tasks anywhere in the journal whose Task Description contains what was typed, each labelled with the state it is in. Body and Task Description only — not Project names. Answering a Note takes History to that day in full, leaving the Project constraint as it was; answering a Task focuses it in its list, switching to Completed Tasks if that is where it lives. What is on screen is always one thing and nothing else: a Filter in History, a list in Tasks View.
 _Avoid_: Query, find, filter by text
 
 **Nudge**:
