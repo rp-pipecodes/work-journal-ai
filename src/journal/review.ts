@@ -146,6 +146,14 @@ export function buildReviewMaterial(
   selection: ReviewSelection,
 ): ReviewMaterial {
   const { filter, digest } = selection
+  // Two locale policies in one document, deliberately. The heading below
+  // names the range in the Filter control's own words — machine locale, like
+  // the control — while the day headings further down render journal content
+  // in the Digest's pinned `en-GB` — like the Digest. Each half matches its
+  // source of truth: the control about which range this is, the Digest about
+  // which days its Notes fall under. Pinning the heading would break the
+  // first sameness on a non-English machine; localizing the day headings
+  // would break the second everywhere. See ADR 0034.
   const heading = `# ${formatDayRange(filter.from, filter.to)}`
   const completions = mergeCompletions({
     completedTasks: selection.completedTasks,
