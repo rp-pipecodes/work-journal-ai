@@ -315,4 +315,192 @@ describe('createTaskAlertsSession', () => {
 
     expect(desktop.reconciliations).toHaveLength(asked)
   })
+
+  it('completes the Task a Complete action names', async () => {
+    const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
+    const task = await journal.createTask('ahead', {
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await session.start()
+
+    desktop.completeTaskAlert({
+      taskId: `task:${task.id}`,
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(await journal.openTasks()).toEqual([])
+    // A success opens nothing: there is nothing to review.
+    expect(desktop.pendingTaskAlert).toBeNull()
+    expect(pending(desktop)).toEqual([])
+  })
+
+  it('advances a Recurring Task from its Alert', async () => {
+    const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
+    const task = await journal.createTask(
+      'stand-up',
+      { date: '2026-03-16', time: '09:00' },
+      { unit: 'day', interval: 1, weekdays: [] },
+    )
+    await session.start()
+
+    desktop.completeTaskAlert({
+      taskId: `task:${task.id}`,
+      date: '2026-03-16',
+      time: '09:00',
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(await journal.openTasks()).toEqual([
+      expect.objectContaining({
+        id: task.id,
+        scheduledDate: '2026-03-17',
+        scheduledTime: '09:00',
+      }),
+    ])
+    expect(desktop.pendingAlerts).toHaveLength(1)
+    expect(desktop.pendingAlerts[0]).toMatchObject({ day: 17, hour: 9 })
+  })
+
+  it('opens the Task for review when its slot moved under the banner', async () => {
+    const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
+    const task = await journal.createTask('ahead', {
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await session.start()
+
+    // Rescheduled since the banner was delivered.
+    await journal.editTask(task.id, {
+      description: task.description,
+      schedule: { date: '2026-03-18', time: '09:30' },
+    })
+    desktop.completeTaskAlert({
+      taskId: `task:${task.id}`,
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    // No mutation: still open at the new slot.
+    expect(await journal.openTasks()).toEqual([
+      expect.objectContaining({
+        id: task.id,
+        scheduledDate: '2026-03-18',
+        scheduledTime: '09:30',
+      }),
+    ])
+    // Opened for review instead.
+    expect(desktop.pendingTaskAlert).toBe(`task:${task.id}`)
+  })
+
+  it('claims no review when the Task is gone', async () => {
+    const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
+    const task = await journal.createTask('ahead', {
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await session.start()
+    await journal.deleteTask(task.id)
+
+    desktop.completeTaskAlert({
+      taskId: `task:${task.id}`,
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(await journal.openTasks()).toEqual([])
+    expect(desktop.pendingTaskAlert).toBeNull()
+  })
+
+  it('processes one Complete delivered twice only once', async () => {
+    const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
+    const task = await journal.createTask('ahead', {
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await session.start()
+
+    const response = {
+      taskId: `task:${task.id}`,
+      date: '2026-03-16',
+      time: '17:00',
+    }
+    desktop.completeTaskAlert(response)
+    desktop.completeTaskAlert(response)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(await journal.openTasks()).toEqual([])
+    // Without the guard the second delivery would read as stale and open the
+    // Task for a review nobody asked for.
+    expect(desktop.pendingTaskAlert).toBeNull()
+  })
+
+  it('claims a Complete chosen while the app was not running', async () => {
+    const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
+    const task = await journal.createTask('ahead', {
+      date: '2026-03-16',
+      time: '17:00',
+    })
+
+    // Chosen before the session was listening: taken at start, exactly once.
+    desktop.completeTaskAlert({
+      taskId: `task:${task.id}`,
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await session.start()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(await journal.openTasks()).toEqual([])
+    expect(await desktop.completedTaskAlert()).toBeNull()
+  })
+
+  it('leaves the Task alone when the guarded completion fails', async () => {
+    const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
+    const task = await journal.createTask('ahead', {
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await session.start()
+    vi.spyOn(journal, 'completeTaskAt').mockRejectedValueOnce(
+      new Error('the journal could not be written'),
+    )
+
+    desktop.completeTaskAlert({
+      taskId: `task:${task.id}`,
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(await journal.openTasks()).toEqual([
+      expect.objectContaining({ id: task.id }),
+    ])
+    expect(desktop.pendingTaskAlert).toBeNull()
+  })
+
+  it('hears no Complete once it is stopped', async () => {
+    const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
+    const task = await journal.createTask('ahead', {
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await session.start()
+    session.stop()
+
+    desktop.completeTaskAlert({
+      taskId: `task:${task.id}`,
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(await journal.openTasks()).toEqual([
+      expect.objectContaining({ id: task.id }),
+    ])
+  })
 })

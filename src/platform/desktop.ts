@@ -279,6 +279,36 @@ export const TASKS_CHANGED_EVENT = 'tasks://changed'
 export const TASK_ALERT_OPENED_EVENT = 'task-alert://opened'
 
 /**
+ * What choosing Complete on a Task Alert carries: which Task, and the exact
+ * Scheduled For the delivered banner represented. The slot is what makes a
+ * stale banner harmless — completion proceeds only if the journal still holds
+ * this Task Open at this slot; see `completeTaskAt` in
+ * `src/journal/journal.ts`. Must match `TaskAlertCompletion` in
+ * `src-tauri/src/alerts.rs`.
+ */
+export interface TaskAlertCompletion {
+  /**
+   * The pending request's identifier the Alert was registered under, verbatim
+   * — which Task it names is the journal's to say, in `taskIdOfAlert`.
+   */
+  taskId: string
+  /** The delivered slot's date, exactly as `TaskSchedule` spells it. */
+  date: string
+  /** The delivered slot's time, exactly as `TaskSchedule` spells it. */
+  time: string
+}
+
+/**
+ * The user chose Complete on a Task Alert. Spoken by the Rust side, which is
+ * the only part of the app macOS hands the response to, and carried to the
+ * Capture window, where the Task Alerts session processes it — never to the
+ * Main Window, which is what the default click is for. Must match
+ * `TASK_ALERT_COMPLETED_EVENT` in `src-tauri/src/lib.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
+ */
+export const TASK_ALERT_COMPLETED_EVENT = 'task-alert://completed'
+
+/**
  * How a reconciliation went: whether the OS is now holding what the journal
  * says it should. Spoken by the reconciliation, which runs in the capture
  * window and has no screen of its own, and heard by Tasks View, which does. A
@@ -511,6 +541,15 @@ export interface Desktop {
    */
   onTaskAlertOpened(handle: (taskId: string) => void): Promise<Unlisten>
   /**
+   * The user chose Complete on a Task Alert. Carries the Task and the exact
+   * delivered slot, so the session can complete it only if it still stands
+   * there. Heard in the Capture window, where the session lives — the default
+   * click keeps its own announcement to the Main Window.
+   */
+  onTaskAlertCompleted(
+    handle: (completion: TaskAlertCompletion) => void,
+  ): Promise<Unlisten>
+  /**
    * Whether the OS took what the journal asked it to hold. Said by the window
    * that reconciles, which is headless, so that the window with a screen can
    * say it to the user — and said either way, so a failure that has since been
@@ -544,6 +583,24 @@ export interface Desktop {
    * hands it over exactly once.
    */
   openedTaskAlert(): Promise<string | null>
+  /**
+   * The Complete action waiting to be claimed, if one was chosen — asked for
+   * by the Capture window as it starts, and null when the app was opened any
+   * other way.
+   *
+   * The announcement above is not enough on its own: a Complete chosen while
+   * Work Journal was not running arrives before the Capture window is
+   * listening. The Rust side keeps it until it is asked for, and hands it over
+   * exactly once.
+   */
+  completedTaskAlert(): Promise<TaskAlertCompletion | null>
+  /**
+   * Opens the Main Window on Tasks View focused on the Task an Alert names —
+   * what a stale Complete does instead of completing, so the banner's Task is
+   * reviewed rather than acted on. Takes the pending request's identifier, as
+   * `completedTaskAlert` carries it.
+   */
+  focusTaskAlert(alertId: string): Promise<void>
   /**
    * Opens System Settings at Notifications — the only way back after a denial,
    * since macOS will not show its prompt a second time. The pane is opened by

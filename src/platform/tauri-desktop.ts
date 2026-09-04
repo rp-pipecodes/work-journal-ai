@@ -39,6 +39,7 @@ import {
   SETTINGS_FILE,
   SECTION_REQUESTED_EVENT,
   SYSTEM_WOKE_EVENT,
+  TASK_ALERT_COMPLETED_EVENT,
   TASK_ALERT_OPENED_EVENT,
   TASK_ALERTS_RECONCILED_EVENT,
   TASK_CREATION_SHOWN_EVENT,
@@ -55,6 +56,7 @@ import {
   type MainSection,
   type StandupPostRequest,
   type StandupPostResponse,
+  type TaskAlertCompletion,
   type TaskAlertPermission,
 } from './desktop'
 
@@ -178,6 +180,10 @@ export function createTauriDesktop(): Desktop {
       listen<{ taskId: string }>(TASK_ALERT_OPENED_EVENT, ({ payload }) =>
         handle(payload.taskId),
       ),
+    onTaskAlertCompleted: (handle) =>
+      listen<TaskAlertCompletion>(TASK_ALERT_COMPLETED_EVENT, ({ payload }) =>
+        handle(payload),
+      ),
     announceTaskAlertsReconciled: (held) =>
       emit(TASK_ALERTS_RECONCILED_EVENT, { held }),
     onTaskAlertsReconciled: (handle) =>
@@ -193,6 +199,11 @@ export function createTauriDesktop(): Desktop {
 
     openedTaskAlert: async () =>
       (await invoke<string | null>('opened_task_alert')) ?? null,
+    completedTaskAlert: async () =>
+      (await invoke<TaskAlertCompletion | null>('completed_task_alert')) ??
+      null,
+    focusTaskAlert: (alertId) =>
+      invoke('focus_task_alert', { alertId }),
     openNotificationSettings: () => invoke('open_notification_settings'),
 
     onYesterdayDigestRequested: (handle) =>

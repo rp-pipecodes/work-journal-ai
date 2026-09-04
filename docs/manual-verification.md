@@ -284,7 +284,16 @@ Requires the release build: macOS will not hold a notification for a binary with
 - [ ] Allowing it leaves the Task exactly as saved; **Settings › Task Alerts** then reads **Allowed**.
 - [ ] The Alert arrives at the minute chosen, shows the whole Task Description, and plays a sound.
 - [ ] It arrives while Work Journal is the active application too, rather than being swallowed.
-- [ ] Clicking the Alert opens Tasks View with that Task singled out. There is no Complete and no Snooze on it.
+- [ ] Clicking the Alert opens Tasks View with that Task singled out. There is no Snooze on it.
+- [ ] The Alert also offers a **Complete** action and nothing else: on the default banner style it appears as a button on hover, and choosing it completes the Task without opening any window.
+- [ ] Choosing **Complete** on an ordinary Task completes it while the app is running: Tasks View lists it under **Completed**, and nothing arrives for it again.
+- [ ] Choosing **Complete** while the app is quit still completes the Task — no window opens — and the next launch shows it completed.
+- [ ] Choosing **Complete** on a Recurring Task advances it to its next slot immediately, with exactly one pending Alert left for the series.
+- [ ] Choosing **Complete** on a banner delivered before a reschedule completes nothing: Tasks View opens with the Task singled out at its new slot instead.
+- [ ] The same after a Recurring Task advanced on its own: an old banner never completes the successor occurrence.
+- [ ] Choosing **Complete** on a banner whose Task was deleted completes nothing and opens nothing.
+- [ ] With notifications denied, Tasks still complete from the list exactly as before; turning notifications back on registers the Tasks still ahead with their **Complete** action, and replays none of the past ones.
+- [ ] Completing from the Alert across a daylight-saving transition behaves exactly as completing from the list: the wall-clock slot is what is checked, and the series advances on the same civil day.
 - [ ] Clicking an Alert with Tasks View closed — including one delivered while the app was quit — opens the window with that Task singled out, not on a plain list.
 - [ ] Switching to **Completed** and back stops singling it out, and opening Tasks View from the Tray Menu afterwards singles out nothing.
 - [ ] Quitting the app before the moment arrives still delivers the Alert.

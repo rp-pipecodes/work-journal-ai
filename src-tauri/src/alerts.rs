@@ -23,6 +23,7 @@
 //! docs/calendar-access.md.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// What the OS currently allows. Must match `TaskAlertPermission` in
 /// `src/platform/desktop.ts`.
@@ -58,6 +59,73 @@ pub struct TaskAlert {
     pub minute: i32,
 }
 
+/// What choosing Complete on a Task Alert carries: which Task, and the exact
+/// Scheduled For the delivered banner represented. Must match
+/// `TaskAlertCompletion` in `src/platform/desktop.ts`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskAlertCompletion {
+    pub task_id: String,
+    pub date: String,
+    pub time: String,
+}
+
+/// The identifier of the Complete action. Completion is never inferred from
+/// button text — only this identifier decides.
+pub const COMPLETE_ACTION_ID: &str = "complete-task";
+
+/// The notification category Task Alerts are registered under: one action,
+/// Complete, and nothing else.
+pub const TASK_ALERT_CATEGORY_ID: &str = "task-alert";
+
+/// The `userInfo` keys carrying the delivered slot. The Task is named by the
+/// pending request's identifier verbatim — which Task that is stays the
+/// journal's to say — while the date and time it represented travel here,
+/// spelled exactly as `TaskSchedule` spells them.
+const USER_INFO_TASK_ID: &str = "taskId";
+const USER_INFO_DATE: &str = "date";
+const USER_INFO_TIME: &str = "time";
+
+/// What a notification response is, once classified: a default click opens the
+/// Task, while a Complete action carries the exact delivered slot for the
+/// guarded completion to check.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AlertResponse {
+    Open,
+    Complete(TaskAlertCompletion),
+}
+
+/// Which response a notification response is, from the action identifier and
+/// the `userInfo` payload — and nothing else.
+///
+/// Pure, and deliberately out of the `objc2` module so it is reachable from a
+/// test on any platform; the delegate calls it and does nothing else with the
+/// response. Anything that is not a Complete with a whole slot behind it is an
+/// Open — including a Complete whose payload is missing, which opens the Task
+/// rather than dropping the response on the floor.
+pub fn classify_alert_response(
+    action_id: &str,
+    user_info: &HashMap<String, String>,
+) -> AlertResponse {
+    if action_id != COMPLETE_ACTION_ID {
+        return AlertResponse::Open;
+    }
+
+    let slot = [USER_INFO_TASK_ID, USER_INFO_DATE, USER_INFO_TIME]
+        .into_iter()
+        .map(|key| user_info.get(key).filter(|value| !value.is_empty()))
+        .collect::<Option<Vec<_>>>();
+
+    match slot.as_deref() {
+        Some([task_id, date, time]) => AlertResponse::Complete(TaskAlertCompletion {
+            task_id: task_id.to_string(),
+            date: date.to_string(),
+            time: time.to_string(),
+        }),
+        _ => AlertResponse::Open,
+    }
+}
+
 /// Which of the app's pending requests the journal no longer wants: everything
 /// macOS is holding that is not in the answer it was just handed.
 ///
@@ -82,14 +150,18 @@ mod user_notifications {
     use objc2::runtime::ProtocolObject;
     use objc2::{define_class, msg_send, DefinedClass, MainThreadOnly};
     use objc2_foundation::{
-        NSBundle, NSDateComponents, NSError, NSMutableArray, NSObject, NSObjectProtocol, NSString,
+        NSArray, NSBundle, NSDateComponents, NSDictionary, NSError, NSMutableArray,
+        NSMutableDictionary, NSSet, NSObject, NSObjectProtocol, NSString,
     };
     use objc2_user_notifications::{
         UNAuthorizationOptions, UNAuthorizationStatus, UNCalendarNotificationTrigger,
-        UNMutableNotificationContent, UNNotification, UNNotificationPresentationOptions,
-        UNNotificationRequest, UNNotificationResponse, UNNotificationSettings, UNNotificationSound,
-        UNUserNotificationCenter, UNUserNotificationCenterDelegate,
+        UNMutableNotificationContent, UNNotification, UNNotificationAction,
+        UNNotificationActionOptionNone, UNNotificationCategory, UNNotificationCategoryOptionNone,
+        UNNotificationPresentationOptions, UNNotificationRequest, UNNotificationResponse,
+        UNNotificationSettings, UNNotificationSound, UNUserNotificationCenter,
+        UNUserNotificationCenterDelegate,
     };
+    use std::collections::HashMap;
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -185,6 +257,7 @@ mod user_notifications {
             return Err("Work Journal is not running from a bundle, so macOS will not hold Task Alerts.".to_string());
         };
 
+        register_complete_category(&center);
         cancel_all_but(&center, alerts)?;
 
         for alert in alerts {
@@ -195,6 +268,31 @@ mod user_notifications {
         }
 
         Ok(())
+    }
+
+    /// The one action a Task Alert carries: Complete, with no options — in
+    /// particular not `.foreground`, so choosing it never brings the app
+    /// forward. The session decides whether anything needs showing.
+    ///
+    /// Registering again replaces the category macOS holds, so this runs with
+    /// every reconciliation rather than once: whatever the OS lost while the
+    /// app was away is back before the requests that name it are.
+    fn register_complete_category(center: &UNUserNotificationCenter) {
+        let complete = UNNotificationAction::actionWithIdentifier_title_options(
+            &NSString::from_str(super::COMPLETE_ACTION_ID),
+            &NSString::from_str("Complete"),
+            UNNotificationActionOptionNone,
+        );
+        let actions = NSArray::from_retained_slice(&[complete]);
+        let category =
+            UNNotificationCategory::categoryWithIdentifier_actions_intentIdentifiers_options(
+                &NSString::from_str(super::TASK_ALERT_CATEGORY_ID),
+                &actions,
+                &NSArray::new(),
+                UNNotificationCategoryOptionNone,
+            );
+
+        center.setNotificationCategories(&NSSet::setWithObject(&*category));
     }
 
     /// Every pending request of this app's that the journal no longer wants —
@@ -251,6 +349,13 @@ mod user_notifications {
         // the room the description has.
         content.setBody(&NSString::from_str(&alert.description));
         content.setSound(Some(&UNNotificationSound::defaultSound()));
+        content.setCategoryIdentifier(&NSString::from_str(super::TASK_ALERT_CATEGORY_ID));
+        // The delivered slot, as the response carries it back. The identifier
+        // stays the Task's own — an interpolated one would break the
+        // replacement reconciliation counts on.
+        unsafe {
+            content.setUserInfo(&slot_user_info(alert));
+        }
 
         let when = NSDateComponents::new();
         when.setYear(alert.year as isize);
@@ -271,12 +376,54 @@ mod user_notifications {
         )
     }
 
+    /// The delivered slot, as a response carries it back: the pending
+    /// request's identifier verbatim, plus the civil date and minute it
+    /// represented — spelled exactly as `TaskSchedule` spells them, so the
+    /// guarded completion compares strings without parsing anything.
+    fn slot_user_info(alert: &TaskAlert) -> Retained<NSDictionary> {
+        let date = format!(
+            "{:04}-{:02}-{:02}",
+            alert.year, alert.month, alert.day
+        );
+        let time = format!("{:02}:{:02}", alert.hour, alert.minute);
+
+        let info: Retained<NSMutableDictionary> = NSMutableDictionary::new();
+        // Safety: every key is an `NSString`, which is `NSCopying`, and every
+        // value is one too.
+        unsafe {
+            for (key, value) in [
+                (super::USER_INFO_TASK_ID, alert.id.as_str()),
+                (super::USER_INFO_DATE, date.as_str()),
+                (super::USER_INFO_TIME, time.as_str()),
+            ] {
+                let key = NSString::from_str(key);
+                let value = NSString::from_str(value);
+                info.setObject_forKey(&value, ProtocolObject::from_ref(&*key));
+            }
+        }
+        info.into_super()
+    }
+
+    /// The delivered slot back out of a response's payload: each of the three
+    /// values this module wrote, read as the strings they were stored as.
+    /// Anything else in there is not one of ours and is ignored.
+    fn user_info_text(user_info: &NSDictionary, key: &str) -> Option<String> {
+        let value = user_info.objectForKey(&NSString::from_str(key))?;
+        let text: Retained<NSString> = value.downcast().ok()?;
+        Some(text.to_string())
+    }
+
     /// What a click on a Task Alert does, and what one arriving while Work
     /// Journal is in front looks like. Held by the notification centre for the
     /// life of the app.
     pub struct Clicks {
         /// Called with the identifier the Alert was registered under.
         pub opened: Box<dyn Fn(String) + Send + Sync>,
+        /// Called with the Task and the exact delivered slot when Complete is
+        /// chosen. Addressed to the Capture window, where the session that
+        /// processes it lives — the default click keeps going to the Main
+        /// Window.
+        pub completed: Box<dyn Fn(super::TaskAlertCompletion) + Send + Sync>,
     }
 
     define_class!(
@@ -309,10 +456,12 @@ mod user_notifications {
                     | UNNotificationPresentationOptions::Sound,));
             }
 
-            /// The user clicked it. There are no actions on a Task Alert — no
-            /// Complete and no Snooze — so the only response worth anything is
-            /// the click itself, and all it does is open Tasks View on that
-            /// Task.
+            /// The user responded. A Complete action carries the delivered slot
+            /// and goes to the session as a typed completion; anything else —
+            /// the default click above all — opens Tasks View on the Task,
+            /// exactly as before. Completion is never inferred from button
+            /// text: only the action identifier decides, through
+            /// `classify_alert_response`, which is also what the test proves.
             #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
             fn did_receive(
                 &self,
@@ -320,8 +469,27 @@ mod user_notifications {
                 response: &UNNotificationResponse,
                 completion: &block2::DynBlock<dyn Fn()>,
             ) {
-                let identifier = response.notification().request().identifier();
-                (self.ivars().opened)(identifier.to_string());
+                let request = response.notification().request();
+                let action = response.actionIdentifier().to_string();
+
+                let mut delivered = HashMap::new();
+                let user_info = request.content().userInfo();
+                for key in [
+                    super::USER_INFO_TASK_ID,
+                    super::USER_INFO_DATE,
+                    super::USER_INFO_TIME,
+                ] {
+                    if let Some(value) = user_info_text(&user_info, key) {
+                        delivered.insert(key.to_string(), value);
+                    }
+                }
+
+                match super::classify_alert_response(&action, &delivered) {
+                    super::AlertResponse::Complete(done) => (self.ivars().completed)(done),
+                    super::AlertResponse::Open => {
+                        (self.ivars().opened)(request.identifier().to_string());
+                    }
+                }
                 completion.call(());
             }
         }
@@ -395,6 +563,7 @@ mod user_notifications {
 
     pub struct Clicks {
         pub opened: Box<dyn Fn(String) + Send + Sync>,
+        pub completed: Box<dyn Fn(super::TaskAlertCompletion) + Send + Sync>,
     }
 
     pub fn watch_for_clicks(_clicks: Clicks) {}
@@ -410,7 +579,10 @@ pub use user_notifications::{
 
 #[cfg(test)]
 mod tests {
-    use super::{stale_identifiers, TaskAlert};
+    use super::{
+        classify_alert_response, stale_identifiers, AlertResponse, TaskAlert, COMPLETE_ACTION_ID,
+    };
+    use std::collections::HashMap;
 
     /// One Task's pending request, under the identifier the journal derives
     /// from the Task — the same one every occurrence of a Recurring Task
@@ -455,6 +627,79 @@ mod tests {
         assert_eq!(
             stale_identifiers(&pending, &[]),
             vec!["task:a".to_string()]
+        );
+    }
+
+    /// The `userInfo` payload a delivered Alert carries back: the pending
+    /// request's identifier verbatim, plus the civil slot it represented.
+    fn delivered() -> HashMap<String, String> {
+        HashMap::from([
+            ("taskId".to_string(), "task:a".to_string()),
+            ("date".to_string(), "2026-03-16".to_string()),
+            ("time".to_string(), "09:00".to_string()),
+        ])
+    }
+
+    #[test]
+    fn a_complete_action_with_a_whole_slot_completes() {
+        assert_eq!(
+            classify_alert_response(COMPLETE_ACTION_ID, &delivered()),
+            AlertResponse::Complete(super::TaskAlertCompletion {
+                task_id: "task:a".to_string(),
+                date: "2026-03-16".to_string(),
+                time: "09:00".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_default_click_opens_whatever_the_payload_says() {
+        // The system default action identifier, as Apple names it: a click is
+        // a click even with a whole slot behind it.
+        assert_eq!(
+            classify_alert_response(
+                "com.apple.UNNotificationDefaultActionIdentifier",
+                &delivered()
+            ),
+            AlertResponse::Open
+        );
+    }
+
+    #[test]
+    fn an_unknown_action_opens() {
+        assert_eq!(
+            classify_alert_response("snooze-task", &delivered()),
+            AlertResponse::Open
+        );
+    }
+
+    #[test]
+    fn a_complete_without_a_slot_opens_rather_than_dropping_the_response() {
+        assert_eq!(
+            classify_alert_response(COMPLETE_ACTION_ID, &HashMap::new()),
+            AlertResponse::Open
+        );
+    }
+
+    #[test]
+    fn a_complete_with_a_partial_slot_opens() {
+        let mut partial = delivered();
+        partial.remove("time");
+
+        assert_eq!(
+            classify_alert_response(COMPLETE_ACTION_ID, &partial),
+            AlertResponse::Open
+        );
+    }
+
+    #[test]
+    fn a_complete_with_an_empty_value_opens() {
+        let mut empty = delivered();
+        empty.insert("time".to_string(), String::new());
+
+        assert_eq!(
+            classify_alert_response(COMPLETE_ACTION_ID, &empty),
+            AlertResponse::Open
         );
     }
 }
