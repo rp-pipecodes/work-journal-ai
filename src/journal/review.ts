@@ -55,35 +55,50 @@ export interface ReviewMaterial {
 }
 
 /**
- * Selects Review Material's records for one Filter. Uses the journal's
- * canonical `digest(filter)` for Notes, and reads `occurrencesKeptIn` for the
- * range alongside `completedTasks()`, keeping ordinary Tasks whose Task
- * Completed At falls inclusively between `filter.from` and `filter.to` — the
- * range read already bounds occurrences the same way, and both are narrowed
- * to the local Journal Day so a completion just after local midnight lands
- * with the day it belongs to.
+ * The work completed in one Filter's days: ordinary Tasks and Task
+ * Occurrences, each kept only when its completion falls in the range.
+ */
+export interface ReviewCompletions {
+  /** Ordinary Tasks completed in the Filter's days. */
+  completedTasks: Task[]
+  /**
+   * Task Occurrences completed in the Filter's days, each with the Recurring
+   * Task it belongs to. The parent is never completed by this — it continues.
+   */
+  completedOccurrences: CompletedOccurrence[]
+}
+
+/**
+ * Selects the work completed in one Filter's days. Reads
+ * `occurrencesKeptIn` for the range alongside `completedTasks()`, keeping
+ * ordinary Tasks whose Task Completed At falls inclusively between
+ * `filter.from` and `filter.to` — the range read already bounds occurrences
+ * the same way, and both are narrowed to the local Journal Day so a
+ * completion just after local midnight lands with the day it belongs to.
+ *
+ * Notes are deliberately not read here: the session holds the canonical
+ * Digest from the read that drew the list, and Review Material embeds that
+ * Digest verbatim — a second read could describe a journal the reader is no
+ * longer looking at, which is the one disagreement ADR 0034 forbids.
  *
  * Only called under Project Any: a Task is never filed under a Project, so a
  * named Project or Unfiled has no completed work to select. The session
  * refuses those before asking; this function reads whatever Filter it is
  * handed.
  */
-export async function selectReview({
+export async function selectReviewCompletions({
   journal,
   filter,
 }: {
   journal: Journal
   filter: Filter
-}): Promise<ReviewSelection> {
-  const [digest, completedTasks, completedOccurrences] = await Promise.all([
-    journal.digest(filter),
+}): Promise<ReviewCompletions> {
+  const [completedTasks, completedOccurrences] = await Promise.all([
     journal.completedTasks(),
     journal.occurrencesKeptIn({ from: filter.from, to: filter.to }),
   ])
 
   return {
-    filter,
-    digest,
     completedTasks: completedTasks.filter(
       (task) =>
         task.completedAt !== null && inRange(task.completedAt, filter),
@@ -94,6 +109,25 @@ export async function selectReview({
         inRange(completed.occurrence.completedAt, filter),
     ),
   }
+}
+
+/**
+ * Selects Review Material's records for one Filter: the journal's canonical
+ * `digest(filter)` for Notes, plus the work completed in its days.
+ */
+export async function selectReview({
+  journal,
+  filter,
+}: {
+  journal: Journal
+  filter: Filter
+}): Promise<ReviewSelection> {
+  const [digest, completions] = await Promise.all([
+    journal.digest(filter),
+    selectReviewCompletions({ journal, filter }),
+  ])
+
+  return { filter, digest, ...completions }
 }
 
 /** Whether there is nothing to copy: neither Notes nor completions. */

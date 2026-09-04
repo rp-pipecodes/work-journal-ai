@@ -988,6 +988,23 @@ describe('copying Review Material', () => {
     expect(session.snapshot().confirmation).toContain('Review Material')
   })
 
+  it('embeds the Digest as it was read, so the two copies cannot disagree', async () => {
+    const { session, core, notes, clipboard } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'Friday' },
+    ])
+
+    await session.open()
+    // The journal moves behind the session's back — another window's
+    // correction, with no refresh yet — so a fresh read would describe Notes
+    // the reader is no longer looking at.
+    await core.editBody(notes[0].id, 'Friday, reworded elsewhere')
+    await session.copyReviewMaterial()
+
+    expect(clipboard.written).toHaveLength(1)
+    expect(clipboard.written[0]).toContain('- Friday')
+    expect(clipboard.written[0]).not.toContain('reworded')
+  })
+
   it('copies a range whose only content is completed work', async () => {
     const { session, core, clock, clipboard } = await sessionOver([
       { at: '2026-03-13T10:00:00', body: 'Friday' },

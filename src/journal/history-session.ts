@@ -36,7 +36,7 @@ import {
   NOTHING_TO_REVIEW,
   REVIEW_PROJECT_RULE,
   reviewRefuses,
-  selectReview,
+  selectReviewCompletions,
 } from './review'
 
 /**
@@ -226,6 +226,11 @@ export function createHistorySession({
   // The Filter as Markdown, kept ready for a copy. Read from the core with the
   // list, so what gets copied is never the list on screen.
   let digest: Digest | null = null
+  // The Filter that Digest was read for. A move names the new Filter at once
+  // while the read that draws it is still in flight, so the held Digest can
+  // belong to the Filter the reader just left — a copy is of what was drawn,
+  // and this is how it knows what that was.
+  let digestFilter: Filter | null = null
   // A term waiting out its debounce, and how to abandon it: the reader typed
   // another character, or the Filter moved out from under it.
   let waiting: { cancel: () => void } | null = null
@@ -255,6 +260,7 @@ export function createHistorySession({
       ])
       if (latestRead !== ticket) return
       digest = rendered
+      digestFilter = filter
       show({
         projects,
         history: { state: 'notes', days: groupByJournalDay(notes) },
@@ -559,8 +565,13 @@ export function createHistorySession({
     },
 
     async copyReviewMaterial() {
-      const filter = snapshot.filter
-      if (filter === null) return
+      // The copy is of what was drawn: the held Digest, and the Filter it
+      // was read for — the same Digest `copy()` would write, so the two can
+      // never disagree about the Filter's Notes. Completions are the only
+      // fresh read, taken for those same days.
+      const held = digest
+      const filter = digestFilter
+      if (held === null || filter === null) return
 
       // Completed work has no Project: the action is disabled in the view,
       // and refused here for anything that asks regardless.
@@ -570,29 +581,23 @@ export function createHistorySession({
       }
 
       const ticket = latestRead
-      let selection
+      let completions
       try {
         const core = await journal
-        selection = await selectReview({ journal: core, filter })
+        completions = await selectReviewCompletions({ journal: core, filter })
       } catch (error) {
         console.error('could not read Review Material', error)
-        if (latestRead === ticket) {
+        if (latestRead === ticket && digest === held) {
           show({ confirmation: 'Could not copy Review Material.' })
         }
         return
       }
       // A read that lands after the Filter moved must not copy the wrong
-      // days: the move's own read holds the newer ticket.
-      if (latestRead !== ticket) return
-      if (
-        snapshot.filter === null ||
-        snapshot.filter.from !== filter.from ||
-        snapshot.filter.to !== filter.to ||
-        constraintOf(snapshot.filter).kind !== 'any'
-      ) {
-        return
-      }
+      // days: the move's own read holds the newer ticket, and a landed read
+      // replaces the held Digest — either way what was drawn is gone.
+      if (latestRead !== ticket || digest !== held) return
 
+      const selection = { filter, digest: held, ...completions }
       if (reviewRefuses(selection)) {
         show({ confirmation: NOTHING_TO_REVIEW })
         return
