@@ -383,6 +383,11 @@ describe('Copy Review Material', () => {
     expect(copy.parentElement?.getAttribute('title')).toContain(
       'Review Material covers completed work, which has no Project.',
     )
+    // …and said, to whoever is listening rather than looking: a title on a
+    // wrapper is announced to nobody, so the rule is described to the button.
+    expect(ruleSaidTo(copy)).toContain(
+      'Review Material covers completed work, which has no Project.',
+    )
   })
 
   it('is disabled with the reason under Unfiled', async () => {
@@ -399,6 +404,9 @@ describe('Copy Review Material', () => {
     }) as HTMLButtonElement
     expect(copy.disabled).toBe(true)
     expect(copy.parentElement?.getAttribute('title')).toContain(
+      'Review Material covers completed work, which has no Project.',
+    )
+    expect(ruleSaidTo(copy)).toContain(
       'Review Material covers completed work, which has no Project.',
     )
   })
@@ -554,6 +562,20 @@ async function showOffScreenable() {
 /** The Filter's header, which is the whole of what this file is about. */
 function header(): HTMLElement {
   return screen.getByRole('banner')
+}
+
+/**
+ * What a screen reader makes of the nodes a control's description points at:
+ * the description is the AT contract, so the assertion reads what it resolves
+ * to rather than which DOM structure carries it.
+ */
+function ruleSaidTo(control: HTMLElement): string {
+  const described = control.getAttribute('aria-describedby')?.split(' ') ?? []
+  return described
+    .map((id) => document.getElementById(id)?.textContent ?? '')
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 /** The record's refusals are the subject here, not noise on the console. */

@@ -1095,6 +1095,7 @@ function Copies({
   // A Task is never filed under a Project: the Project axis cannot narrow
   // what was never filed under it.
   const reviewAllowed = constraintOf(filter).kind === 'any'
+  const reviewRuleId = useId()
 
   return (
     <div className="ml-auto flex shrink-0 items-center gap-3">
@@ -1107,9 +1108,10 @@ function Copies({
         Copy Digest
       </Button>
       {/*
-        The reason rides on the wrapper rather than the button: a disabled
-        button fires no hover, so the rule would be unreadable on the button
-        itself.
+        The reason rides on the wrapper as a tooltip for whoever is looking —
+        a disabled button fires no hover, so it would be unreadable on the
+        button itself — and is described to the button for whoever is
+        listening: a title on a wrapper is announced to nobody.
       */}
       <span title={reviewAllowed ? undefined : REVIEW_PROJECT_RULE}>
         <Button
@@ -1117,10 +1119,16 @@ function Copies({
           variant="outline"
           onClick={onCopyReviewMaterial}
           disabled={!reviewAllowed}
+          aria-describedby={reviewAllowed ? undefined : reviewRuleId}
         >
           <ClipboardCopyIcon data-icon="inline-start" />
           Copy Review Material
         </Button>
+        {!reviewAllowed && (
+          <span id={reviewRuleId} className="sr-only">
+            {REVIEW_PROJECT_RULE}
+          </span>
+        )}
       </span>
     </div>
   )
