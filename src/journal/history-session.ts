@@ -17,6 +17,7 @@
 
 import {
   ANY_PROJECT,
+  constraintOf,
   decideArrival,
   describeCopiedDigest,
   groupByJournalDay,
@@ -29,6 +30,14 @@ import {
   type Note,
   type ProjectConstraint,
 } from './journal'
+import {
+  buildReviewMaterial,
+  describeCopiedReviewMaterial,
+  NOTHING_TO_REVIEW,
+  REVIEW_PROJECT_RULE,
+  reviewRefuses,
+  selectReview,
+} from './review'
 
 /**
  * What History has to show, once the core has been asked. One arm at a time,
@@ -171,6 +180,18 @@ export interface HistorySession {
    * docs/adr/0012-the-os-writes-the-clipboard.md.
    */
   copy(): void
+  /**
+   * The Filter's Notes and the work completed in its days on the clipboard, as
+   * one lossless document — see `review.ts`. Async because completions are
+   * read when asked for rather than held: the ticket check below is what keeps
+   * a read that lands after the Filter moved from copying the wrong days.
+   *
+   * Refuses under a named Project or Unfiled — completed work has no Project —
+   * and refuses an empty range, in both cases writing nothing. Each
+   * confirmation names which of the two copies landed, so the two actions
+   * cannot be confused.
+   */
+  copyReviewMaterial(): Promise<void>
 }
 
 export function createHistorySession({
@@ -535,6 +556,56 @@ export function createHistorySession({
           show({ confirmation: 'Could not copy.' })
         },
       )
+    },
+
+    async copyReviewMaterial() {
+      const filter = snapshot.filter
+      if (filter === null) return
+
+      // Completed work has no Project: the action is disabled in the view,
+      // and refused here for anything that asks regardless.
+      if (constraintOf(filter).kind !== 'any') {
+        show({ confirmation: REVIEW_PROJECT_RULE })
+        return
+      }
+
+      const ticket = latestRead
+      let selection
+      try {
+        const core = await journal
+        selection = await selectReview({ journal: core, filter })
+      } catch (error) {
+        console.error('could not read Review Material', error)
+        if (latestRead === ticket) {
+          show({ confirmation: 'Could not copy Review Material.' })
+        }
+        return
+      }
+      // A read that lands after the Filter moved must not copy the wrong
+      // days: the move's own read holds the newer ticket.
+      if (latestRead !== ticket) return
+      if (
+        snapshot.filter === null ||
+        snapshot.filter.from !== filter.from ||
+        snapshot.filter.to !== filter.to ||
+        constraintOf(snapshot.filter).kind !== 'any'
+      ) {
+        return
+      }
+
+      if (reviewRefuses(selection)) {
+        show({ confirmation: NOTHING_TO_REVIEW })
+        return
+      }
+
+      const material = buildReviewMaterial(selection)
+      try {
+        await clipboard(material.markdown)
+        show({ confirmation: describeCopiedReviewMaterial(material) })
+      } catch (error) {
+        console.error('could not copy Review Material', error)
+        show({ confirmation: 'Could not copy Review Material.' })
+      }
     },
   }
 }

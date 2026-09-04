@@ -62,6 +62,7 @@ import {
   openingSnapshot,
   type HistorySnapshot,
 } from '@/journal/history-session'
+import { REVIEW_PROJECT_RULE } from '@/journal/review'
 import {
   constraintOf,
   decideKeystroke,
@@ -280,6 +281,12 @@ export default function HistoryView({
     session.copy()
   }
 
+  /** Review Material onto the clipboard, and a toast once it is there. */
+  function copyReviewMaterial() {
+    copying.current = true
+    void session.copyReviewMaterial()
+  }
+
   return (
     // Every tooltip on the page shares one provider, so a reader moving along
     // a row's actions is told what the next one is without waiting again.
@@ -321,7 +328,12 @@ export default function HistoryView({
               month reaches a standup thread.
             */}
             {!searching && (
-              <CopyDigest confirmation={confirmation} onCopy={copyDigest} />
+              <Copies
+                filter={filter}
+                confirmation={confirmation}
+                onCopyDigest={copyDigest}
+                onCopyReviewMaterial={copyReviewMaterial}
+              />
             )}
           </header>
         )}
@@ -1060,29 +1072,56 @@ function SearchField({
 }
 
 /**
- * The journal's one output, and the header's one primary action. The
- * confirmation is not a decoration: a clipboard write is invisible, so a count
- * is how the reader knows it worked before they paste. It is said twice, in
- * the two ways a confirmation has to be said — a toast for whoever is looking
- * at the screen, and a live region for whoever is not.
+ * The header's two copies, side by side and labelled so they cannot be
+ * confused: the Digest, and Review Material — the Filter's Notes and the work
+ * completed in its days as one document. Each copy's confirmation names which
+ * one landed, through the toast and the one live region below.
+ *
+ * Review Material covers completed work, which has no Project, so under a
+ * named Project or Unfiled its action is present but disabled, stating the
+ * rule rather than disappearing.
  */
-function CopyDigest({
+function Copies({
+  filter,
   confirmation,
-  onCopy,
+  onCopyDigest,
+  onCopyReviewMaterial,
 }: {
+  filter: Filter
   confirmation: string | null
-  onCopy: () => void
+  onCopyDigest: () => void
+  onCopyReviewMaterial: () => void
 }) {
+  // A Task is never filed under a Project: the Project axis cannot narrow
+  // what was never filed under it.
+  const reviewAllowed = constraintOf(filter).kind === 'any'
+
   return (
     <div className="ml-auto flex shrink-0 items-center gap-3">
       {/* Empty until something has been copied, and announced when it is. */}
       <span role="status" aria-live="polite" className="sr-only">
         {confirmation}
       </span>
-      <Button size="sm" onClick={onCopy}>
+      <Button size="sm" onClick={onCopyDigest}>
         <ClipboardCopyIcon data-icon="inline-start" />
         Copy Digest
       </Button>
+      {/*
+        The reason rides on the wrapper rather than the button: a disabled
+        button fires no hover, so the rule would be unreadable on the button
+        itself.
+      */}
+      <span title={reviewAllowed ? undefined : REVIEW_PROJECT_RULE}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onCopyReviewMaterial}
+          disabled={!reviewAllowed}
+        >
+          <ClipboardCopyIcon data-icon="inline-start" />
+          Copy Review Material
+        </Button>
+      </span>
     </div>
   )
 }
