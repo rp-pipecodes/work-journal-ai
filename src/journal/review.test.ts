@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   createJournal,
+  formatDayRange,
   formatSlot,
   isOpen,
   slotOf,
   type Journal,
 } from './journal'
 import { fixedClock, openTestDatabase } from './testing/database'
-import { formatDayRange } from '@/views/history/range-label'
 import {
   buildReviewMaterial,
   reviewRefuses,

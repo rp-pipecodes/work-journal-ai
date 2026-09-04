@@ -17,7 +17,10 @@
  */
 
 import {
+  formatDayRange,
+  formatDigestDay,
   journalDayFor,
+  plural,
   type CompletedOccurrence,
   type Digest,
   type Filter,
@@ -131,10 +134,6 @@ export function describeCopiedReviewMaterial(
   return `Copied Review Material (${counted.join(', ')}).`
 }
 
-function plural(count: number, thing: string): string {
-  return `${count} ${thing}${count === 1 ? '' : 's'}`
-}
-
 /**
  * Review Material as one Markdown document: one top-level heading naming the
  * range, the Filter's Digest verbatim, then a Completed section day-grouped
@@ -147,7 +146,7 @@ export function buildReviewMaterial(
   selection: ReviewSelection,
 ): ReviewMaterial {
   const { filter, digest } = selection
-  const heading = `# ${formatReviewRange(filter.from, filter.to)}`
+  const heading = `# ${formatDayRange(filter.from, filter.to)}`
   const completions = mergeCompletions({
     completedTasks: selection.completedTasks,
     completedOccurrences: selection.completedOccurrences,
@@ -202,41 +201,8 @@ function renderCompleted(
   const grouped = groups
     .map(
       (group) =>
-        `### ${formatReviewDay(group.journalDay)}\n${group.bullets.join('\n')}`,
+        `### ${formatDigestDay(group.journalDay)}\n${group.bullets.join('\n')}`,
     )
     .join('\n')
   return `## Completed\n${grouped}`
-}
-
-/**
- * The Filter's day axis in words — the same words the Filter control reads.
- * A copy of `src/views/history/range-label.ts`'s formatter, which owns the
- * control: the journal layer cannot import a view, so the two are kept in
- * sync by the review tests asserting against the control's own formatter.
- */
-const REVIEW_DAYS = new Intl.DateTimeFormat(undefined, {
-  day: 'numeric',
-  month: 'long',
-  year: 'numeric',
-  timeZone: 'UTC',
-})
-
-function formatReviewRange(from: string, to: string): string {
-  if (from === to) return REVIEW_DAYS.format(new Date(from))
-  return REVIEW_DAYS.formatRange(new Date(from), new Date(to))
-}
-
-/**
- * A Journal Day as a Completed subsection heading: the same heading the
- * Digest uses for the day. A copy of the core's digest heading, which is
- * private to the core: pinned to `en-GB` like the original, so output never
- * depends on the machine that produced it.
- */
-function formatReviewDay(journalDay: string): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    timeZone: 'UTC',
-  }).format(new Date(journalDay))
 }
