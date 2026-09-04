@@ -9,18 +9,16 @@
  */
 
 import {
-  formatSlot,
   groupOpenTasks,
   journalDayFor,
   rangeForPreset,
-  scheduleOf,
-  slotOf,
   type Clock,
   type CompletedOccurrence,
   type Journal,
   type Note,
   type Task,
 } from './journal'
+import { mergeCompletions, taskBullet } from './completions'
 
 export interface StandupPostSelection {
   /** The previous calendar day this material is about. */
@@ -134,21 +132,12 @@ export async function buildStandupMaterial({
     selection.completedOccurrences.length > 0
   ) {
     // Work kept yesterday is one set, so the section reads newest completion
-    // first across both record types. Completed At is non-null on both sides
-    // by construction — `selectStandupPost` filters the Tasks, and the range
-    // read's query asks for completed occurrences only — so the fallback
-    // never fires and is spelled as the absence it is.
-    const bullets = [
-      ...selection.completedOccurrences.map((completed) => ({
-        completedAt: completed.occurrence.completedAt ?? '',
-        bullet: occurrenceBullet(completed),
-      })),
-      ...selection.completedTasks.map((task) => ({
-        completedAt: task.completedAt ?? '',
-        bullet: taskBullet(task),
-      })),
-    ].sort((one, other) => (one.completedAt < other.completedAt ? 1 : -1))
-      .map((one) => one.bullet)
+    // first across both record types — see `mergeCompletions`.
+    const bullets = mergeCompletions({
+      completedTasks: selection.completedTasks,
+      completedOccurrences: selection.completedOccurrences,
+      order: 'newest-first',
+    }).map((one) => one.bullet)
     parts.push(`## Completed yesterday\n${bullets.join('\n')}`)
   }
   if (selection.openTasks.length > 0) {
@@ -160,31 +149,4 @@ export async function buildStandupMaterial({
   }
 
   return parts.join('\n\n')
-}
-
-/**
- * One Task as the model hears it: the checkbox saying which state it is in,
- * the description as written, and — when there is one — its Scheduled For,
- * the same way an export spells it. Absent metadata is omitted, so a line
- * says nothing the journal does not know.
- */
-function taskBullet(task: Task): string {
-  const schedule = scheduleOf(task)
-  const said = schedule !== null ? ` (scheduled ${formatSlot(schedule)})` : ''
-  const box = task.completedAt === null ? ' ' : 'x'
-  return `- [${box}] ${task.description}${said}`
-}
-
-/**
- * One kept Task Occurrence as the model hears it: always checked, because
- * the record is a completion — the checkbox is the occurrence's, never the
- * parent Task's, which carries on and is rendered only under Still to do.
- * The Task Description comes from the parent riding along in the selection,
- * and the slot is spelled the one way the app spells one, the word
- * `occurrence` matching Export and the glossary.
- */
-function occurrenceBullet(completed: CompletedOccurrence): string {
-  return `- [x] ${completed.task.description} (occurrence ${formatSlot(
-    slotOf(completed.occurrence),
-  )})`
 }

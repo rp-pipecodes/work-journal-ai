@@ -968,6 +968,159 @@ describe('copying the Digest', () => {
   })
 })
 
+describe('copying Review Material', () => {
+  it('writes the Filter’s Notes and its completed work, naming which copy landed', async () => {
+    const { session, core, clock, clipboard } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'Friday' },
+    ])
+
+    clock.set(new Date('2026-03-13T11:00:00'))
+    const kept = await core.createTask('kept Friday')
+    await core.completeTask(kept.id)
+
+    await session.open()
+    await session.copyReviewMaterial()
+
+    expect(clipboard.written).toHaveLength(1)
+    expect(clipboard.written[0]).toContain('- Friday')
+    expect(clipboard.written[0]).toContain('## Completed')
+    expect(clipboard.written[0]).toContain('- [x] kept Friday')
+    expect(session.snapshot().confirmation).toContain('Review Material')
+  })
+
+  it('embeds the Digest as it was read, so the two copies cannot disagree', async () => {
+    const { session, core, notes, clipboard } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'Friday' },
+    ])
+
+    await session.open()
+    // The journal moves behind the session's back — another window's
+    // correction, with no refresh yet — so a fresh read would describe Notes
+    // the reader is no longer looking at.
+    await core.editBody(notes[0].id, 'Friday, reworded elsewhere')
+    await session.copyReviewMaterial()
+
+    expect(clipboard.written).toHaveLength(1)
+    expect(clipboard.written[0]).toContain('- Friday')
+    expect(clipboard.written[0]).not.toContain('reworded')
+  })
+
+  it('copies a range whose only content is completed work', async () => {
+    const { session, core, clock, clipboard } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'Friday' },
+    ])
+
+    clock.set(new Date('2026-03-13T11:00:00'))
+    const kept = await core.createTask('kept Friday')
+    await core.completeTask(kept.id)
+
+    await session.open()
+    await session.moveTo(rangeForJournalDay('2026-03-09'))
+    clock.set(new Date('2026-03-09T11:00:00'))
+    const earlier = await core.createTask('kept earlier')
+    await core.completeTask(earlier.id)
+    await session.moveTo(rangeForJournalDay('2026-03-09'))
+    await session.copyReviewMaterial()
+
+    expect(clipboard.written).toHaveLength(1)
+    expect(clipboard.written[0]).toContain('- [x] kept earlier')
+    expect(clipboard.written[0]).not.toContain('Friday')
+  })
+
+  it('refuses under a named Project without writing, stating the rule', async () => {
+    const { session, clipboard } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: '#api rate limits' },
+    ])
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'api' })
+    await session.copyReviewMaterial()
+
+    expect(clipboard.written).toEqual([])
+    expect(session.snapshot().confirmation).toBe(
+      'Review Material covers completed work, which has no Project.',
+    )
+  })
+
+  it('refuses under Unfiled without writing, stating the rule', async () => {
+    const { session, clipboard } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'Friday' },
+    ])
+
+    await session.open()
+    await session.narrowTo(UNFILED)
+    await session.copyReviewMaterial()
+
+    expect(clipboard.written).toEqual([])
+    expect(session.snapshot().confirmation).toBe(
+      'Review Material covers completed work, which has no Project.',
+    )
+  })
+
+  it('refuses an empty range without writing', async () => {
+    const { session, clipboard } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'Friday' },
+    ])
+
+    await session.open()
+    await session.moveTo(rangeForJournalDay('2026-03-09'))
+    await session.copyReviewMaterial()
+
+    expect(clipboard.written).toEqual([])
+    expect(session.snapshot().confirmation).toBe(
+      'No Notes or completed work to copy.',
+    )
+  })
+
+  it('says so when the clipboard write fails', async () => {
+    silenceErrors()
+    const { session, clipboard } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'Friday' },
+    ])
+    clipboard.fail(new Error('not allowed'))
+
+    await session.open()
+    await session.copyReviewMaterial()
+
+    expect(clipboard.written).toEqual([])
+    expect(session.snapshot().confirmation).toBe(
+      'Could not copy Review Material.',
+    )
+  })
+
+  it('writes nothing when the Filter moved while the copy was in flight', async () => {
+    const slow = gate()
+    const { session, clipboard } = await sessionOver(
+      [
+        { at: '2026-03-09T10:00:00', body: 'Monday' },
+        { at: '2026-03-13T10:00:00', body: 'Friday' },
+      ],
+      {
+        journal: (core) => ({
+          ...core,
+          async completedTasks() {
+            const tasks = await core.completedTasks()
+            await slow.reached('copy')
+            return tasks
+          },
+        }),
+      },
+    )
+
+    await session.open()
+    await session.moveTo(rangeForJournalDay('2026-03-09'))
+    slow.hold('copy')
+
+    // The copy is asked for Monday, but Friday lands first.
+    const copying = session.copyReviewMaterial()
+    await session.moveTo(rangeForJournalDay('2026-03-13'))
+    slow.release('copy')
+    await copying
+
+    expect(clipboard.written).toEqual([])
+  })
+})
+
 describe('announcing a change to the journal', () => {
   it('says so when a Note is deleted', async () => {
     const { session, notes, announced } = await sessionOver([
@@ -1125,7 +1278,7 @@ async function sessionOver(
     onChange: (snapshot) => seen.push(snapshot),
   })
 
-  return { session, core, capture, notes, clipboard, seen, announced }
+  return { session, core, clock, capture, notes, clipboard, seen, announced }
 }
 
 function recordingClipboard() {
