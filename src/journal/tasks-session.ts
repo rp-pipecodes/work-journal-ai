@@ -22,6 +22,7 @@ import {
   ALERTS_NOT_HELD,
   askAboutTaskAlerts,
 } from './task-alerts'
+import { createSearch } from './search'
 import {
   groupOpenTasks,
   isOpen,
@@ -70,20 +71,6 @@ export type TasksState =
     }
   | { state: 'results'; term: string; tasks: Task[] }
   | { state: 'unreadable' }
-
-/**
- * How long a term has to stand still before it is asked of the journal. Short
- * enough to feel like typing, long enough that a word is one read rather than
- * seven. The same threshold as History's Search — one term, one feel.
- */
-export const SEARCH_DEBOUNCE_MS = 150
-
-/**
- * The shortest term worth asking about. One character matches most of a
- * journal, which is a slower way of showing the reader nothing. The same
- * threshold as History's Search.
- */
-export const SEARCH_MIN_TERM_LENGTH = 2
 
 /** Everything Tasks View renders, and the only thing it renders. */
 export interface TasksSnapshot {
@@ -229,9 +216,16 @@ export function createTasksSession({
   // Reads can overlap — a completion while a tab change is still in flight —
   // and only the newest one may reach the view.
   let latestRead = 0
-  // A term waiting out its debounce, and how to abandon it: the reader typed
-  // another character, or the list moved out from under it.
-  let waiting: { cancel: () => void } | null = null
+
+  // The half of a Search Tasks View shares with History — the thresholds, the
+  // debounce, which read may land — held in common rather than copied, so the
+  // two cannot drift apart. What a settled term lands on stays here. See
+  // `src/journal/search.ts`.
+  const { search, abandonWaitingTerm } = createSearch({
+    showTerm: (term, searching) => show({ term, searching }),
+    run,
+    stop: stopShowingResults,
+  })
 
   function show(change: Partial<TasksSnapshot>): void {
     snapshot = { ...snapshot, ...change }
@@ -273,12 +267,6 @@ export function createTasksSession({
     } catch (error) {
       giveUp(error, ticket)
     }
-  }
-
-  /** A term that will never be asked for now, let go of without asking. */
-  function abandonWaitingTerm(): void {
-    waiting?.cancel()
-    waiting = null
   }
 
   /** One settled term, asked of the whole journal — both lists at once. */
@@ -401,34 +389,13 @@ export function createTasksSession({
     },
 
     /**
-     * A term as the reader typed it. The field is answered at once so typing
-     * never lags, but the journal is asked only once the term has stood still —
-     * and the list keeps whatever it is showing until that read lands, so
-     * there is no loading state to flash between keystrokes.
+     * The term as it now reads, after every keystroke. Nothing is asked of the
+     * journal until it has stood still for `SEARCH_DEBOUNCE_MS` and is at least
+     * `SEARCH_MIN_TERM_LENGTH` long; a shorter term takes the results off the
+     * screen and gives the list back. Resolves once the term it was given has
+     * either landed or been overtaken, so a test can await it.
      */
-    search(term: string): Promise<void> {
-      abandonWaitingTerm()
-      const showing = term.length >= SEARCH_MIN_TERM_LENGTH
-      show({ term, searching: showing })
-
-      if (!showing) return stopShowingResults()
-
-      return new Promise((resolve) => {
-        const timer = setTimeout(() => {
-          waiting = null
-          void run(term).then(resolve)
-        }, SEARCH_DEBOUNCE_MS)
-
-        waiting = {
-          cancel: () => {
-            clearTimeout(timer)
-            // The term it was given has been overtaken, which is as settled as
-            // it is ever going to get.
-            resolve()
-          },
-        }
-      })
-    },
+    search,
 
     reconciled(held) {
       show({ alertProblem: held ? null : ALERTS_NOT_HELD })

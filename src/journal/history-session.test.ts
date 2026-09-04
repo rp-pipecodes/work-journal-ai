@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createHistorySession,
-  SEARCH_DEBOUNCE_MS,
   type HistorySnapshot,
 } from './history-session'
+import { SEARCH_DEBOUNCE_MS } from './search'
 import {
   ANY_PROJECT,
   createJournal,

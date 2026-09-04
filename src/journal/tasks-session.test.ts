@@ -3,10 +3,10 @@ import { createJournal, type Journal, type Task } from './journal'
 import {
   createTasksSession,
   openingTasksSnapshot,
-  SEARCH_DEBOUNCE_MS,
   type TasksSession,
   type TasksSnapshot,
 } from './tasks-session'
+import { SEARCH_DEBOUNCE_MS } from './search'
 import { fixedClock, openTestDatabase } from './testing/database'
 import { ALERT_REFUSED } from './task-alerts'
 import { fakeDesktop, type FakeDesktop } from '../platform/testing/desktop'
