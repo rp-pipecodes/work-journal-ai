@@ -29,29 +29,54 @@
       content="The Work Journal mark above the words Work Journal and the line: a local-first log of short work notes — and the tasks that go with them."
     />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta
+      name="theme-color"
+      content="#121511"
+      media="(prefers-color-scheme: dark)"
+    />
 
     <style>
+      /* Tokens: ledger-green professional. Cool sage-grey wash, green-black
+         ink, one pine CTA. Deliberately not warm cream, not near-black with
+         an acid accent, not hairline broadsheet. */
       :root {
         color-scheme: light dark;
 
-        --bg: #fbfaf9;
-        --fg: #1c1a17;
-        --muted: #6b655d;
-        --rule: #e4e0da;
-        --code-bg: #f2efeb;
-        --accent: #1c1a17;
-        --accent-fg: #fbfaf9;
+        --paper: #ffffff;
+        --fog: #f2f4f1;
+        --tint: #e8efe9;
+        --ink: #131915;
+        --slate: #5c6b60;
+        --line: #dfe6e0;
+        --pine: #17452f;
+        --pine-deep: #0f3524;
+        --pine-ink: #ffffff;
+        --serif: Charter, "Bitstream Charter", "Sitka Text", Georgia, serif;
+        --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Inter, Helvetica, Arial, sans-serif;
+        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+          monospace;
+
+        --radius: 14px;
+        --max: 68rem;
+        --shadow: 0 1px 2px rgb(19 25 21 / 0.06),
+          0 12px 32px -12px rgb(19 25 21 / 0.18);
       }
 
       @media (prefers-color-scheme: dark) {
         :root {
-          --bg: #161513;
-          --fg: #ece8e2;
-          --muted: #9a938a;
-          --rule: #2c2a27;
-          --code-bg: #211f1d;
-          --accent: #ece8e2;
-          --accent-fg: #161513;
+          --paper: #121511;
+          --fog: #171c18;
+          --tint: #1c2420;
+          --ink: #e9ede8;
+          --slate: #9aa79d;
+          --line: #263027;
+          --pine: #8fc7a3;
+          --pine-deep: #a8d8b8;
+          --pine-ink: #0e1712;
+          --shadow: 0 1px 2px rgb(0 0 0 / 0.4),
+            0 16px 40px -12px rgb(0 0 0 / 0.6);
         }
       }
 
@@ -61,83 +86,21 @@
         box-sizing: border-box;
       }
 
+      html {
+        scroll-behavior: smooth;
+      }
+
       body {
         margin: 0;
-        background: var(--bg);
-        color: var(--fg);
-        font: 17px/1.6 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
-          Helvetica, Arial, sans-serif;
+        background: var(--paper);
+        color: var(--ink);
+        font: 17px/1.6 var(--sans);
         -webkit-font-smoothing: antialiased;
       }
 
-      main {
-        max-width: 34rem;
-        margin: 0 auto;
-        padding: 5rem 1.5rem 6rem;
-      }
-
-      /* The lockup: icon and name read as one unit. */
-      .lockup {
-        display: flex;
-        align-items: center;
-        gap: 0.9rem;
-        margin-bottom: 1.75rem;
-      }
-
-      /* The mark is drawn in ink on the page, not on a tile of its own: the
-         app icon's dark tile all but vanishes against the dark background. */
-      .lockup img {
-        width: 54px;
-        height: 44px;
-      }
-
-      h1 {
-        font-size: 1.75rem;
-        letter-spacing: -0.02em;
-        margin: 0;
-      }
-
-      .tagline {
-        font-size: 1.2rem;
-        line-height: 1.45;
-        letter-spacing: -0.01em;
-        margin: 0 0 1.5rem;
-      }
-
-      p {
-        margin: 0 0 1.1rem;
-      }
-
-      .muted {
-        color: var(--muted);
-      }
-
-      h2 {
-        font-size: 0.8rem;
-        text-transform: uppercase;
-        letter-spacing: 0.09em;
-        color: var(--muted);
-        margin: 0 0 1rem;
-        font-weight: 600;
-      }
-
-      /* The feature groups are a list of lists inside one section, not five
-         sections: a rule between each of them would read as five topics. */
-      section h3 {
-        font-size: 1rem;
-        font-weight: 600;
-        letter-spacing: -0.01em;
-        margin: 1.75rem 0 0.6rem;
-      }
-
-      section h3:first-of-type {
-        margin-top: 0;
-      }
-
-      section {
-        border-top: 1px solid var(--rule);
-        margin-top: 3rem;
-        padding-top: 2rem;
+      ::selection {
+        background: var(--pine);
+        color: var(--pine-ink);
       }
 
       a {
@@ -146,286 +109,1297 @@
         text-decoration-thickness: 1px;
       }
 
-      .download {
-        display: inline-block;
-        background: var(--accent);
-        color: var(--accent-fg);
+      /* Flat class names on purpose: no element/type selector pairs that
+         fight each other over padding. Spacing lives on layout wrappers. */
+      .skip {
+        position: absolute;
+        left: 1rem;
+        top: -4rem;
+        background: var(--ink);
+        color: var(--paper);
+        padding: 0.6rem 1rem;
+        border-radius: 8px;
+        z-index: 50;
+        transition: top 0.15s ease;
+      }
+
+      .skip:focus {
+        top: 1rem;
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--pine);
+        outline-offset: 3px;
+        border-radius: 4px;
+      }
+
+      .wrap {
+        max-width: var(--max);
+        margin: 0 auto;
+        padding-left: 1.5rem;
+        padding-right: 1.5rem;
+      }
+
+      /* Sticky product nav: mark, anchors, download. */
+      .nav {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        background: var(--paper);
+        background: color-mix(in srgb, var(--paper) 88%, transparent);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .nav-inner {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        min-height: 4rem;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        text-decoration: none;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+
+      .brand img {
+        width: 30px;
+        height: 25px;
+        display: block;
+      }
+
+      .brand-badge {
+        font-family: var(--mono);
+        font-size: 0.7rem;
+        color: var(--slate);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0.1rem 0.5rem;
+        white-space: nowrap;
+      }
+
+      .nav-links {
+        display: flex;
+        gap: 1.25rem;
+        margin-left: 1.5rem;
+        font-size: 0.95rem;
+        color: var(--slate);
+      }
+
+      .nav-links a {
+        text-decoration: none;
+      }
+
+      .nav-links a:hover {
+        color: var(--ink);
+      }
+
+      .nav-cta {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 0.9rem;
+      }
+
+      .nav-version {
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        color: var(--slate);
+        white-space: nowrap;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
         text-decoration: none;
         font-weight: 600;
-        font-size: 1.05rem;
-        padding: 0.8rem 1.5rem;
         border-radius: 10px;
+        border: 1px solid transparent;
+        cursor: pointer;
+        font-size: 1rem;
       }
 
-      .download:hover {
-        opacity: 0.85;
+      .btn-pine {
+        background: var(--pine);
+        color: var(--pine-ink);
+        padding: 0.7rem 1.3rem;
       }
 
-      .download:focus-visible {
-        outline: 2px solid var(--fg);
-        outline-offset: 3px;
+      .btn-pine:hover {
+        background: var(--pine-deep);
       }
 
-      /* Filled in from the GitHub API when the page loads, and hidden until
-         then: a page that fetched nothing says nothing rather than a version
-         that could be wrong. */
-      .latest-release {
-        margin: 0.9rem 0 0;
-        font-size: 0.95rem;
-        color: var(--muted);
+      .btn-pine:active {
+        transform: translateY(1px);
       }
 
-      /* Sits directly under the button on purpose: nobody should reach the
-         DMG without having read the requirements and the xattr step. */
-      .requirements {
-        margin: 0.9rem 0 1.5rem;
-        font-size: 0.95rem;
-        color: var(--muted);
+      .btn-ghost,
+      .btn-pine,
+      .demo-add,
+      .demo-tab,
+      .copy-btn {
+        transition: background 0.15s ease, border-color 0.15s ease,
+          transform 0.05s ease;
       }
 
-      /* Wraps rather than scrolls: a horizontally clipped command is one a
-         reader can copy half of, and this is the command the app depends on. */
-      pre {
-        background: var(--code-bg);
-        border-radius: 8px;
-        padding: 0.9rem 1rem;
+      .btn-small {
+        padding: 0.5rem 1rem;
+        font-size: 0.92rem;
+      }
+
+      .btn-ghost {
+        border-color: var(--line);
+        color: var(--ink);
+        padding: 0.7rem 1.3rem;
+        background: transparent;
+      }
+
+      .btn-ghost:hover {
+        border-color: var(--slate);
+      }
+
+      /* Hero: thesis on the left, working journal on the right. */
+      .hero {
+        padding-top: 4rem;
+        padding-bottom: 3rem;
+      }
+
+      .hero-grid {
+        display: grid;
+        grid-template-columns: 1.02fr 0.98fr;
+        gap: 3rem;
+        align-items: start;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        letter-spacing: 0.04em;
+        color: var(--pine);
+        background: var(--tint);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0.3rem 0.75rem;
+        margin: 0 0 1.25rem;
+      }
+
+      .hero-title {
+        font-size: clamp(2.4rem, 4.6vw, 3.5rem);
+        line-height: 1.04;
+        letter-spacing: -0.035em;
+        font-weight: 700;
         margin: 0 0 1.1rem;
+        text-wrap: balance;
+      }
+
+      .hero-lede {
+        font-size: 1.16rem;
+        line-height: 1.55;
+        color: var(--slate);
+        margin: 0 0 1.75rem;
+        max-width: 32rem;
+        text-wrap: pretty;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+      }
+
+      .hero-note {
+        font-size: 0.9rem;
+        color: var(--slate);
+        margin: 0 0 1.75rem;
+      }
+
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+
+      .trust-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 0.55rem;
+        font-size: 0.96rem;
+      }
+
+      .trust-list li {
+        display: flex;
+        gap: 0.6rem;
+        align-items: baseline;
+      }
+
+      .trust-tick {
+        color: var(--pine);
+        font-weight: 700;
+        font-family: var(--mono);
+      }
+
+      /* Signature: a working journal. Type a line, watch the Digest. */
+      .demo {
+        background: var(--fog);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .demo-chrome {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.7rem 1rem;
+        border-bottom: 1px solid var(--line);
+        background: var(--paper);
+      }
+
+      .demo-dots {
+        display: flex;
+        gap: 0.35rem;
+      }
+
+      .demo-dots span {
+        width: 0.65rem;
+        height: 0.65rem;
+        border-radius: 50%;
+        background: var(--line);
+        display: block;
+      }
+
+      .demo-title {
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        color: var(--slate);
+      }
+
+      .demo-count {
+        margin-left: auto;
+        font-family: var(--mono);
+        font-size: 0.76rem;
+        color: var(--pine);
+        background: var(--tint);
+        border: 1px solid var(--line);
+        padding: 0.15rem 0.6rem;
+        border-radius: 999px;
+        white-space: nowrap;
+      }
+
+      .demo-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        padding: 0.8rem 1rem 0;
+      }
+
+      .demo-tab {
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        border: 1px solid var(--line);
+        background: var(--paper);
+        color: var(--slate);
+        border-radius: 8px;
+        padding: 0.35rem 0.7rem;
+        cursor: pointer;
+      }
+
+      .demo-tab[aria-pressed="true"] {
+        background: var(--ink);
+        color: var(--paper);
+        border-color: var(--ink);
+      }
+
+      .demo-body {
+        padding: 1rem;
+        display: grid;
+        gap: 0.8rem;
+      }
+
+      .demo-field {
+        display: flex;
+        gap: 0.5rem;
+      }
+
+      .demo-input {
+        flex: 1;
+        font-family: var(--mono);
+        font-size: 0.88rem;
+        color: var(--ink);
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 0.65rem 0.8rem;
+      }
+
+      .demo-input::placeholder {
+        color: var(--slate);
+      }
+
+      .demo-add {
+        font-family: var(--mono);
+        font-size: 0.85rem;
+        font-weight: 700;
+        background: var(--pine);
+        color: var(--pine-ink);
+        border: 0;
+        border-radius: 10px;
+        padding: 0 1rem;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .demo-add:hover {
+        background: var(--pine-deep);
+      }
+
+      .demo-out {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 0.9rem 1rem;
+        margin: 0;
+        font-family: var(--mono);
+        font-size: 0.83rem;
+        line-height: 1.7;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        min-height: 11.5rem;
+      }
+
+      .demo-out .proj {
+        color: var(--pine);
+        font-weight: 700;
+      }
+
+      .demo-out .dim {
+        color: var(--slate);
+      }
+
+      .demo-out .prose {
+        font-family: var(--serif);
+        font-style: italic;
+      }
+
+      .demo-hint {
+        font-size: 0.82rem;
+        color: var(--slate);
+        margin: 0;
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+
+      .demo-hint kbd {
+        font-family: var(--mono);
+        font-size: 0.76rem;
+        border: 1px solid var(--line);
+        border-bottom-width: 2px;
+        border-radius: 6px;
+        padding: 0.05rem 0.4rem;
+        background: var(--paper);
+      }
+
+      /* Fact strip under the hero. */
+      .facts {
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        background: var(--fog);
+      }
+
+      .facts-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1.5rem;
+        padding-top: 1.75rem;
+        padding-bottom: 1.75rem;
+      }
+
+      .fact-title {
+        font-size: 0.95rem;
+        font-weight: 650;
+        margin: 0 0 0.25rem;
+        letter-spacing: -0.01em;
+      }
+
+      .fact-body {
+        font-size: 0.9rem;
+        color: var(--slate);
+        margin: 0;
+      }
+
+      /* Sections share one rhythm class only. Anchored sections clear the
+         sticky nav instead of sliding under it. */
+      .section {
+        padding-top: 4rem;
+        padding-bottom: 0.5rem;
+        scroll-margin-top: 4.5rem;
+      }
+
+      .section-kicker {
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--pine);
+        margin: 0 0 0.6rem;
+      }
+
+      .section-title {
+        font-size: clamp(1.5rem, 2.6vw, 2rem);
+        letter-spacing: -0.025em;
+        line-height: 1.15;
+        margin: 0 0 0.7rem;
+        text-wrap: balance;
+      }
+
+      .section-lede {
+        color: var(--slate);
+        max-width: 42rem;
+        margin: 0 0 2rem;
+      }
+
+      /* How it works IS a sequence over time, so numbering carries info. */
+      .steps {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1rem;
+      }
+
+      .step {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 1.4rem;
+        background: var(--paper);
+      }
+
+      .step-num {
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        color: var(--pine);
+      }
+
+      .step h3 {
+        margin: 0.5rem 0 0.5rem;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+      }
+
+      .step p {
+        margin: 0 0 0.9rem;
+        font-size: 0.94rem;
+        color: var(--slate);
+      }
+
+      .step-sample {
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        background: var(--fog);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 0.6rem 0.7rem;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        margin: 0;
+      }
+
+      /* Capabilities are parallel groups, not a sequence: labels, no numbers. */
+      .cards {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 1.5rem;
+        background: var(--paper);
+      }
+
+      .card-label {
+        font-family: var(--mono);
+        font-size: 0.76rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--slate);
+        margin: 0 0 0.6rem;
+      }
+
+      .card h3 {
+        margin: 0 0 0.7rem;
+        font-size: 1.15rem;
+        letter-spacing: -0.015em;
+      }
+
+      .card ul {
+        margin: 0;
+        padding-left: 1.1rem;
+        color: var(--slate);
+        font-size: 0.95rem;
+        display: grid;
+        gap: 0.4rem;
+      }
+
+      .card li::marker {
+        color: var(--pine);
+      }
+
+      .card code,
+      .step-sample code,
+      code.inline {
+        font-family: var(--mono);
+        font-size: 0.85em;
+        background: var(--fog);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 0.05rem 0.35rem;
+      }
+
+      /* Download panel: the one dark moment, so the paid action stands out. */
+      .download-panel {
+        margin-top: 4rem;
+        scroll-margin-top: 5rem;
+        background: #10160f;
+        color: #eef3ec;
+        border-radius: 20px;
+        padding: clamp(1.75rem, 4vw, 3rem);
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2.5rem;
+        align-items: start;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        .download-panel {
+          background: #0b0e0b;
+          border: 1px solid var(--line);
+        }
+      }
+
+      .download-panel h2 {
+        margin: 0 0 0.7rem;
+        letter-spacing: -0.025em;
+        font-size: clamp(1.5rem, 2.6vw, 2rem);
+        line-height: 1.15;
+      }
+
+      .download-panel p {
+        color: #b9c4ba;
+        margin: 0 0 1rem;
+      }
+
+      .download-note {
+        margin-top: 1rem;
+        margin-bottom: 0;
+      }
+
+      .download-panel .btn-pine {
+        background: #eef3ec;
+        color: #10160f;
+      }
+
+      .download-panel .btn-pine:hover {
+        background: #ffffff;
+      }
+
+      .release-line {
+        font-family: var(--mono);
+        font-size: 0.82rem;
+        color: #9fb0a1;
+        margin: 0.9rem 0 0;
+      }
+
+      .cmd-row {
+        display: flex;
+        gap: 0.5rem;
+        align-items: stretch;
+      }
+
+      .cmd {
+        flex: 1;
+        background: #1a211b;
+        border: 1px solid #2c372e;
+        color: #eef3ec;
+        border-radius: 10px;
+        padding: 0.85rem 1rem;
+        margin: 0;
+        font-family: var(--mono);
+        font-size: 0.8rem;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
 
-      code {
-        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-        font-size: 0.875rem;
+      .copy-btn {
+        font-family: var(--mono);
+        font-size: 0.82rem;
+        font-weight: 700;
+        background: transparent;
+        color: #eef3ec;
+        border: 1px solid #2c372e;
+        border-radius: 10px;
+        padding: 0 1rem;
+        cursor: pointer;
+        white-space: nowrap;
       }
 
-      ul {
-        padding-left: 1.1rem;
-        margin: 0 0 1.1rem;
+      .copy-btn:hover {
+        border-color: #eef3ec;
       }
 
-      li {
-        margin-bottom: 0.4rem;
+      .req-title {
+        font-family: var(--mono);
+        font-size: 0.76rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #9fb0a1;
+        margin: 0 0 0.6rem;
       }
 
-      footer {
-        border-top: 1px solid var(--rule);
-        margin-top: 3rem;
+      .site-footer {
+        border-top: 1px solid var(--line);
+        margin-top: 4rem;
         padding-top: 2rem;
+        padding-bottom: 3rem;
+        color: var(--slate);
         font-size: 0.9rem;
-        color: var(--muted);
+      }
+
+      .footer-row {
+        display: flex;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .footer-row nav {
+        display: flex;
+        gap: 1.25rem;
+        margin-left: auto;
+      }
+
+      /* Entrance: one quiet rise, never scattered. */
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      .hero-copy {
+        animation: rise 0.5s ease both;
+      }
+
+      .demo {
+        animation: rise 0.5s 0.08s ease both;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+        .hero-copy,
+        .demo {
+          animation: none;
+        }
+      }
+
+      @media (max-width: 60rem) {
+        .hero-grid,
+        .download-panel {
+          grid-template-columns: 1fr;
+        }
+        .facts-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+        .steps {
+          grid-template-columns: 1fr;
+        }
+        .nav-links {
+          display: none;
+        }
+      }
+
+      @media (max-width: 38rem) {
+        .cards {
+          grid-template-columns: 1fr;
+        }
+        .facts-grid {
+          grid-template-columns: 1fr;
+        }
+        .nav-version {
+          display: none;
+        }
+        .hero {
+          padding-top: 2.5rem;
+        }
       }
     </style>
   </head>
 
   <body>
-    <main>
-      <div class="lockup">
-        <img src="logo.svg" alt="" />
-        <h1>Work Journal</h1>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <a class="brand" href="#top" aria-label="Work Journal home">
+          <img src="logo.svg" alt="" />
+          Work Journal
+        </a>
+        <span class="brand-badge">macOS · Apple Silicon</span>
+        <nav class="nav-links" aria-label="Page">
+          <a href="#how">How it works</a>
+          <a href="#capabilities">Capabilities</a>
+          <a href="#download">Download</a>
+        </nav>
+        <div class="nav-cta">
+          <span class="nav-version" id="nav-version" hidden></span>
+          <a
+            class="btn btn-pine btn-small"
+            href="https://github.com/rp-pipecodes/work-journal-ai/releases/latest"
+            >Download</a
+          >
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="wrap hero" id="top">
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">Local-first work log · Notes + Tasks</p>
+            <h1 class="hero-title">
+              The day&rsquo;s work, written down before it evaporates.
+            </h1>
+            <p class="hero-lede">
+              Work Journal lives in the menu bar. One hotkey captures a
+              one-line Note about what you just did, another creates a Task
+              for what is still to do. At standup time, yesterday reads back
+              as Markdown &mdash; or as prose, written by your own model.
+            </p>
+            <div class="hero-actions">
+              <a
+                class="btn btn-pine"
+                href="https://github.com/rp-pipecodes/work-journal-ai/releases/latest"
+                >Download for macOS</a
+              >
+              <a class="btn btn-ghost" href="#how">See how it reads back</a>
+            </div>
+            <p class="hero-note">
+              Unsigned DMG &mdash; one
+              <code class="inline">xattr</code> command after install, then
+              in-app updates from there. Details at
+              <a href="#download">Download</a>.
+            </p>
+            <ul class="trust-list">
+              <li>
+                <span class="trust-tick" aria-hidden="true">✓</span>
+                No account, no server. Notes and Tasks are a SQLite file on
+                your Mac.
+              </li>
+              <li>
+                <span class="trust-tick" aria-hidden="true">✓</span>
+                Export everything to Markdown any time. Nothing is locked in.
+              </li>
+              <li>
+                <span class="trust-tick" aria-hidden="true">✓</span>
+                The network is touched only for a standup post you request
+                and an update you confirm.
+              </li>
+            </ul>
+          </div>
+
+          <section class="demo" aria-label="Try the journal loop">
+            <div class="demo-chrome">
+              <div class="demo-dots" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </div>
+              <span class="demo-title">Work Journal &mdash; Yesterday</span>
+              <span class="demo-count" id="demo-count" aria-live="polite"
+                >● 3 today</span
+              >
+            </div>
+            <div
+              class="demo-tabs"
+              role="group"
+              aria-label="Choose what to copy"
+            >
+              <button class="demo-tab" data-tab="digest" aria-pressed="true">
+                Digest
+              </button>
+              <button class="demo-tab" data-tab="material" aria-pressed="false">
+                Standup Material
+              </button>
+              <button class="demo-tab" data-tab="post" aria-pressed="false">
+                Standup Post
+              </button>
+            </div>
+            <div class="demo-body">
+              <form class="demo-field" id="demo-form">
+                <label for="demo-input" class="visually-hidden"
+                  >Capture a Note</label
+                >
+                <input
+                  class="demo-input"
+                  id="demo-input"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="Type a line — #api fixed retry storm…"
+                />
+                <button class="demo-add" type="submit">Add</button>
+              </form>
+              <pre class="demo-out" id="demo-out" aria-live="polite"></pre>
+              <p class="demo-hint">
+                <span>Type a line and press <kbd>Enter</kbd> — stays here, in this page.</span>
+                <span id="demo-status">Yesterday&rsquo;s Digest, verbatim.</span>
+              </p>
+            </div>
+          </section>
+        </div>
       </div>
 
-      <p class="tagline">
-        A personal, local-first log of short work notes captured throughout the
-        day — and the tasks that go with them. Notes recover what you did; tasks
-        hold what you still mean to do.
-      </p>
+      <div class="facts">
+        <div class="wrap facts-grid">
+          <div>
+            <p class="fact-title">One line per Note</p>
+            <p class="fact-body">
+              A remark, not a document. One line keeps capture instant and
+              every Digest a clean list of bullets.
+            </p>
+          </div>
+          <div>
+            <p class="fact-title">Tasks beside Notes</p>
+            <p class="fact-body">
+              Open work with dates, times, and repeats &mdash; grouped as
+              overdue, today, upcoming, unscheduled.
+            </p>
+          </div>
+          <div>
+            <p class="fact-title">Markdown out</p>
+            <p class="fact-body">
+              Copy any range, yesterday from the tray, or Export the whole
+              journal. Paste it into chat or an LLM.
+            </p>
+          </div>
+          <div>
+            <p class="fact-title">Your model or none</p>
+            <p class="fact-body">
+              Point it at any OpenAI-compatible endpoint for prose. The key
+              stays in your keychain; all else works without it.
+            </p>
+          </div>
+        </div>
+      </div>
 
-      <p>
-        You write one line whenever something happens. Later — at standup, in a
-        review, or as context for an LLM — you read the day back as Markdown and
-        paste it wherever it needs to go.
-      </p>
+      <div class="wrap">
+        <section class="section" id="how" aria-labelledby="how-title">
+          <p class="section-kicker">How it works</p>
+          <h2 class="section-title" id="how-title">
+            Capture in a keystroke, file as you type, read back as Markdown.
+          </h2>
+          <p class="section-lede">
+            Three moments in order &mdash; during the day, at the boundary,
+            the next morning. That order is the whole product, so it is the
+            one numbered list on this page.
+          </p>
+          <ol class="steps">
+            <li class="step">
+              <span class="step-num">01 — Capture</span>
+              <h3>One line, then gone</h3>
+              <p>
+                The Note hotkey opens a text field over whatever you are
+                doing. Write the line, press Enter, the window is gone.
+              </p>
+              <p class="step-sample">#api fixed retry storm on checkout</p>
+            </li>
+            <li class="step">
+              <span class="step-num">02 — File</span>
+              <h3>The marker is the filing</h3>
+              <p>
+                Start the line with <code>#name</code> and the Note is filed
+                under that Project. Names you used are offered as you type.
+              </p>
+              <p class="step-sample">#website rewrote hero, kept the xattr note</p>
+            </li>
+            <li class="step">
+              <span class="step-num">03 — Read back</span>
+              <h3>Yesterday, ready to paste</h3>
+              <p>
+                The tray copies Yesterday&rsquo;s Digest with no window open.
+                One click further gives the Standup Material or a Post.
+              </p>
+              <p class="step-sample">## Yesterday&#10;- #api fixed retry storm…</p>
+            </li>
+          </ol>
+        </section>
 
-      <p>
-        It lives in the menu bar. One hotkey opens a text field for a note,
-        another opens one for a task, and both disappear again as soon as you
-        are done. The tray menu offers the same two, and carries today's note
-        count beside its glyph — the only reminder to journal the app will ever
-        give you.
-      </p>
-
-      <p>
-        Everything is stored locally — no account, no server. The notes and
-        tasks are a SQLite file on your Mac, and Export writes all of it to
-        Markdown so nothing is locked in. The app reaches the network only when
-        you ask it to: to write a standup post with the language model you point
-        it at, and to download an update you confirm.
-      </p>
-
-      <section>
-        <h2>Download</h2>
-
-        <a
-          class="download"
-          href="https://github.com/rp-pipecodes/work-journal-ai/releases/latest"
-          >Download for macOS</a
+        <section
+          class="section"
+          id="capabilities"
+          aria-labelledby="capabilities-title"
         >
+          <p class="section-kicker">Capabilities</p>
+          <h2 class="section-title" id="capabilities-title">
+            Everything around that loop, and nothing else.
+          </h2>
+          <p class="section-lede">
+            The app&rsquo;s vocabulary is small on purpose: Notes recover work
+            that happened, Tasks hold work still to do. These groups sit side
+            by side &mdash; none comes before the other.
+          </p>
+          <div class="cards">
+            <article class="card">
+              <p class="card-label">Notes</p>
+              <h3>History you can actually search</h3>
+              <ul>
+                <li>Capture from the hotkey, the tray menu, or relaunch.</li>
+                <li>
+                  Read any range &mdash; today, yesterday, this or last week
+                  or month &mdash; narrowed to one Project or not at all.
+                </li>
+                <li>
+                  Search every Note&rsquo;s text to jump to the day it is
+                  filed under.
+                </li>
+                <li>Reword, refile to another day, or delete. No trash.</li>
+              </ul>
+            </article>
+            <article class="card">
+              <p class="card-label">Tasks</p>
+              <h3>Commitments with a schedule</h3>
+              <ul>
+                <li>
+                  Its own hotkey and an always-ready window; Enter commits
+                  one Task.
+                </li>
+                <li>
+                  A date, with a time to the minute &mdash; past dates are
+                  valid and read as overdue.
+                </li>
+                <li>
+                  Daily, weekly, monthly, yearly, or every N &mdash; one open
+                  occurrence, never a backlog of missed ones.
+                </li>
+                <li>
+                  A dated Task with a time raises a local macOS alert. No
+                  sign-in, nothing sent anywhere.
+                </li>
+              </ul>
+            </article>
+            <article class="card">
+              <p class="card-label">Standup Post</p>
+              <h3>Yesterday, written up when you want it</h3>
+              <ul>
+                <li>
+                  Yesterday&rsquo;s Digest from the tray &mdash; Markdown,
+                  nothing to configure.
+                </li>
+                <li>
+                  Standup Material one click in: Notes plus work kept plus
+                  open Tasks due. Paste it as-is with no model.
+                </li>
+                <li>
+                  Or a Standup Post in prose from exactly that material &mdash;
+                  read it before copying; it may be wrong and is never kept.
+                </li>
+              </ul>
+            </article>
+            <article class="card">
+              <p class="card-label">Meetings &amp; the rest</p>
+              <h3>The day, even what you forgot</h3>
+              <ul>
+                <li>
+                  Today&rsquo;s macOS calendar meetings can become Notes on
+                  their own. Off until you pick the calendars.
+                </li>
+                <li>Copy the range on screen; Export the whole journal.</li>
+                <li>
+                  Remap both hotkeys, follow the system theme, start at
+                  login, recover alert permission from Settings.
+                </li>
+              </ul>
+            </article>
+          </div>
+        </section>
 
-        <p class="latest-release" id="latest-release" hidden>
-          Latest release <span id="latest-release-version"></span> ·
-          <span id="latest-release-date"></span>
-        </p>
+        <section class="download-panel" id="download" aria-labelledby="download-title">
+          <div>
+            <h2 id="download-title">Download for macOS</h2>
+            <p>
+              Apple Silicon only. The build is unsigned, so macOS quarantines
+              the download &mdash; the command on the right clears it once.
+              From then on, Settings finds updates and installs them itself.
+            </p>
+            <a
+              class="btn btn-pine"
+              href="https://github.com/rp-pipecodes/work-journal-ai/releases/latest"
+              >Download for macOS</a
+            >
+            <p class="release-line" id="latest-release" hidden>
+              Latest release <span id="latest-release-version"></span> ·
+              <span id="latest-release-date"></span>
+            </p>
+          </div>
+          <div>
+            <p class="req-title">After dragging it to Applications — required, once</p>
+            <div class="cmd-row">
+              <pre
+                class="cmd"
+                id="xattr-cmd"
+              >xattr -dr com.apple.quarantine "/Applications/Work Journal.app"</pre>
+              <button class="copy-btn" id="copy-cmd" type="button">Copy</button>
+            </div>
+            <p class="download-note">
+              A copy you compiled yourself was never quarantined and needs
+              nothing. Updates need nothing either &mdash; the app unpacks
+              its own signed payload and restarts into it.
+            </p>
+          </div>
+        </section>
 
-        <p class="requirements">
-          Apple Silicon only. Unsigned and unnotarized — after dragging it to
-          Applications you <strong>must</strong> clear the quarantine attribute
-          macOS attached to it, or macOS will report the app as damaged:
-        </p>
-
-        <pre><code>xattr -dr com.apple.quarantine "/Applications/Work Journal.app"</code></pre>
-
-        <p class="muted">
-          That step is not optional for a downloaded copy. A build you compiled
-          yourself and never moved is not quarantined and needs nothing. It is
-          also the only time you will do it: from then on, Settings › Updates ›
-          Check for updates finds the newest release and installs and restarts
-          into it — the update is signed, and the app unpacks it itself.
-        </p>
-      </section>
-
-      <section>
-        <h2>What it does</h2>
-
-        <h3>Notes</h3>
-        <ul>
-          <li>
-            Capture a note from the note hotkey, the tray menu, or relaunching
-            the app.
-          </li>
-          <li>
-            File it under a project by starting the line with <code>#name</code>;
-            names you have used already are offered as you type.
-          </li>
-          <li>
-            Rename a project — or fold one into another — and every note filed
-            under it moves with it, in one operation.
-          </li>
-          <li>
-            Read back any range of days — with presets for today, yesterday,
-            this or last week, this or last month — narrowed to one project or
-            not at all.
-          </li>
-          <li>
-            Search every note's text to jump to the day it is filed under.
-          </li>
-          <li>
-            Correct a note's wording, move it to another day or project, or
-            delete it.
-          </li>
-        </ul>
-
-        <h3>Tasks</h3>
-        <ul>
-          <li>
-            Create a task from its own hotkey, in a window that is always ready
-            for the next one.
-          </li>
-          <li>
-            Give it a date, and a time to the minute if you want one.
-          </li>
-          <li>
-            Repeat it daily, weekly on the days you pick, monthly, yearly, or
-            every N of those — one occurrence open at a time, never a backlog of
-            missed ones.
-          </li>
-          <li>
-            A dated task with a time raises a local macOS alert when it comes
-            due. Nothing is sent anywhere; there is nothing to sign in to.
-          </li>
-          <li>
-            Tasks View groups what is open into overdue, today, upcoming, and
-            unscheduled. Completed tasks are their own view, and a recurring
-            task keeps its completed occurrences in a history of its own.
-          </li>
-        </ul>
-
-        <h3>Standup Post</h3>
-        <ul>
-          <li>
-            Copy yesterday's digest straight from the tray menu, without opening
-            a window — the day's notes as Markdown, with nothing to configure.
-          </li>
-          <li>
-            One click further in, copy the Standup Material: yesterday's notes
-            plus the work kept and the tasks still standing. The complete input,
-            and what you paste when no model is set up.
-          </li>
-          <li>
-            Or have the standup written for you, in prose, from exactly that
-            material — read it before you copy it, since it is written and may
-            be wrong. Nothing is kept: close the window and it is gone.
-          </li>
-          <li>
-            The writing is done by a language model you point the app at — any
-            OpenAI-compatible endpoint, your key, your prompt for the voice. The
-            key lives in your Mac's keychain, and every other feature works with
-            none of it configured.
-          </li>
-        </ul>
-
-        <h3>Meetings</h3>
-        <ul>
-          <li>
-            Today's meetings from the macOS calendar can become notes on their
-            own, so the day is not only what you remembered to type.
-          </li>
-          <li>
-            Off until you turn it on, and then only over the calendars you tick.
-            Meetings you declined and events covering the whole day are left
-            alone.
-          </li>
-        </ul>
-
-        <h3>Reading back, and settings</h3>
-        <ul>
-          <li>Copy the range you are looking at as Markdown.</li>
-          <li>
-            Export every note and task to a Markdown file, regardless of what
-            is on screen.
-          </li>
-          <li>
-            Remap either hotkey, pick a light, dark, or system theme, start at
-            login, and choose which calendars meetings come from.
-          </li>
-        </ul>
-      </section>
-
-      <footer>
-        <p>
-          MIT licensed.
-          <a href="https://github.com/rp-pipecodes/work-journal-ai"
-            >Source on GitHub</a
-          >.
-          <a href="https://github.com/rp-pipecodes/work-journal-ai/releases"
-            >Changelog</a
-          >.
-        </p>
-      </footer>
+        <footer class="site-footer">
+          <div class="footer-row">
+            <span>MIT licensed. Local-first means your words stay yours.</span>
+            <nav aria-label="Project">
+              <a href="https://github.com/rp-pipecodes/work-journal-ai"
+                >Source on GitHub</a
+              >
+              <a href="https://github.com/rp-pipecodes/work-journal-ai/releases"
+                >Changelog</a
+              >
+            </nav>
+          </div>
+        </footer>
+      </div>
     </main>
 
     <script>
-      // Progressive enhancement: name the latest release under the download
-      // button. The button already points at the right place, so a failed
-      // fetch — no network, rate limiting — is silent and the line stays
-      // hidden rather than showing a version that could be wrong.
+      // Release name: progressive enhancement. The buttons already point at
+      // /releases/latest, so a failed fetch stays silent rather than naming
+      // a version that could be wrong.
       fetch(
         "https://api.github.com/repos/rp-pipecodes/work-journal-ai/releases/latest",
       )
         .then((response) => (response.ok ? response.json() : null))
         .then((release) => {
           if (!release || !release.tag_name || !release.published_at) return;
+          var version = release.tag_name;
+          var date = new Intl.DateTimeFormat("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          }).format(new Date(release.published_at));
+          var line = document.getElementById("latest-release");
           document.getElementById("latest-release-version").textContent =
-            release.tag_name;
-          document.getElementById("latest-release-date").textContent =
-            new Intl.DateTimeFormat("en-US", {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-            }).format(new Date(release.published_at));
-          document.getElementById("latest-release").hidden = false;
+            version;
+          document.getElementById("latest-release-date").textContent = date;
+          line.hidden = false;
+          var nav = document.getElementById("nav-version");
+          nav.textContent = version;
+          nav.hidden = false;
         })
         .catch(() => {});
+
+      // Copy the quarantine command without selecting half of it.
+      (function () {
+        var btn = document.getElementById("copy-cmd");
+        btn.addEventListener("click", function () {
+          var text = document
+            .getElementById("xattr-cmd")
+            .textContent.trim();
+          function done(ok) {
+            btn.textContent = ok ? "Copied" : "Copy";
+            if (ok) setTimeout(() => (btn.textContent = "Copy"), 1600);
+          }
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(
+              () => done(true),
+              () => done(false),
+            );
+          } else {
+            var ta = document.createElement("textarea");
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            try {
+              done(document.execCommand("copy"));
+            } catch (e) {
+              done(false);
+            }
+            document.body.removeChild(ta);
+          }
+        });
+      })();
+
+      // Signature: a working journal loop. Notes live only in this page.
+      // A line starting with #name files under that Project; anything else
+      // is Unfiled. Tabs switch Digest / Material / Post renderings.
+      (function () {
+        var seedNotes = [
+          { project: "api", body: "fixed retry storm on checkout" },
+          { project: "website", body: "rewrote hero, kept the xattr note" },
+          { project: null, body: "1:1 with Mara — scope the import pass" },
+        ];
+        var seedTasks = [
+          { state: "kept", body: "review Mara's migration notes" },
+          { state: "open", body: "cut the next DMG and check the hash" },
+        ];
+        var notes = seedNotes.slice();
+        var count = notes.length;
+        var tab = "digest";
+
+        var out = document.getElementById("demo-out");
+        var status = document.getElementById("demo-status");
+        var countEl = document.getElementById("demo-count");
+        var form = document.getElementById("demo-form");
+        var input = document.getElementById("demo-input");
+        var tabs = Array.from(document.querySelectorAll(".demo-tab"));
+
+        function esc(s) {
+          return s
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+        }
+
+        function parse(line) {
+          if (/^#[A-Za-z0-9_-]+\s*$/.test(line.trim()))
+            return { bare: true };
+          var m = line.match(/^#([A-Za-z0-9_-]+)\s+([\s\S]+)$/);
+          if (m) return { project: m[1].toLowerCase(), body: m[2].trim() };
+          return { project: null, body: line.trim() };
+        }
+
+        function renderDigest() {
+          return notes
+            .map((n) =>
+              n.project
+                ? '- <span class="proj">#' + esc(n.project) + "</span> " + esc(n.body)
+                : "- " + esc(n.body),
+            )
+            .join("\n");
+        }
+
+        function renderMaterial() {
+          var lines = ["## Yesterday", ""].concat(
+            notes.map((n) =>
+              n.project ? "- #" + n.project + " " + n.body : "- " + n.body,
+            ),
+          );
+          lines.push("", "## Kept", "");
+          lines.push(
+            ...seedTasks
+              .filter((t) => t.state === "kept")
+              .map((t) => "- [x] " + t.body),
+          );
+          lines.push("", "## Still standing", "");
+          lines.push(
+            ...seedTasks
+              .filter((t) => t.state === "open")
+              .map((t) => "- [ ] " + t.body),
+          );
+          return esc(lines.join("\n"));
+        }
+
+        function renderPost() {
+          var first = notes[0];
+          var firstLine = first
+            ? (first.project ? first.project + ": " : "") + first.body
+            : "inbox zero and a clean Filter";
+          return (
+            '<span class="dim">Yesterday</span>\n' +
+            '<span class="prose">“Shipped ' +
+            esc(firstLine) +
+            " and " +
+            esc(String(notes.length - 1)) +
+            ' more lines worth of done. Today: the DMG and Mara’s review.”</span>\n' +
+            '<span class="dim">Read it before you copy it — prose may be wrong.</span>'
+          );
+        }
+
+        function render() {
+          if (tab === "digest") {
+            out.innerHTML = renderDigest();
+            status.textContent = "Yesterday’s Digest, verbatim.";
+          } else if (tab === "material") {
+            out.innerHTML = renderMaterial();
+            status.textContent = "Standup Material: notes + kept + standing.";
+          } else {
+            out.innerHTML = renderPost();
+            status.textContent = "Standup Post: written, lossy, never kept.";
+          }
+          countEl.textContent = "● " + count + " today";
+        }
+
+        tabs.forEach((b) =>
+          b.addEventListener("click", () => {
+            tab = b.dataset.tab;
+            tabs.forEach((x) =>
+              x.setAttribute(
+                "aria-pressed",
+                x === b ? "true" : "false",
+              ),
+            );
+            render();
+          }),
+        );
+
+        form.addEventListener("submit", (e) => {
+          e.preventDefault();
+          var line = input.value;
+          if (!line.trim()) return;
+          var parsed = parse(line);
+          if (parsed.bare) {
+            status.textContent =
+              "A #name alone captures nothing — write the note after it.";
+            return;
+          }
+          if (!parsed.body) return;
+          notes.push(parsed);
+          count += 1;
+          input.value = "";
+          tab = "digest";
+          tabs.forEach((x) =>
+            x.setAttribute(
+              "aria-pressed",
+              x.dataset.tab === "digest" ? "true" : "false",
+            ),
+          );
+          render();
+          status.textContent = parsed.project
+            ? "Filed under #" + parsed.project + "."
+            : "Captured as Unfiled.";
+        });
+
+        render();
+      })();
     </script>
   </body>
 </html>
