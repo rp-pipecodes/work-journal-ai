@@ -111,25 +111,6 @@ export async function selectReviewCompletions({
   }
 }
 
-/**
- * Selects Review Material's records for one Filter: the journal's canonical
- * `digest(filter)` for Notes, plus the work completed in its days.
- */
-export async function selectReview({
-  journal,
-  filter,
-}: {
-  journal: Journal
-  filter: Filter
-}): Promise<ReviewSelection> {
-  const [digest, completions] = await Promise.all([
-    journal.digest(filter),
-    selectReviewCompletions({ journal, filter }),
-  ])
-
-  return { filter, digest, ...completions }
-}
-
 /** Whether there is nothing to copy: neither Notes nor completions. */
 export function reviewRefuses(selection: ReviewSelection): boolean {
   return (

@@ -5,13 +5,15 @@ import {
   formatSlot,
   isOpen,
   slotOf,
+  type Filter,
   type Journal,
 } from './journal'
 import { fixedClock, openTestDatabase } from './testing/database'
 import {
   buildReviewMaterial,
   reviewRefuses,
-  selectReview,
+  selectReviewCompletions,
+  type ReviewSelection,
 } from './review'
 
 // Review Material is tested at the Journal boundary like Standup Material:
@@ -32,6 +34,28 @@ async function journalAt(instant: string): Promise<{
   openJournals.push(close)
   const clock = fixedClock(instant)
   return { journal: createJournal({ clock, driver }), clock }
+}
+
+/**
+ * The tests' own selection: the journal's canonical Digest for Notes, plus
+ * the work completed in the Filter's days. Production never takes this path —
+ * the session embeds the Digest it already holds and reads only completions
+ * via `selectReviewCompletions` — so this helper lives with the tests rather
+ * than shipping a selection function nothing in the app calls.
+ */
+async function selectReview({
+  journal,
+  filter,
+}: {
+  journal: Journal
+  filter: Filter
+}): Promise<ReviewSelection> {
+  const [digest, completions] = await Promise.all([
+    journal.digest(filter),
+    selectReviewCompletions({ journal, filter }),
+  ])
+
+  return { filter, digest, ...completions }
 }
 
 describe('selectReview', () => {
