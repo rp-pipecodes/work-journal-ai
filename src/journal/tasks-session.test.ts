@@ -805,4 +805,32 @@ describe('searching the Tasks', () => {
     expect(now().term).toBe('renew')
     expect(descriptionsOf(now())).toEqual(['renewed it'])
   })
+
+  it('lands a change made while the search debounce is still waiting', async () => {
+    const slow = gate()
+    const { session, created, now } = await tasksSession(['alpha', 'beta'], {
+      journal: (core) => ({
+        ...core,
+        async openTasks() {
+          const tasks = await core.openTasks()
+          await slow.reached('read')
+          return tasks
+        },
+      }),
+    })
+
+    await session.open()
+    slow.hold('read')
+    const searching = session.search('al')
+    // The list — with its checkboxes — is still on screen while the term
+    // waits out its debounce, so completing a Task right now is one ordinary
+    // click, and its re-read is still in flight when the timer fires.
+    const completing = session.complete(created[0].id)
+    await afterDebounce()
+    slow.release('read')
+    await completing
+    await searching
+
+    expect(descriptionsOf(now())).toEqual(['beta'])
+  })
 })

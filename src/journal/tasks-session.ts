@@ -337,10 +337,15 @@ export function createTasksSession({
     // Said whether or not it changed: a change that worked clears the one
     // before it, so no problem outlives the list it was about.
     show({ problem })
-    // A change made here ends a Search the way moving lists does: what was
-    // asked for is the list, and the results answered a question it has now
-    // moved past. The term stays in the field.
-    if (snapshot.searching) show({ searching: false })
+    // A change made here ends a Search the way moving lists does — and takes
+    // its waiting term with it. The list is still on screen while a term waits
+    // out its debounce, so a change in that window would otherwise have its
+    // re-read invalidated by the timer firing: the timer takes a newer ticket
+    // and then bails, and neither read lands. The term stays in the field.
+    if (snapshot.searching) {
+      abandonWaitingTerm()
+      show({ searching: false })
+    }
     await read(snapshot.showing)
 
     return problem === null
