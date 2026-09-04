@@ -325,7 +325,7 @@ describe('createTaskAlertsSession', () => {
     await session.start()
 
     desktop.completeTaskAlert({
-      taskId: `task:${task.id}`,
+      alertId: `task:${task.id}`,
       date: '2026-03-16',
       time: '17:00',
     })
@@ -347,7 +347,7 @@ describe('createTaskAlertsSession', () => {
     await session.start()
 
     desktop.completeTaskAlert({
-      taskId: `task:${task.id}`,
+      alertId: `task:${task.id}`,
       date: '2026-03-16',
       time: '09:00',
     })
@@ -378,7 +378,7 @@ describe('createTaskAlertsSession', () => {
       schedule: { date: '2026-03-18', time: '09:30' },
     })
     desktop.completeTaskAlert({
-      taskId: `task:${task.id}`,
+      alertId: `task:${task.id}`,
       date: '2026-03-16',
       time: '17:00',
     })
@@ -406,7 +406,7 @@ describe('createTaskAlertsSession', () => {
     await journal.deleteTask(task.id)
 
     desktop.completeTaskAlert({
-      taskId: `task:${task.id}`,
+      alertId: `task:${task.id}`,
       date: '2026-03-16',
       time: '17:00',
     })
@@ -425,7 +425,7 @@ describe('createTaskAlertsSession', () => {
     await session.start()
 
     const response = {
-      taskId: `task:${task.id}`,
+      alertId: `task:${task.id}`,
       date: '2026-03-16',
       time: '17:00',
     }
@@ -448,7 +448,7 @@ describe('createTaskAlertsSession', () => {
 
     // Chosen before the session was listening: taken at start, exactly once.
     desktop.completeTaskAlert({
-      taskId: `task:${task.id}`,
+      alertId: `task:${task.id}`,
       date: '2026-03-16',
       time: '17:00',
     })
@@ -471,16 +471,38 @@ describe('createTaskAlertsSession', () => {
     )
 
     desktop.completeTaskAlert({
-      taskId: `task:${task.id}`,
+      alertId: `task:${task.id}`,
       date: '2026-03-16',
       time: '17:00',
     })
     await vi.advanceTimersByTimeAsync(0)
 
+    // No mutation — but no silence either: the Task opens for review, since
+    // the failure says nothing about whether it still exists.
     expect(await journal.openTasks()).toEqual([
       expect.objectContaining({ id: task.id }),
     ])
-    expect(desktop.pendingTaskAlert).toBeNull()
+    expect(desktop.pendingTaskAlert).toBe(`task:${task.id}`)
+  })
+
+  it('drains the written-down copy when the live announcement arrives', async () => {
+    const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
+    const task = await journal.createTask('ahead', {
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await session.start()
+
+    desktop.completeTaskAlert({
+      alertId: `task:${task.id}`,
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Claimed with the announcement, so a restarted session reclaims nothing
+    // and opens no review nobody asked for.
+    expect(await desktop.completedTaskAlert()).toBeNull()
   })
 
   it('hears no Complete once it is stopped', async () => {
@@ -493,7 +515,7 @@ describe('createTaskAlertsSession', () => {
     session.stop()
 
     desktop.completeTaskAlert({
-      taskId: `task:${task.id}`,
+      alertId: `task:${task.id}`,
       date: '2026-03-16',
       time: '17:00',
     })

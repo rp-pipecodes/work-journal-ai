@@ -6,7 +6,7 @@ import type { TaskAlertCompletion } from './desktop'
 // seam: announced live to the Capture window, and kept for a cold launch to
 // claim. Written against the fake, which is the same surface the app runs on.
 const completion: TaskAlertCompletion = {
-  taskId: 'task-1',
+  alertId: 'task:task-1',
   date: '2026-03-16',
   time: '17:00',
 }

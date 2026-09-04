@@ -65,7 +65,7 @@ pub struct TaskAlert {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskAlertCompletion {
-    pub task_id: String,
+    pub alert_id: String,
     pub date: String,
     pub time: String,
 }
@@ -82,7 +82,7 @@ pub const TASK_ALERT_CATEGORY_ID: &str = "task-alert";
 /// pending request's identifier verbatim — which Task that is stays the
 /// journal's to say — while the date and time it represented travel here,
 /// spelled exactly as `TaskSchedule` spells them.
-const USER_INFO_TASK_ID: &str = "taskId";
+const USER_INFO_ALERT_ID: &str = "alertId";
 const USER_INFO_DATE: &str = "date";
 const USER_INFO_TIME: &str = "time";
 
@@ -111,19 +111,37 @@ pub fn classify_alert_response(
         return AlertResponse::Open;
     }
 
-    let slot = [USER_INFO_TASK_ID, USER_INFO_DATE, USER_INFO_TIME]
+    let slot = [USER_INFO_ALERT_ID, USER_INFO_DATE, USER_INFO_TIME]
         .into_iter()
         .map(|key| user_info.get(key).filter(|value| !value.is_empty()))
         .collect::<Option<Vec<_>>>();
 
     match slot.as_deref() {
-        Some([task_id, date, time]) => AlertResponse::Complete(TaskAlertCompletion {
-            task_id: task_id.to_string(),
+        Some([alert_id, date, time]) => AlertResponse::Complete(TaskAlertCompletion {
+            alert_id: alert_id.to_string(),
             date: date.to_string(),
             time: time.to_string(),
         }),
         _ => AlertResponse::Open,
     }
+}
+
+/// The delivered slot, spelled exactly as `TaskSchedule` spells it: the civil
+/// date and minute a pending request represents, as the strings the guarded
+/// completion compares.
+///
+/// Pure and beside `classify_alert_response`, for the same reason: `taskAlerts`
+/// splits the schedule into components and the completion compares the rebuilt
+/// strings, so any drift between the two spellings turns every Complete
+/// silently stale — and only a test pins them together.
+pub fn delivered_slot(alert: &TaskAlert) -> (String, String) {
+    (
+        format!(
+            "{:04}-{:02}-{:02}",
+            alert.year, alert.month, alert.day
+        ),
+        format!("{:02}:{:02}", alert.hour, alert.minute),
+    )
 }
 
 /// Which of the app's pending requests the journal no longer wants: everything
@@ -378,21 +396,17 @@ mod user_notifications {
 
     /// The delivered slot, as a response carries it back: the pending
     /// request's identifier verbatim, plus the civil date and minute it
-    /// represented — spelled exactly as `TaskSchedule` spells them, so the
-    /// guarded completion compares strings without parsing anything.
+    /// represented — spelled by `delivered_slot`, so the guarded completion
+    /// compares strings without parsing anything.
     fn slot_user_info(alert: &TaskAlert) -> Retained<NSDictionary> {
-        let date = format!(
-            "{:04}-{:02}-{:02}",
-            alert.year, alert.month, alert.day
-        );
-        let time = format!("{:02}:{:02}", alert.hour, alert.minute);
+        let (date, time) = super::delivered_slot(alert);
 
         let info: Retained<NSMutableDictionary> = NSMutableDictionary::new();
         // Safety: every key is an `NSString`, which is `NSCopying`, and every
         // value is one too.
         unsafe {
             for (key, value) in [
-                (super::USER_INFO_TASK_ID, alert.id.as_str()),
+                (super::USER_INFO_ALERT_ID, alert.id.as_str()),
                 (super::USER_INFO_DATE, date.as_str()),
                 (super::USER_INFO_TIME, time.as_str()),
             ] {
@@ -475,7 +489,7 @@ mod user_notifications {
                 let mut delivered = HashMap::new();
                 let user_info = request.content().userInfo();
                 for key in [
-                    super::USER_INFO_TASK_ID,
+                    super::USER_INFO_ALERT_ID,
                     super::USER_INFO_DATE,
                     super::USER_INFO_TIME,
                 ] {
@@ -580,7 +594,8 @@ pub use user_notifications::{
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_alert_response, stale_identifiers, AlertResponse, TaskAlert, COMPLETE_ACTION_ID,
+        classify_alert_response, delivered_slot, stale_identifiers, AlertResponse, TaskAlert,
+        COMPLETE_ACTION_ID,
     };
     use std::collections::HashMap;
 
@@ -634,7 +649,7 @@ mod tests {
     /// request's identifier verbatim, plus the civil slot it represented.
     fn delivered() -> HashMap<String, String> {
         HashMap::from([
-            ("taskId".to_string(), "task:a".to_string()),
+            ("alertId".to_string(), "task:a".to_string()),
             ("date".to_string(), "2026-03-16".to_string()),
             ("time".to_string(), "09:00".to_string()),
         ])
@@ -645,7 +660,7 @@ mod tests {
         assert_eq!(
             classify_alert_response(COMPLETE_ACTION_ID, &delivered()),
             AlertResponse::Complete(super::TaskAlertCompletion {
-                task_id: "task:a".to_string(),
+                alert_id: "task:a".to_string(),
                 date: "2026-03-16".to_string(),
                 time: "09:00".to_string(),
             })
@@ -700,6 +715,39 @@ mod tests {
         assert_eq!(
             classify_alert_response(COMPLETE_ACTION_ID, &empty),
             AlertResponse::Open
+        );
+    }
+
+    /// One Task's pending request with every component single-digit: the
+    /// spelling has to pad each one, exactly as the schedule it came from.
+    fn alert_at(year: i32, month: i32, day: i32, hour: i32, minute: i32) -> TaskAlert {
+        TaskAlert {
+            id: "task:a".to_string(),
+            description: "water the plants".to_string(),
+            year,
+            month,
+            day,
+            hour,
+            minute,
+        }
+    }
+
+    #[test]
+    fn the_delivered_slot_is_spelled_like_the_schedule_it_came_from() {
+        // What `taskAlerts` splits out of "2026-03-05"/"09:05" must rebuild
+        // byte-for-byte: the guarded completion compares strings, so any
+        // drift here turns every Complete silently stale.
+        assert_eq!(
+            delivered_slot(&alert_at(2026, 3, 5, 9, 5)),
+            ("2026-03-05".to_string(), "09:05".to_string())
+        );
+    }
+
+    #[test]
+    fn the_delivered_slot_needs_no_padding_when_nothing_is_single_digit() {
+        assert_eq!(
+            delivered_slot(&alert_at(2026, 11, 17, 17, 30)),
+            ("2026-11-17".to_string(), "17:30".to_string())
         );
     }
 }

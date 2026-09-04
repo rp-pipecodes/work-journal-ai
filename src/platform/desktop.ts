@@ -291,7 +291,7 @@ export interface TaskAlertCompletion {
    * The pending request's identifier the Alert was registered under, verbatim
    * — which Task it names is the journal's to say, in `taskIdOfAlert`.
    */
-  taskId: string
+  alertId: string
   /** The delivered slot's date, exactly as `TaskSchedule` spells it. */
   date: string
   /** The delivered slot's time, exactly as `TaskSchedule` spells it. */

@@ -159,39 +159,40 @@ export function createTaskAlertsSession({
   async function completeFromAlert(
     response: TaskAlertCompletion,
   ): Promise<void> {
-    const delivered = `${response.taskId} ${response.date} ${response.time}`
+    const delivered = `${response.alertId} ${response.date} ${response.time}`
     if (seenCompletions.has(delivered)) return
     seenCompletions.add(delivered)
 
     // Which Task the Alert named — the journal's to say, not this session's.
-    const taskId = taskIdOfAlert(response.taskId)
+    const taskId = taskIdOfAlert(response.alertId)
     if (taskId === null) {
       console.error(
         'could not complete the Task its Alert asked for',
-        response.taskId,
+        response.alertId,
       )
-      return
-    }
-
-    let core: Journal
-    try {
-      core = await journal
-    } catch (error) {
-      console.error('could not complete the Task its Alert asked for', error)
       return
     }
 
     let outcome: CompletionAtSlot
     try {
+      const core = await journal
       outcome = await core.completeTaskAt(taskId, {
         date: response.date,
         time: response.time,
       })
     } catch (error) {
-      // No mutation happened and nothing is claimed: without the guarded
-      // answer there is nothing to say the Task still exists, so there is
-      // nothing to open either.
+      // No mutation happened and none is claimed — but the failure is not
+      // silent either. Tasks View opens on the Alert's Task for review, and a
+      // Task that turns out not to exist simply isn't singled out.
       console.error('could not complete the Task its Alert asked for', error)
+      try {
+        await desktop.focusTaskAlert(response.alertId)
+      } catch (focusError) {
+        console.error(
+          'could not open the Task its Alert asked for',
+          focusError,
+        )
+      }
       return
     }
 
@@ -210,7 +211,7 @@ export function createTaskAlertsSession({
       // Deleted since the banner was delivered: nothing to review.
       console.error(
         'could not complete the Task its Alert asked for',
-        response.taskId,
+        response.alertId,
       )
       return
     }
@@ -218,7 +219,7 @@ export function createTaskAlertsSession({
     // Stale: the Task moved, and the banner must not move with it. No
     // mutation — Tasks View opens on it instead, for review.
     try {
-      await desktop.focusTaskAlert(response.taskId)
+      await desktop.focusTaskAlert(response.alertId)
     } catch (error) {
       console.error('could not open the Task its Alert asked for', error)
     }
@@ -239,9 +240,19 @@ export function createTaskAlertsSession({
         // A Complete chosen on a Task Alert. Subscribed before the
         // cold-launch read below, so a response arriving in between is
         // deduplicated rather than missed or doubled.
-        desktop.onTaskAlertCompleted((response) =>
-          void completeFromAlert(response),
-        ),
+        desktop.onTaskAlertCompleted((response) => {
+          // The choice is written down as well as announced — the Rust side
+          // cannot know a window is listening. This window was, so it claims
+          // what was written down too. Otherwise a session restarted
+          // in-process would reclaim it and open a review nobody asked for.
+          void desktop.completedTaskAlert().catch((error: unknown) => {
+            console.error(
+              'could not claim the Task Alert completion',
+              error,
+            )
+          })
+          void completeFromAlert(response)
+        }),
       ])
 
       if (!running) {
