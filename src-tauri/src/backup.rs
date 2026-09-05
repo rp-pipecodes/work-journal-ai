@@ -1029,22 +1029,21 @@ mod tests {
 
         let pruned = prunable(&directory.path);
 
-        // The five oldest go, the thirty newest stay, and what is named is
-        // what is on disk — so the caller's deletes cannot miss.
+        // The five oldest go — oldest first, the order `prunable` promises —
+        // the thirty newest stay, and what is named is what is on disk, so
+        // the caller's deletes cannot miss.
         assert_eq!(pruned.len(), 5);
-        let mut pruned_names: Vec<String> = pruned
+        let pruned_names: Vec<String> = pruned
             .iter()
             .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
-        pruned_names.sort();
-        let mut expected: Vec<String> = (0..5)
+        let expected: Vec<String> = (0..5)
             .map(|seconds| {
                 let instant =
                     UNIX_EPOCH + Duration::from_secs(1_788_425_100 + seconds as u64);
                 snapshot_file_name(instant)
             })
             .collect();
-        expected.sort();
         assert_eq!(pruned_names, expected);
         for path in &pruned {
             assert!(path.exists(), "{} is not on disk", path.display());
@@ -1070,22 +1069,21 @@ mod tests {
 
         let pruned = prunable(&directory.path);
 
-        // Two over the limit means the two oldest *snapshots* go — and
-        // neither neighbour is among them, whatever either is named.
+        // Two over the limit means the two oldest *snapshots* go — oldest
+        // first, the order `prunable` promises — and neither neighbour is
+        // among them, whatever either is named.
         assert_eq!(pruned.len(), 2);
-        let mut pruned_names: Vec<String> = pruned
+        let pruned_names: Vec<String> = pruned
             .iter()
             .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
-        pruned_names.sort();
-        let mut expected: Vec<String> = (0..2)
+        let expected: Vec<String> = (0..2)
             .map(|seconds| {
                 let instant =
                     UNIX_EPOCH + Duration::from_secs(1_788_425_100 + seconds as u64);
                 snapshot_file_name(instant)
             })
             .collect();
-        expected.sort();
         assert_eq!(pruned_names, expected);
         for path in &pruned {
             let name = path.file_name().unwrap().to_string_lossy();
