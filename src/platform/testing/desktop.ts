@@ -130,11 +130,11 @@ export interface FakeDesktop extends Desktop {
   /** The user chooses Complete on a Task Alert. */
   completeTaskAlert(completion: TaskAlertCompletion): void
   /**
-   * The Complete action waiting to be claimed by the Capture window it is
-   * addressed to — what a choice made while the app was not running leaves
-   * behind. Null when nothing chose one.
+   * The Complete actions waiting to be claimed by the Capture window they are
+   * addressed to — what choices made while the app was not running leave
+   * behind. Empty when nothing chose one.
    */
-  pendingTaskAlertCompletion: TaskAlertCompletion | null
+  pendingTaskAlertCompletion: TaskAlertCompletion[]
   /**
    * The Alert waiting to be claimed by the window it opened — what a click
    * that built the window leaves behind. Null when the window was opened any
@@ -273,7 +273,7 @@ export function fakeDesktop({
     pendingSection: null,
     sectionsClaimed: 0,
     pendingTaskAlert: null,
-    pendingTaskAlertCompletion: null,
+    pendingTaskAlertCompletion: [],
     apiKey,
     keychainRefuses,
     availableUpdate: null,
@@ -414,15 +414,17 @@ export function fakeDesktop({
     completeTaskAlert: (completion) => {
       // Both, exactly as the Rust side does it: written down for a Capture
       // window that has yet to ask — a choice made while the app was not
-      // running — and announced for one already listening. Whichever claims
-      // it, it is claimed once. The default-click handoff is untouched.
-      desktop.pendingTaskAlertCompletion = completion
+      // running — and announced for one already listening. Whatever is
+      // written down is claimed once, and one choice never destroys another.
+      // The default-click handoff is untouched.
+      desktop.pendingTaskAlertCompletion.push(completion)
       taskAlertCompleted.announce(completion)
     },
     completedTaskAlert: async () => {
-      // Handed over exactly once, as the real one is.
+      // Handed over exactly once, as the real one is: whatever is waiting is
+      // taken, and the next ask finds nothing.
       const waiting = desktop.pendingTaskAlertCompletion
-      desktop.pendingTaskAlertCompletion = null
+      desktop.pendingTaskAlertCompletion = []
       return waiting
     },
     focusTaskAlert: async (alertId) => {

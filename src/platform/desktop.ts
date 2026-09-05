@@ -585,16 +585,17 @@ export interface Desktop {
    */
   openedTaskAlert(): Promise<string | null>
   /**
-   * The Complete action waiting to be claimed, if one was chosen — asked for
-   * by the Capture window as it starts, and null when the app was opened any
+   * The Complete actions waiting to be claimed, if any were chosen — asked for
+   * by the Capture window as it starts, and empty when the app was opened any
    * other way.
    *
    * The announcement above is not enough on its own: a Complete chosen while
    * Work Journal was not running arrives before the Capture window is
-   * listening. The Rust side keeps it until it is asked for, and hands it over
-   * exactly once.
+   * listening. The Rust side keeps them until it is asked for — one per banner
+   * acted on, so a second choice never destroys the first — and hands them
+   * over exactly once, as a set.
    */
-  completedTaskAlert(): Promise<TaskAlertCompletion | null>
+  completedTaskAlert(): Promise<TaskAlertCompletion[]>
   /**
    * Opens the Main Window on Tasks View focused on the Task an Alert names —
    * what a stale Complete does instead of completing, so the banner's Task is

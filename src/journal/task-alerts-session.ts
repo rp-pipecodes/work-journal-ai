@@ -151,6 +151,28 @@ export function createTaskAlertsSession({
   }
 
   /**
+   * The Complete actions written down and waiting, drained and processed.
+   *
+   * Drained when a choice is announced too — this window was listening, so
+   * what was written down for it is claimed, and a session restarted in-process
+   * reclaims nothing — and read at start for the choices made while the app
+   * was not running. Whatever was waiting is processed here: a copy of the
+   * choice just announced, and a retried delivery, are the deduplication
+   * above's to turn away. Never throws: a failure to claim must not take the
+   * reconciliation with it.
+   */
+  async function completeWrittenDown(): Promise<void> {
+    let pending: TaskAlertCompletion[]
+    try {
+      pending = await desktop.completedTaskAlert()
+    } catch (error) {
+      console.error('could not claim the Task Alert completions', error)
+      return
+    }
+    for (const completion of pending) await completeFromAlert(completion)
+  }
+
+  /**
    * One Complete chosen on a Task Alert: the guarded completion, or Tasks View
    * opened on the Task when the banner outlived its slot. Never throws: a
    * banner is an ordinary copy of a schedule that may have moved, and a
@@ -242,15 +264,12 @@ export function createTaskAlertsSession({
         // deduplicated rather than missed or doubled.
         desktop.onTaskAlertCompleted((response) => {
           // The choice is written down as well as announced — the Rust side
-          // cannot know a window is listening. This window was, so it claims
-          // what was written down too. Otherwise a session restarted
-          // in-process would reclaim it and open a review nobody asked for.
-          void desktop.completedTaskAlert().catch((error: unknown) => {
-            console.error(
-              'could not claim the Task Alert completion',
-              error,
-            )
-          })
+          // cannot know a window is listening. This window was, so what was
+          // written down is claimed too — and anything written down before
+          // this session was listening is processed here, exactly as a cold
+          // launch would. A session restarted in-process must reclaim nothing
+          // and open no review nobody asked for.
+          void completeWrittenDown()
           void completeFromAlert(response)
         }),
       ])
@@ -266,15 +285,9 @@ export function createTaskAlertsSession({
       // reinstalled or its permission was turned back on.
       await reconcile()
 
-      // A Complete chosen while the app was not running, waiting to be
+      // The Completions chosen while the app was not running, waiting to be
       // claimed. Read only after subscribing above.
-      let pending: TaskAlertCompletion | null = null
-      try {
-        pending = await desktop.completedTaskAlert()
-      } catch (error) {
-        console.error('could not read the Task Alert completion', error)
-      }
-      if (pending !== null) await completeFromAlert(pending)
+      await completeWrittenDown()
 
       interval = setInterval(() => void reconcile(), RECONCILE_INTERVAL_MS)
     },

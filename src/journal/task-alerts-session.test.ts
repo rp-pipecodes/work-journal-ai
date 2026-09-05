@@ -439,6 +439,36 @@ describe('createTaskAlertsSession', () => {
     expect(desktop.pendingTaskAlert).toBeNull()
   })
 
+  it('applies two different Completions that arrive together once each', async () => {
+    const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
+    const first = await journal.createTask('first', {
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    const second = await journal.createTask('second', {
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await session.start()
+
+    desktop.completeTaskAlert({
+      alertId: `task:${first.id}`,
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    desktop.completeTaskAlert({
+      alertId: `task:${second.id}`,
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Each is its own guarded completion: both applied, and neither opened a
+    // review for the other's sake.
+    expect(await journal.openTasks()).toEqual([])
+    expect(desktop.pendingTaskAlert).toBeNull()
+  })
+
   it('claims a Complete chosen while the app was not running', async () => {
     const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
     const task = await journal.createTask('ahead', {
@@ -456,7 +486,38 @@ describe('createTaskAlertsSession', () => {
     await vi.advanceTimersByTimeAsync(0)
 
     expect(await journal.openTasks()).toEqual([])
-    expect(await desktop.completedTaskAlert()).toBeNull()
+    expect(await desktop.completedTaskAlert()).toEqual([])
+  })
+
+  it('applies every Complete chosen while the app was not running', async () => {
+    const { session, journal, desktop } = await sessionAt('2026-03-16T10:00:00')
+    const first = await journal.createTask('first', {
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    const second = await journal.createTask('second', {
+      date: '2026-03-16',
+      time: '17:00',
+    })
+
+    // Both chosen before the session was listening: the single slot this once
+    // was would have let the second destroy the first, and the other Task
+    // would stay Open with no trace. Each is taken at start.
+    desktop.completeTaskAlert({
+      alertId: `task:${first.id}`,
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    desktop.completeTaskAlert({
+      alertId: `task:${second.id}`,
+      date: '2026-03-16',
+      time: '17:00',
+    })
+    await session.start()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(await journal.openTasks()).toEqual([])
+    expect(await desktop.completedTaskAlert()).toEqual([])
   })
 
   it('leaves the Task alone when the guarded completion fails', async () => {
@@ -502,7 +563,7 @@ describe('createTaskAlertsSession', () => {
 
     // Claimed with the announcement, so a restarted session reclaims nothing
     // and opens no review nobody asked for.
-    expect(await desktop.completedTaskAlert()).toBeNull()
+    expect(await desktop.completedTaskAlert()).toEqual([])
   })
 
   it('hears no Complete once it is stopped', async () => {

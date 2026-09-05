@@ -26,8 +26,20 @@ describe('a Complete action on a Task Alert', () => {
     const desktop = fakeDesktop()
     desktop.completeTaskAlert(completion)
 
-    expect(await desktop.completedTaskAlert()).toEqual(completion)
-    expect(await desktop.completedTaskAlert()).toBeNull()
+    expect(await desktop.completedTaskAlert()).toEqual([completion])
+    expect(await desktop.completedTaskAlert()).toEqual([])
+  })
+
+  it('keeps every cold-launch pending response until claimed', async () => {
+    const desktop = fakeDesktop()
+    const second = { ...completion, alertId: 'task:task-2' }
+    desktop.completeTaskAlert(completion)
+    desktop.completeTaskAlert(second)
+
+    // One choice must never destroy another: both are waiting, in the order
+    // they were chosen.
+    expect(await desktop.completedTaskAlert()).toEqual([completion, second])
+    expect(await desktop.completedTaskAlert()).toEqual([])
   })
 
   it('leaves the default-click handoff untouched', async () => {
