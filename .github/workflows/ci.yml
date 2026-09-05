@@ -1,7 +1,7 @@
 name: ci
 
 # Runs on every push and pull request, so breakage surfaces before a tag is cut
-# rather than at release time. Node only — the Rust build belongs to release.yml.
+# rather than at release time.
 
 on:
   push:
@@ -42,3 +42,25 @@ jobs:
       # `tsc -b && vite build`, so this is the type check as well.
       - name: Build
         run: pnpm build
+
+  rust:
+    runs-on: macos-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Test
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
