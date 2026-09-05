@@ -173,7 +173,7 @@ pub fn prunable(directory: &Path) -> Vec<PathBuf> {
     // Counted by what is a snapshot, not by what is in the directory: the
     // limit is on backups, and a neighbour that is not one is outside the
     // arithmetic entirely.
-    let mut snapshots: Vec<Listed> = listed_snapshots(directory)
+    let snapshots: Vec<Listed> = listed_snapshots(directory)
         .into_iter()
         .filter(|listed| listed.instant.is_some())
         .collect();
@@ -181,13 +181,16 @@ pub fn prunable(directory: &Path) -> Vec<PathBuf> {
         return Vec::new();
     }
 
-    // Oldest first, so pruning walks down from the edge of retention.
-    snapshots.reverse();
-    snapshots
+    // `listed_snapshots` is newest first, so skipping keeps the newest N and
+    // offers the oldest beyond them. Reversed to oldest first, so pruning
+    // walks down from the edge of retention.
+    let mut pruned: Vec<PathBuf> = snapshots
         .into_iter()
         .skip(RETAINED_SNAPSHOTS)
         .filter_map(|snapshot| snapshot.path)
-        .collect()
+        .collect();
+    pruned.reverse();
+    pruned
 }
 
 /// Takes a snapshot of `source` into `destination` through the pool the
@@ -983,6 +986,20 @@ mod tests {
         // The five oldest go, the thirty newest stay, and what is named is
         // what is on disk — so the caller's deletes cannot miss.
         assert_eq!(pruned.len(), 5);
+        let mut pruned_names: Vec<String> = pruned
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        pruned_names.sort();
+        let mut expected: Vec<String> = (0..5)
+            .map(|seconds| {
+                let instant =
+                    UNIX_EPOCH + Duration::from_secs(1_788_425_100 + seconds as u64);
+                snapshot_file_name(instant)
+            })
+            .collect();
+        expected.sort();
+        assert_eq!(pruned_names, expected);
         for path in &pruned {
             assert!(path.exists(), "{} is not on disk", path.display());
         }
@@ -1010,6 +1027,20 @@ mod tests {
         // Two over the limit means the two oldest *snapshots* go — and
         // neither neighbour is among them, whatever either is named.
         assert_eq!(pruned.len(), 2);
+        let mut pruned_names: Vec<String> = pruned
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        pruned_names.sort();
+        let mut expected: Vec<String> = (0..2)
+            .map(|seconds| {
+                let instant =
+                    UNIX_EPOCH + Duration::from_secs(1_788_425_100 + seconds as u64);
+                snapshot_file_name(instant)
+            })
+            .collect();
+        expected.sort();
+        assert_eq!(pruned_names, expected);
         for path in &pruned {
             let name = path.file_name().unwrap().to_string_lossy();
             assert_ne!(name, "read-me-first.txt");
