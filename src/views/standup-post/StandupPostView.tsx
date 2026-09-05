@@ -408,10 +408,10 @@ function MaterialSummary({ selection }: { selection: StandupPostSelection }) {
 
 /**
  * Why there is no post, as one line — the few kinds the call answers with,
- * each with its own words. Only the Model Access one is actionable here,
- * because only its fix lives in this window: the rest name what happened and
- * leave the retry to the user, who is the only one who may spend the call
- * again.
+ * each with its own words. The two whose fix lives in Settings carry the
+ * way there — a missing half of Model Access, and a Base URL the API Key
+ * must not travel over; the rest name what happened and leave the retry to
+ * the user, who is the only one who may spend the call again.
  */
 function FailureLine({
   failure,
@@ -425,7 +425,7 @@ function FailureLine({
       <p role="alert" className="type-meta text-destructive">
         {describeFailure(failure)}
       </p>
-      {failure.kind === 'model-access' && (
+      {(failure.kind === 'model-access' || failure.kind === 'https-required') && (
         <Button variant="outline" size="sm" onClick={onOpenSettings}>
           Open Settings
         </Button>
@@ -446,6 +446,8 @@ function describeFailure(failure: StandupFailure): string {
       return 'Could not ask for a Standup Post. Try again.'
     case 'model-access':
       return 'Model Access is not configured. Open Settings to add a Base URL, a Model and an API Key.'
+    case 'https-required':
+      return 'The Base URL must be https to send the API Key. Open Settings to change it.'
     case 'keychain':
       return 'macOS is not letting Work Journal reach the API Key in your Keychain. Unlock your login keychain and try again.'
     case 'offline':

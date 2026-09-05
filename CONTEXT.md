@@ -236,7 +236,7 @@ Moving from the version running to a newer released one, without leaving the app
 _Avoid_: Upgrade, auto-update, patch
 
 **Model Access**:
-Whether the app can reach a language model at all: a Base URL, a Model name and an API Key, together and useless apart. Absent until the user supplies all three, and the only thing the app stores that is a secret — which is why the Key lives in the operating system's keychain rather than beside the other settings, and why the request is made outside the webview. Any OpenAI-compatible endpoint, so the Base URL is a field rather than a list of vendors and the Model is free text: a model name baked into the app is a name that outlives the model. Nothing but a Standup Post uses it, and everything else in the app works exactly as before while it is missing.
+Whether the app can reach a language model at all: a Base URL, a Model name and an API Key, together and useless apart. Absent until the user supplies all three, and the only thing the app stores that is a secret — which is why the Key lives in the operating system's keychain rather than beside the other settings, and why the request is made outside the webview. Any OpenAI-compatible endpoint, so the Base URL is a field rather than a list of vendors and the Model is free text: a model name baked into the app is a name that outlives the model. The Base URL must be https unless the host is the machine's own loopback — localhost, any of 127.0.0.0/8, or ::1 — self-hosted endpoints stay usable, and the Key never travels over plaintext. Nothing but a Standup Post uses it, and everything else in the app works exactly as before while it is missing.
 _Avoid_: Provider, AI settings, OpenAI key, integration
 
 **Standup Prompt**:

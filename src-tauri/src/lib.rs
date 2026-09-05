@@ -1466,7 +1466,10 @@ fn clear_api_key() -> Result<(), String> {
 ///
 /// Only the Keychain is this side's business: whether the Base URL and the
 /// Model are there at all is settings validation, which lives in TypeScript
-/// — see ADR 0026. Off the main thread twice over: the Keychain can put an
+/// — see ADR 0026 — with one deliberate exception: the transport the Key is
+/// allowed to travel on is refused here, in `standup::generate`, because a
+/// settings file edited by hand bypasses a view-layer check. Off the main
+/// thread twice over: the Keychain can put an
 /// authorization prompt in front of the read, and the call itself is allowed
 /// 60 seconds. A failure is an answer like any other — one of the few kinds
 /// `StandupFailure` names — so the section can say it back as a line. No

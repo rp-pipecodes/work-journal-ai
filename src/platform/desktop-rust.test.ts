@@ -643,6 +643,7 @@ describe('the Standup Post call contract', () => {
 
     expect(rustKinds).toEqual([
       'model-access',
+      'https-required',
       'keychain',
       'offline',
       'unauthorized',
