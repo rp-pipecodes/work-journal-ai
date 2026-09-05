@@ -199,9 +199,8 @@ export function createTauriDesktop(): Desktop {
 
     openedTaskAlert: async () =>
       (await invoke<string | null>('opened_task_alert')) ?? null,
-    completedTaskAlert: async () =>
-      (await invoke<TaskAlertCompletion | null>('completed_task_alert')) ??
-      null,
+    completedTaskAlert: () =>
+      invoke<TaskAlertCompletion[]>('completed_task_alert'),
     focusTaskAlert: (alertId) =>
       invoke('focus_task_alert', { alertId }),
     openNotificationSettings: () => invoke('open_notification_settings'),

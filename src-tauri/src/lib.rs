@@ -192,16 +192,18 @@ struct RequestedSection(Mutex<Option<String>>);
 #[derive(Default)]
 struct OpenedTaskAlert(Mutex<Option<String>>);
 
-/// The Complete action the user chose, waiting for the Capture window to claim
-/// it.
+/// The Complete actions the user chose, waiting for the Capture window to
+/// claim them.
 ///
 /// The event alone is not enough, for the same reason the click above keeps
 /// one of these: a choice made while Work Journal was not running arrives
 /// before the Capture window is listening. It is kept here instead, and the
-/// window asks for it as it starts. Taken rather than read: a Complete
-/// processes once.
+/// window asks for it as it starts. A list rather than a single slot: one
+/// Complete per banner the user acted on is kept, so a second choice never
+/// destroys the first. Drained rather than read: each Complete processes once,
+/// however it arrived.
 #[derive(Default)]
-struct CompletedTaskAlert(Mutex<Option<TaskAlertCompletion>>);
+struct CompletedTaskAlert(Mutex<Vec<TaskAlertCompletion>>);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -1600,10 +1602,12 @@ fn watch_for_task_alerts(app: &tauri::AppHandle) {
             let handle = &completed_handle;
             // Written down first, and always: a choice made while Work Journal
             // was not running arrives before the Capture window is listening,
-            // so it asks for this as it starts instead.
+            // so it asks for these as it starts instead. Kept alongside any
+            // choice that is already waiting — a second must not destroy the
+            // first.
             if let Some(pending) = handle.try_state::<CompletedTaskAlert>() {
                 if let Ok(mut waiting) = pending.0.lock() {
-                    *waiting = Some(completion.clone());
+                    waiting.push(completion.clone());
                 }
             }
 
@@ -1679,14 +1683,17 @@ fn focus_task_alert(app: tauri::AppHandle, alert_id: String) {
     show_task_alert(&app, alert_id);
 }
 
-/// The Complete action waiting to be claimed, if one was chosen — asked for by
-/// the Capture window as it starts. Taken rather than read: a Complete
+/// The Complete actions waiting to be claimed, if any were chosen — asked for
+/// by the Capture window as it starts. Drained rather than read: each Complete
 /// processes once, however it arrived.
 #[tauri::command]
 fn completed_task_alert(
     pending: tauri::State<'_, CompletedTaskAlert>,
-) -> Option<TaskAlertCompletion> {
-    pending.0.lock().ok()?.take()
+) -> Vec<TaskAlertCompletion> {
+    match pending.0.lock() {
+        Ok(mut waiting) => std::mem::take(&mut waiting),
+        Err(_) => Vec::new(),
+    }
 }
 
 /// Which Task an Alert the user clicked was about. Must match the payload
