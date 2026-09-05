@@ -222,6 +222,14 @@ pub fn staged_restore_path(config_dir: &Path) -> PathBuf {
     config_dir.join(STAGED_FILE_NAME)
 }
 
+/// The temp sibling a stage copies through, beside the staged path. The same
+/// directory, so the final rename is atomic — a partial file can never occupy
+/// the staged path. Not a snapshot name, so pruning never touches it, and
+/// never opened by plugin-sql.
+fn staged_temp_path(staged: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.tmp", staged.display()))
+}
+
 /// The filename a rollback of `instant` carries:
 /// `work-journal-rollback-20260903T084500.db`. UTC, second-precise, like a
 /// snapshot name, so it sorts with its own instant.
@@ -346,14 +354,33 @@ fn same_file(first: &Path, second: &Path) -> bool {
     }
 }
 
-/// Stages a validated candidate by copying it to the staged path, beside the
-/// live journal. Validates first, so a refusal stages nothing and touches
-/// neither the staged path nor the live database. A candidate that is the
-/// staged file itself is refused before the copy — copying a file onto
-/// itself truncates it to zero bytes, and validation passes first, on the
-/// intact file — as is one that is the live journal, which there is nothing
-/// to restore from. Answers with the staged path.
+/// Stages a validated candidate beside the live journal. Validates first, so
+/// a refusal stages nothing and touches neither the staged path nor the live
+/// database. A candidate that is the staged file itself is refused before the
+/// copy — copying a file onto itself truncates it to zero bytes, and
+/// validation passes first, on the intact file — as is one that is the live
+/// journal, which there is nothing to restore from. The copy goes to a temp
+/// sibling, which is validated before an atomic rename onto the staged path,
+/// so a copy that fails partway leaves no truncated file where the next
+/// launch would apply it. Answers with the staged path.
 pub async fn stage_restore(candidate: &Path, config_dir: &Path) -> Result<PathBuf, String> {
+    stage_restore_with_copy(candidate, config_dir, copy_candidate).await
+}
+
+/// The file copy staging goes through, so the seam above can swap it in
+/// tests.
+fn copy_candidate(candidate: &Path, temp: &Path) -> io::Result<u64> {
+    std::fs::copy(candidate, temp)
+}
+
+/// The staging body with the file copy as a seam: production passes
+/// `std::fs::copy`, tests pass a copy that fails partway to prove the staged
+/// path is never left truncated.
+async fn stage_restore_with_copy(
+    candidate: &Path,
+    config_dir: &Path,
+    copy: fn(&Path, &Path) -> io::Result<u64>,
+) -> Result<PathBuf, String> {
     validate_restore_candidate(candidate).await?;
 
     let staged = staged_restore_path(config_dir);
@@ -369,12 +396,29 @@ pub async fn stage_restore(candidate: &Path, config_dir: &Path) -> Result<PathBu
             candidate.display()
         ));
     }
+    let temp = staged_temp_path(&staged);
+    if same_file(candidate, &temp) {
+        return Err(format!(
+            "the backup is the staged restore itself: {}",
+            candidate.display()
+        ));
+    }
     if let Some(parent) = staged.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("the staged restore could not be prepared: {error}"))?;
     }
-    std::fs::copy(candidate, &staged)
-        .map_err(|error| format!("the backup could not be staged: {error}"))?;
+    if let Err(error) = copy(candidate, &temp) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(format!("the backup could not be staged: {error}"));
+    }
+    if let Err(error) = validate_restore_candidate(&temp).await {
+        let _ = std::fs::remove_file(&temp);
+        return Err(format!("the backup could not be staged: {error}"));
+    }
+    if let Err(error) = std::fs::rename(&temp, &staged) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(format!("the backup could not be staged: {error}"));
+    }
     Ok(staged)
 }
 
@@ -388,8 +432,10 @@ pub async fn stage_restore(candidate: &Path, config_dir: &Path) -> Result<PathBu
 /// outlives the journal it belonged to: sidecars travel with the rollback
 /// when there is one, and orphans of a missing live journal — a WAL without
 /// its main file is unrecoverable — are removed before the staged file takes
-/// the live path. Renames only, no copies, so a half-written journal is never
-/// the live one. An absent staged file is the ordinary path and costs
+/// the live path. Applying is renames only, no copies; staging is the one
+/// copy, through a temp sibling validated before an atomic rename onto the
+/// staged path, so a half-written journal never occupies the staged path and
+/// is never the live one. An absent staged file is the ordinary path and costs
 /// nothing, as are missing sidecars. If any step fails, every rename already
 /// made is undone, the journal is left as it was, and the failure is answered
 /// as an error for the caller to log.
@@ -1771,5 +1817,79 @@ mod tests {
             .expect("the snapshot Note did not read back");
         assert_eq!(body, "the snapshot note");
         restored.close().await;
+    });
+
+    async_test!(a_copy_failure_mid_stage_leaves_no_staged_file_and_apply_is_a_noop, {
+        // A copy that fails partway must never leave a truncated file at the
+        // staged path: the next ordinary launch must find nothing to apply
+        // and leave the live journal exactly as it was.
+        let config = TempDir::new("restore-partial-stage");
+        let live = live_database_path(&config.path);
+        write_journal_file(&live, SUPPORTED_MIGRATION_VERSION, "the live journal").await;
+        let live_before = std::fs::read(&live).unwrap();
+
+        let elsewhere = TempDir::new("restore-partial-candidate");
+        let candidate = healthy_candidate(&elsewhere, "candidate.db", "the journal").await;
+
+        let failure = stage_restore_with_copy(&candidate, &config.path, |_from, to| {
+            std::fs::write(to, b"partial")?;
+            Err(io::Error::other("injected copy failure"))
+        })
+        .await
+        .expect_err("a copy failure must not stage");
+
+        assert!(
+            failure.contains("could not be staged"),
+            "a staging failure names the stage, got: {failure}"
+        );
+        assert!(
+            !staged_restore_path(&config.path).exists(),
+            "a partial copy must never occupy the staged path"
+        );
+        assert!(
+            !staged_temp_path(&staged_restore_path(&config.path)).exists(),
+            "a partial copy must not linger as a temp file"
+        );
+        assert_eq!(std::fs::read(&live).unwrap(), live_before);
+
+        let outcome = apply_staged_restore(&config.path, SystemTime::now())
+            .expect("apply with nothing staged must not fail");
+        assert!(matches!(outcome, ApplyOutcome::Absent));
+        assert_eq!(std::fs::read(&live).unwrap(), live_before);
+    });
+
+    async_test!(a_failed_second_stage_keeps_the_first_staged_file, {
+        // Atomic replacement: a second stage that fails partway keeps the
+        // first staged file whole, so the next launch restores the first
+        // candidate rather than a truncation.
+        let config = TempDir::new("restore-partial-second");
+        let live = live_database_path(&config.path);
+        write_journal_file(&live, SUPPORTED_MIGRATION_VERSION, "the live journal").await;
+
+        let first_dir = TempDir::new("restore-partial-first");
+        let first = healthy_candidate(&first_dir, "first.db", "the first journal").await;
+        let staged = stage_restore(&first, &config.path)
+            .await
+            .expect("the first stage must succeed");
+        let staged_before = std::fs::read(&staged).unwrap();
+
+        let second_dir = TempDir::new("restore-partial-second-candidate");
+        let second = healthy_candidate(&second_dir, "second.db", "the second journal").await;
+        let failure = stage_restore_with_copy(&second, &config.path, |_from, to| {
+            std::fs::write(to, b"partial")?;
+            Err(io::Error::other("injected copy failure"))
+        })
+        .await
+        .expect_err("a copy failure must not stage");
+
+        assert!(
+            failure.contains("could not be staged"),
+            "a staging failure names the stage, got: {failure}"
+        );
+        assert_eq!(
+            std::fs::read(&staged).unwrap(),
+            staged_before,
+            "a failed stage must leave the previous staged file whole"
+        );
     });
 }
