@@ -176,17 +176,23 @@ pub async fn generate(request: StandupPostRequest, api_key: &str) -> StandupPost
 /// empty one (`ModelAccess`), and a URL the Key must not travel on is the
 /// `HttpsRequired` refusal. A Base URL that ends in a slash is still the
 /// base: whatever the user typed, the endpoint's chat completions path is
-/// one request away.
+/// one request away. The path is joined onto the parsed URL, so a query
+/// string on the Base URL (an Azure-style `api-version`, a routing token)
+/// rides through to the request and a fragment stays where it belongs
+/// instead of swallowing the appended path.
 fn chat_url(base_url: &str) -> Result<reqwest::Url, StandupFailure> {
-    let url = match reqwest::Url::parse(&format!(
-        "{}/chat/completions",
-        base_url.trim_end_matches('/')
-    )) {
+    let mut url = match reqwest::Url::parse(base_url) {
         Ok(url) => url,
         Err(_) => return Err(StandupFailure::ModelAccess),
     };
     if !transport_allows(&url) {
         return Err(StandupFailure::HttpsRequired);
+    }
+    match url.path_segments_mut() {
+        Ok(mut segments) => {
+            segments.pop_if_empty().push("chat").push("completions");
+        }
+        Err(_) => return Err(StandupFailure::ModelAccess),
     }
     Ok(url)
 }
@@ -367,6 +373,34 @@ mod tests {
                 chat_url(not_a_url),
                 Err(StandupFailure::ModelAccess)
             ), "{not_a_url:?} should be ModelAccess");
+        }
+    }
+
+    /// The chat path is joined onto the parsed URL, so a query string or a
+    /// fragment on the Base URL stays where it belongs instead of swallowing
+    /// the appended path. A query (Azure-style `api-version`, routing
+    /// tokens) rides through to the request.
+    #[test]
+    fn chat_path_is_appended_to_the_parsed_url() {
+        for (base, expected) in [
+            (
+                "https://api.openai.com/v1",
+                "https://api.openai.com/v1/chat/completions",
+            ),
+            (
+                "https://api.openai.com/v1/",
+                "https://api.openai.com/v1/chat/completions",
+            ),
+            (
+                "https://api.openai.com/v1?key=x",
+                "https://api.openai.com/v1/chat/completions?key=x",
+            ),
+            (
+                "https://api.openai.com/v1#frag",
+                "https://api.openai.com/v1/chat/completions#frag",
+            ),
+        ] {
+            assert_eq!(chat_url(base).unwrap().as_str(), expected, "{base}");
         }
     }
 
