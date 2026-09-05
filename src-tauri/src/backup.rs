@@ -629,6 +629,10 @@ fn timestamp(seconds: u64) -> String {
 }
 
 /// Reads one of the above back, refusing anything that is not exactly it.
+/// A name before the epoch is not a snapshot — snapshots are named from
+/// `SystemTime` — and neither is an impossible date, which must not
+/// normalise into a different day. Both parse as nothing, so the caller
+/// leaves the file exactly where it is.
 fn parse_timestamp(stamped: &str) -> Option<u64> {
     let bytes = stamped.as_bytes();
     if bytes.len() != 15 || bytes[8] != b'T' {
@@ -649,11 +653,35 @@ fn parse_timestamp(stamped: &str) -> Option<u64> {
     let minute = number(11, 13)?;
     let second = number(13, 15)?;
 
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 59 {
+    if year < 1970 {
+        return None;
+    }
+    if !(1..=12).contains(&month) || hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+    if day < 1 || day > days_in_month(year, month) {
         return None;
     }
 
     Some(seconds_from_civil(year, month, day, hour, minute, second))
+}
+
+/// The days February holds, or any other month: the proleptic Gregorian
+/// calendar, the same one the civil arithmetic above reads.
+fn days_in_month(year: u64, month: u64) -> u64 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+/// Leap years are divisible by four, except centuries, except centuries
+/// divisible by four hundred.
+fn is_leap_year(year: u64) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 fn split_extension(file_name: &str) -> Option<(&str, &str)> {
@@ -928,6 +956,28 @@ mod tests {
         ] {
             assert!(snapshot_instant(name).is_none(), "{name} parsed as a snapshot");
         }
+    }
+
+    #[test]
+    fn pre_epoch_and_impossible_dates_read_back_as_nothing() {
+        // Pre-1970 names must parse as nothing instead of wrapping around
+        // the epoch and panicking; impossible dates must not normalise into
+        // a different day.
+        for name in [
+            "work-journal-19000101T000000.db",
+            "work-journal-19691231T235959.db",
+            "work-journal-20260231T120000.db",
+            "work-journal-20260431T120000.db",
+            "work-journal-20260229T120000.db",
+            "work-journal-20250000T120000.db",
+            "work-journal-20250001T240000.db",
+        ] {
+            assert!(snapshot_instant(name).is_none(), "{name} parsed as a snapshot");
+        }
+        // Boundaries that must keep parsing: the epoch itself and a real
+        // leap day.
+        assert!(snapshot_instant("work-journal-19700101T000000.db").is_some());
+        assert!(snapshot_instant("work-journal-20240229T120000.db").is_some());
     }
 
     #[test]
