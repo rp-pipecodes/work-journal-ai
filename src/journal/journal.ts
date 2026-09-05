@@ -3260,8 +3260,14 @@ function isCalendarDate(date: string): boolean {
   }
 
   // Round-tripped through UTC, where no day is 23 or 25 hours long: a date
-  // that survives is one the calendar has.
-  return new Date(`${date}T00:00:00.000Z`).toISOString().slice(0, 10) === date
+  // that survives is one the calendar has. A month beyond 12 never becomes a
+  // Date at all, so it is refused rather than thrown.
+  const instant = new Date(`${date}T00:00:00.000Z`)
+  if (Number.isNaN(instant.getTime())) {
+    return false
+  }
+
+  return instant.toISOString().slice(0, 10) === date
 }
 
 /** `HH:mm` on a 24-hour clock, minute-precise and nothing finer. */
@@ -3404,12 +3410,15 @@ function taskRecurrence(
 
 /**
  * A Journal Day is a `YYYY-MM-DD` label, not a date to be parsed — but the
- * shape alone is not the rule. A journal of work notes files nothing in the
- * third century, so the year is bounded: it keeps a half-typed year out of the
- * database, since a date input hands over `0002-07-31` on the way to `2026`.
+ * shape alone is not the rule. It is a day that actually exists, under the
+ * same rule `isCalendarDate` enforces, so `2026-13-99` never reaches the
+ * database to throw in the formatters. A journal of work notes files nothing
+ * in the third century, so the year is bounded: it keeps a half-typed year
+ * out of the database, since a date input hands over `0002-07-31` on the way
+ * to `2026`.
  */
 function isJournalDay(journalDay: string): boolean {
-  return /^[2-9]\d{3}-\d{2}-\d{2}$/.test(journalDay)
+  return isCalendarDate(journalDay)
 }
 
 /**

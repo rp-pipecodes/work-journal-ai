@@ -535,6 +535,24 @@ describe('refile', () => {
     ])
   })
 
+  it('refuses a Journal Day that never existed on the calendar', async () => {
+    const { journal } = await journalAt('2026-03-12T09:30:00')
+    const captured = await journal.capture('still where it was')
+
+    // Shaped like a day but impossible: month 13, February 31st, and Feb 29th
+    // outside a leap year. Each would later throw RangeError in the formatters.
+    for (const impossible of ['2026-13-99', '2026-02-31', '2026-02-29']) {
+      await expect(journal.refile(captured!.id, impossible)).rejects.toThrow(
+        /journal day/i,
+      )
+    }
+
+    const march = { from: '2026-03-12', to: '2026-03-12' }
+    expect((await journal.notesForFilter(march)).map((note) => note.body)).toEqual([
+      'still where it was',
+    ])
+  })
+
   it('refuses to refile a Note that is not there', async () => {
     const { journal } = await journalAt('2026-03-12T09:30:00')
 
