@@ -47,17 +47,6 @@ export function isTheme(value: unknown): value is Theme {
   return value === 'system' || value === 'light' || value === 'dark'
 }
 
-/** Every Theme, in the order a picker offers them. */
-export const THEME_CHOICES: readonly Theme[] = ['system', 'light', 'dark']
-
-/** A Theme as a picker spells it. */
-export function describeTheme(theme: Theme): string {
-  if (theme === 'system') {
-    return 'Match the system'
-  }
-  return theme === 'dark' ? 'Dark' : 'Light'
-}
-
 /** The palette a preference comes to, once the OS has been asked. */
 export function resolveTheme(theme: Theme, prefersDark: boolean): ResolvedTheme {
   if (theme === 'system') {

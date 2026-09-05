@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_THEME,
-  THEME_CHOICES,
-  describeTheme,
   isTheme,
   isThemeToggle,
   readTheme,
@@ -66,30 +64,6 @@ describe('isTheme', () => {
     expect(['system', 'light', 'dark'].every(isTheme)).toBe(true)
     expect(isTheme('Dark')).toBe(false)
     expect(isTheme(null)).toBe(false)
-  })
-})
-
-describe('THEME_CHOICES', () => {
-  it('offers every Theme, and offers following the system first', () => {
-    expect(THEME_CHOICES).toEqual(['system', 'light', 'dark'])
-    expect(THEME_CHOICES.every(isTheme)).toBe(true)
-  })
-
-  it('has a label for every choice it offers', () => {
-    for (const choice of THEME_CHOICES) {
-      expect(describeTheme(choice)).not.toBe('')
-    }
-    expect(new Set(THEME_CHOICES.map(describeTheme)).size).toBe(
-      THEME_CHOICES.length,
-    )
-  })
-})
-
-describe('describeTheme', () => {
-  it('says what following the system means rather than naming the value', () => {
-    expect(describeTheme('system')).toBe('Match the system')
-    expect(describeTheme('light')).toBe('Light')
-    expect(describeTheme('dark')).toBe('Dark')
   })
 })
 
