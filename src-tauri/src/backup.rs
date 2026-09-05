@@ -256,8 +256,9 @@ pub enum ApplyOutcome {
     Restored { rollback: Option<PathBuf> },
 }
 
-/// Opens a candidate read-only and validates it: `quick_check`, the expected
-/// table set for the schema version it claims, and the `_sqlx_migrations`
+/// Opens a candidate read-only and validates it: `quick_check`, the schema
+/// the version it claims must carry — every expected table, every column of
+/// each, and nothing a journal never makes — and the `_sqlx_migrations`
 /// boundary. Never opens it with the app's own pool, never writes to the
 /// file, and never mutates anything on a refusal. A refusal names which check
 /// failed. Answers with the migration version the candidate carries, so the
@@ -324,8 +325,32 @@ pub async fn validate_restore_candidate(candidate: &Path) -> Result<i64, String>
         return Err(format!("the backup carries an unknown migration version: {version}"));
     }
 
-    let missing: Vec<&&str> = expected_tables(version)
+    let expected = expected_schema(version);
+
+    // A journal this app makes holds nothing but tables and indexes: none of
+    // its migrations create a view or a trigger, so a candidate that carries
+    // either has been altered or is not a journal at all. Refused rather than
+    // trusted — a trigger could fire on the app's own writes.
+    let unexpected: Vec<String> =
+        sqlx::query(
+            "SELECT name FROM sqlite_master
+             WHERE type IN ('view', 'trigger') AND name NOT LIKE 'sqlite_%'
+             ORDER BY name",
+        )
+        .try_map(|row: sqlx::sqlite::SqliteRow| row.try_get(0))
+        .fetch_all(&mut connection)
+        .await
+        .map_err(|error| format!("the backup's views and triggers could not be read: {error}"))?;
+    if !unexpected.is_empty() {
+        return Err(format!(
+            "the backup carries unexpected views or triggers: {}",
+            unexpected.join(", ")
+        ));
+    }
+
+    let missing: Vec<&&str> = expected
         .iter()
+        .map(|(table, _)| table)
         .filter(|table| !tables.contains(**table))
         .collect();
     if !missing.is_empty() {
@@ -337,7 +362,51 @@ pub async fn validate_restore_candidate(candidate: &Path) -> Result<i64, String>
         return Err(format!("the backup is missing tables: {missing}"));
     }
 
+    // The tables named right are not enough: a `notes` table carrying only
+    // `(id, body)` would pass a names check and fail the next launch's
+    // `SELECT journal_day`. Each expected table must hold every column the
+    // version it claims leaves it with.
+    let mut missing_columns: Vec<String> = Vec::new();
+    for (table, required) in expected.iter() {
+        let held = columns_of(&mut connection, table).await?;
+        let absent: Vec<&&str> = required
+            .iter()
+            .filter(|column| !held.contains(**column))
+            .collect();
+        if !absent.is_empty() {
+            let absent = absent
+                .into_iter()
+                .map(|column| column.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            missing_columns.push(format!("{table} ({absent})"));
+        }
+    }
+    if !missing_columns.is_empty() {
+        return Err(format!(
+            "the backup is missing columns: {}",
+            missing_columns.join("; ")
+        ));
+    }
+
     Ok(version)
+}
+
+/// Reads the columns a table actually holds, by name. Through
+/// `pragma_table_info`'s table-valued form, so the table name is a bound
+/// parameter — a name from this file is data, never interpolated into SQL.
+async fn columns_of(
+    connection: &mut sqlx::sqlite::SqliteConnection,
+    table: &str,
+) -> Result<HashSet<String>, String> {
+    use sqlx::Row;
+    sqlx::query("SELECT name FROM pragma_table_info(?)")
+        .bind(table)
+        .try_map(|row: sqlx::sqlite::SqliteRow| row.try_get(0))
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(|error| format!("the backup's {table} columns could not be read: {error}"))
+        .map(|columns| columns.into_iter().collect())
 }
 
 /// Whether two paths name the same file. Canonicalization covers `.`, `..`,
@@ -533,29 +602,106 @@ fn sidecar_path(live: &Path, sidecar: &str) -> PathBuf {
     PathBuf::from(format!("{}-{sidecar}", live.display()))
 }
 
-/// The tables a journal at `version` must hold. Version-aware because an
-/// older snapshot is accepted and migrated forward: a version 5 snapshot
-/// cannot be expected to hold the version 6 occurrence table, or nothing old
-/// would ever be migratable. What is checked is that the tables the claimed
-/// version must have are there.
+/// The schema a journal at `version` must hold: every table the version must
+/// have, and every column of each. Version-aware because an older snapshot is
+/// accepted and migrated forward: a version 5 snapshot cannot be expected to
+/// hold the version 6 occurrence table, or nothing old would ever be
+/// migratable. What is checked is that the tables — and the columns — the
+/// claimed version must have are there.
 ///
-/// Every arm is an explicit version: the `_` fallback is the latest known
-/// set, and validation never sends it anything newer than
-/// `SUPPORTED_MIGRATION_VERSION` — while `the_supported_version_tracks_the_
-/// migrations_list` and `expected_tables_cover_the_real_schema` fail if a
-/// migration lands without teaching this function its tables.
-fn expected_tables(version: i64) -> &'static [&'static str] {
-    const LATEST: &[&str] = &[
-        "notes",
-        "imported_meetings",
-        "tasks",
-        "task_occurrences",
-        "_sqlx_migrations",
+/// Columns read in the order the migrations left them; a version's list is
+/// always a prefix of a newer version's, because a migration adds columns to
+/// a table it never drops or reorders. Every arm is an explicit version: the
+/// `_` fallback is the latest known schema, and validation never sends it
+/// anything newer than `SUPPORTED_MIGRATION_VERSION` — while
+/// `the_supported_version_tracks_the_migrations_list` and
+/// `expected_schema_covers_the_real_schema_at_every_version` fail if a
+/// migration lands without teaching this function its tables and columns.
+fn expected_schema(version: i64) -> &'static [(&'static str, &'static [&'static str])] {
+    const LATEST: &[(&str, &[&str])] = &[
+        (
+            "notes",
+            &[
+                "id",
+                "body",
+                "captured_at",
+                "journal_day",
+                "edited_at",
+                "project",
+                "origin",
+            ],
+        ),
+        ("imported_meetings", &["event_key", "handled_at"]),
+        (
+            "tasks",
+            &[
+                "id",
+                "description",
+                "created_at",
+                "completed_at",
+                "scheduled_date",
+                "scheduled_time",
+                "recurrence_unit",
+                "recurrence_interval",
+                "recurrence_weekdays",
+                "recurrence_anchor_date",
+            ],
+        ),
+        (
+            "task_occurrences",
+            &[
+                "id",
+                "task_id",
+                "scheduled_date",
+                "scheduled_time",
+                "completed_at",
+                "created_at",
+                "advanced_from",
+            ],
+        ),
     ];
+    // Migration 1 creates `notes`; 2 appends `project`; 3 appends `origin`
+    // and creates `imported_meetings`; 4 creates `tasks`; 5 appends its
+    // schedule; 6 appends its recurrence and creates `task_occurrences`.
     match version {
-        1 | 2 => &["notes", "_sqlx_migrations"],
-        3 => &["notes", "imported_meetings", "_sqlx_migrations"],
-        4 | 5 => &["notes", "imported_meetings", "tasks", "_sqlx_migrations"],
+        1 => &[("notes", &["id", "body", "captured_at", "journal_day", "edited_at"])],
+        2 => &[(
+            "notes",
+            &["id", "body", "captured_at", "journal_day", "edited_at", "project"],
+        )],
+        3 => &[
+            (
+                "notes",
+                &["id", "body", "captured_at", "journal_day", "edited_at", "project", "origin"],
+            ),
+            ("imported_meetings", &["event_key", "handled_at"]),
+        ],
+        4 => &[
+            (
+                "notes",
+                &["id", "body", "captured_at", "journal_day", "edited_at", "project", "origin"],
+            ),
+            ("imported_meetings", &["event_key", "handled_at"]),
+            ("tasks", &["id", "description", "created_at", "completed_at"]),
+        ],
+        5 => &[
+            (
+                "notes",
+                &["id", "body", "captured_at", "journal_day", "edited_at", "project", "origin"],
+            ),
+            ("imported_meetings", &["event_key", "handled_at"]),
+            (
+                "tasks",
+                &[
+                    "id",
+                    "description",
+                    "created_at",
+                    "completed_at",
+                    "scheduled_date",
+                    "scheduled_time",
+                ],
+            ),
+        ],
         6 => LATEST,
         _ => LATEST,
     }
@@ -1112,58 +1258,16 @@ mod tests {
         assert_eq!(status.newest_taken_at, Some(1_788_425_100 + 100));
     }
 
-    /// A journal file at `version`, with the tables that version must hold
-    /// and one Note carrying `marker`, so a replacement can be told apart
-    /// from what it replaced.
+    /// A journal file at `version`, carrying the real schema that version's
+    /// migrations leave — so a file that must pass validation is shaped
+    /// exactly as this app makes one — with one Note carrying `marker`, so a
+    /// replacement can be told apart from what it replaced.
     async fn write_journal_file(path: &Path, version: i64, marker: &str) {
         let url = format!("sqlite:{}?mode=rwc", path.display());
         let pool = SqlitePool::connect(&url)
             .await
             .expect("could not create the journal file");
-        sqlx::query(
-            "CREATE TABLE notes (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-             CREATE TABLE _sqlx_migrations (version BIGINT PRIMARY KEY, description TEXT NOT NULL);",
-        )
-        .execute(&pool)
-        .await
-        .expect("could not create the base tables");
-        if version >= 3 {
-            sqlx::query(
-                "CREATE TABLE imported_meetings (event_key TEXT PRIMARY KEY, handled_at TEXT NOT NULL);",
-            )
-            .execute(&pool)
-            .await
-            .expect("could not create imported_meetings");
-        }
-        if version >= 4 {
-            sqlx::query(
-                "CREATE TABLE tasks (id TEXT PRIMARY KEY, description TEXT NOT NULL, created_at TEXT NOT NULL);",
-            )
-            .execute(&pool)
-            .await
-            .expect("could not create tasks");
-        }
-        if version >= 6 {
-            sqlx::query(
-                "CREATE TABLE task_occurrences (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, scheduled_date TEXT NOT NULL, completed_at TEXT, created_at TEXT NOT NULL);",
-            )
-            .execute(&pool)
-            .await
-            .expect("could not create task_occurrences");
-        }
-        for migrated in 1..=version {
-            sqlx::query("INSERT INTO _sqlx_migrations VALUES (?, ?)")
-                .bind(migrated)
-                .bind(format!("migration {migrated}"))
-                .execute(&pool)
-                .await
-                .expect("could not record the migration");
-        }
-        sqlx::query("INSERT INTO notes VALUES ('n1', ?)")
-            .bind(marker)
-            .execute(&pool)
-            .await
-            .expect("could not seed the Note");
+        seed_real_schema(&pool, version, marker).await;
         pool.close().await;
     }
 
@@ -1191,7 +1295,8 @@ mod tests {
     /// Seeds `pool` with the real schema up to `up_to`, recording each
     /// version in a `_sqlx_migrations` table shaped exactly like the one
     /// sqlx itself keeps — so validation meets the production schema rather
-    /// than the hand-written DDL `write_journal_file` uses.
+    /// than a hand-written approximation of it. `write_journal_file` and
+    /// `real_journal_file` both come through here.
     async fn seed_real_schema(pool: &SqlitePool, up_to: i64, marker: &str) {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS _sqlx_migrations (
@@ -1344,18 +1449,128 @@ mod tests {
         assert_eq!(candidate_bytes(&candidate), before);
     });
 
+    async_test!(a_journal_whose_notes_table_lacks_required_columns_is_refused, {
+        // The shape the issue names: every expected table is there, but
+        // `notes` carries only `(id, body)`. A names-only check lets it
+        // through, and the next launch fails on `SELECT journal_day` with the
+        // original already renamed away — so columns are checked, not just
+        // tables.
+        let directory = TempDir::new("restore-missing-columns");
+        let candidate = healthy_candidate(&directory, "candidate.db", "the journal").await;
+        let url = format!("sqlite:{}?mode=rwc", candidate.display());
+        let pool = SqlitePool::connect(&url).await.expect("could not open");
+        sqlx::query("DROP TABLE notes;")
+            .execute(&pool)
+            .await
+            .expect("could not drop");
+        sqlx::query(
+            "CREATE TABLE notes (id TEXT PRIMARY KEY NOT NULL, body TEXT NOT NULL);",
+        )
+        .execute(&pool)
+        .await
+        .expect("could not recreate");
+        pool.close().await;
+        let before = candidate_bytes(&candidate);
+
+        let refusal = validate_restore_candidate(&candidate)
+            .await
+            .expect_err("a journal with a truncated notes table must not validate");
+
+        assert!(
+            refusal.contains("missing columns")
+                && refusal.contains("notes")
+                && refusal.contains("journal_day"),
+            "a refusal names which check failed, got: {refusal}"
+        );
+        assert_eq!(candidate_bytes(&candidate), before);
+    });
+
+    async_test!(an_older_journal_missing_a_column_its_version_added_is_refused, {
+        // Version-aware, like the tables: a journal claiming version 5 must
+        // carry the columns migration 5 added to `tasks`, not the version 4
+        // shape — anything less would migrate forward onto a table the app
+        // cannot read its schedule from.
+        let directory = TempDir::new("restore-old-missing-columns");
+        let candidate = directory.path.join("candidate.db");
+        write_journal_file(&candidate, SUPPORTED_MIGRATION_VERSION - 1, "the old journal").await;
+        let url = format!("sqlite:{}?mode=rwc", candidate.display());
+        let pool = SqlitePool::connect(&url).await.expect("could not open");
+        sqlx::query("DROP TABLE tasks;")
+            .execute(&pool)
+            .await
+            .expect("could not drop");
+        sqlx::query(
+            "CREATE TABLE tasks (id TEXT PRIMARY KEY, description TEXT NOT NULL,
+                created_at TEXT NOT NULL, completed_at TEXT);",
+        )
+        .execute(&pool)
+        .await
+        .expect("could not recreate");
+        pool.close().await;
+
+        let refusal = validate_restore_candidate(&candidate)
+            .await
+            .expect_err("a journal missing a column its version added must not validate");
+
+        assert!(
+            refusal.contains("missing columns")
+                && refusal.contains("tasks")
+                && refusal.contains("scheduled_date"),
+            "a refusal names which check failed, got: {refusal}"
+        );
+    });
+
+    async_test!(a_journal_carrying_a_view_or_trigger_is_refused, {
+        // A journal this app makes never holds a view or a trigger — no
+        // migration creates one — so a candidate that does has been altered
+        // or is not a journal at all. Refused rather than trusted: a trigger
+        // would fire on the app's own writes once the file is live.
+        let directory = TempDir::new("restore-unexpected-objects");
+        let candidate = healthy_candidate(&directory, "candidate.db", "the journal").await;
+        let url = format!("sqlite:{}?mode=rwc", candidate.display());
+        let pool = SqlitePool::connect(&url).await.expect("could not open");
+        sqlx::query("CREATE VIEW note_bodies AS SELECT body FROM notes;")
+            .execute(&pool)
+            .await
+            .expect("could not create the view");
+        sqlx::query(
+            "CREATE TRIGGER refuse_deletes AFTER DELETE ON notes
+             BEGIN SELECT RAISE(ABORT, 'notes are never deleted'); END;",
+        )
+        .execute(&pool)
+        .await
+        .expect("could not create the trigger");
+        pool.close().await;
+        let before = candidate_bytes(&candidate);
+
+        let refusal = validate_restore_candidate(&candidate)
+            .await
+            .expect_err("a journal with a view or trigger must not validate");
+
+        assert!(
+            refusal.contains("unexpected")
+                && refusal.contains("note_bodies")
+                && refusal.contains("refuse_deletes"),
+            "a refusal names which check failed, got: {refusal}"
+        );
+        assert_eq!(candidate_bytes(&candidate), before);
+    });
+
     async_test!(a_newer_migration_version_is_refused_before_anything_is_touched, {
         let directory = TempDir::new("restore-newer");
         let candidate = directory.path.join("candidate.db");
         write_journal_file(&candidate, SUPPORTED_MIGRATION_VERSION, "the journal").await;
         let url = format!("sqlite:{}?mode=rwc", candidate.display());
         let pool = SqlitePool::connect(&url).await.expect("could not open");
-        sqlx::query("INSERT INTO _sqlx_migrations VALUES (?, ?)")
-            .bind(SUPPORTED_MIGRATION_VERSION + 1)
-            .bind("a future migration")
-            .execute(&pool)
-            .await
-            .expect("could not insert the newer version");
+        sqlx::query(
+            "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
+             VALUES (?, ?, 1, X'00', 0)",
+        )
+        .bind(SUPPORTED_MIGRATION_VERSION + 1)
+        .bind("a future migration")
+        .execute(&pool)
+        .await
+        .expect("could not insert the newer version");
         pool.close().await;
         let before = candidate_bytes(&candidate);
 
@@ -1706,42 +1921,88 @@ mod tests {
         assert_eq!(SUPPORTED_MIGRATION_VERSION, newest);
     }
 
-    async_test!(expected_tables_cover_the_real_schema_at_the_supported_version, {
-        // `expected_tables` is checked against hand-written DDL everywhere
-        // else; this pins it against the production schema instead, so a
-        // migration that adds a table without teaching the check fails here.
-        // The helper below hardcodes one entry per migration file, and
-        // `.take()` truncates silently — so a seventh migration would compare
-        // a v6 schema against `expected_tables(7)` and pass exactly when the
-        // guard is needed. The lengths move together or this fails first.
+    async_test!(expected_schema_covers_the_real_schema_at_every_version, {
+        // `expected_schema` is what validation trusts a restore candidate
+        // against. Hand-written lists drift from the migrations that made
+        // them, so this pins the check to the production schema at *every*
+        // version — not just the newest, because an older snapshot is
+        // accepted and must stay migratable. A migration that adds a table,
+        // or a column to an existing table, without teaching `expected_schema`
+        // fails here. The helper below hardcodes one entry per migration
+        // file, and `.take()` truncates silently — so a seventh migration
+        // would compare a v6 schema against `expected_schema(7)` and pass
+        // exactly when the guard is needed. The lengths move together or this
+        // fails first.
         assert_eq!(REAL_MIGRATIONS.len(), crate::migrations().len());
-        let directory = TempDir::new("restore-real-tables");
-        let journal = real_journal_file(&directory, "journal.db", "the journal").await;
-        let url = format!("sqlite:{}?mode=ro", journal.display());
-        let pool = SqlitePool::connect(&url).await.expect("could not open");
         use sqlx::Row;
-        let tables: Vec<String> = sqlx::query(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
-        )
-        .try_map(|row: sqlx::sqlite::SqliteRow| row.try_get(0))
-        .fetch_all(&pool)
-        .await
-        .expect("the tables could not be read");
-        pool.close().await;
+        for version in 1..=SUPPORTED_MIGRATION_VERSION {
+            let directory = TempDir::new(&format!("restore-real-schema-{version}"));
+            let journal = directory.path.join("journal.db");
+            write_journal_file(&journal, version, "the journal").await;
+            let url = format!("sqlite:{}?mode=ro", journal.display());
+            let pool = SqlitePool::connect(&url).await.expect("could not open");
 
-        let expected = expected_tables(SUPPORTED_MIGRATION_VERSION);
-        for table in &tables {
-            assert!(
-                expected.contains(&table.as_str()),
-                "the real schema holds {table}, which the check does not expect"
-            );
-        }
-        // And the check expects nothing the real schema does not hold.
-        for table in expected {
-            assert!(
-                tables.iter().any(|name| name == table),
-                "the check expects {table}, which the real schema does not hold"
-            );
+            // The migrations table is sqlx's own; its presence is checked
+            // separately, so the schema under comparison is the app's alone.
+            let tables: HashSet<String> = sqlx::query(
+                "SELECT name FROM sqlite_master
+                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != '_sqlx_migrations'",
+            )
+            .try_map(|row: sqlx::sqlite::SqliteRow| row.try_get(0))
+            .fetch_all(&pool)
+            .await
+            .expect("the tables could not be read")
+            .into_iter()
+            .collect();
+
+            let expected = expected_schema(version);
+            let expected_tables: HashSet<&str> =
+                expected.iter().map(|(table, _)| *table).collect();
+
+            // The real schema holds exactly the tables the check expects for
+            // the version — nothing more, nothing less.
+            for table in &tables {
+                assert!(
+                    expected_tables.contains(table.as_str()),
+                    "at version {version} the real schema holds {table}, which the check does not expect"
+                );
+            }
+            for table in &expected_tables {
+                assert!(
+                    tables.contains(*table),
+                    "at version {version} the check expects {table}, which the real schema does not hold"
+                );
+            }
+
+            // And each expected table holds exactly the columns the check
+            // demands: every one it names is really there, and no column the
+            // migrations made is left out of the check.
+            for (table, required) in expected {
+                let held: HashSet<String> =
+                    sqlx::query("SELECT name FROM pragma_table_info(?)")
+                        .bind(table)
+                        .try_map(|row: sqlx::sqlite::SqliteRow| row.try_get(0))
+                        .fetch_all(&pool)
+                        .await
+                        .unwrap_or_else(|_| {
+                            panic!("at version {version} the {table} columns could not be read")
+                        })
+                        .into_iter()
+                        .collect();
+                for column in required.iter() {
+                    assert!(
+                        held.contains(*column),
+                        "at version {version} the check expects {table}.{column}, which the real schema does not hold"
+                    );
+                }
+                for column in &held {
+                    assert!(
+                        required.contains(&column.as_str()),
+                        "at version {version} the real schema holds {table}.{column}, which the check does not expect"
+                    );
+                }
+            }
+            pool.close().await;
         }
     });
 
