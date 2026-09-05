@@ -391,6 +391,7 @@ export type StandupPostResponse =
 export type StandupFailure =
   | { kind: 'local' }
   | { kind: 'model-access' }
+  | { kind: 'https-required' }
   | { kind: 'keychain' }
   | { kind: 'offline' }
   | { kind: 'unauthorized' }

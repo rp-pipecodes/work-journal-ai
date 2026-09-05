@@ -12,6 +12,6 @@ This honours the promise already written into [0001](0001-defer-voice-capture-to
 ## Consequences
 
 - **A new dependency for the secret and a new one for the socket** — `keyring` and `reqwest` — plus an HTTP capability, in an app whose entire dependency list was local until now.
-- **Settings validation stays in TypeScript and the secret stays in Rust**, so Model Access is the one setting read from two places. The command takes `{ baseUrl, model, systemPrompt, userContent }` and supplies only the key, mirroring `export_journal`, which likewise takes rendered Markdown and does the privileged part.
+- **Settings validation stays in TypeScript and the secret stays in Rust**, so Model Access is the one setting read from two places. The command takes `{ baseUrl, model, systemPrompt, userContent }` and supplies only the key, mirroring `export_journal`, which likewise takes rendered Markdown and does the privileged part. The one rule that overrides that split is the transport the key may travel on: it is enforced in Rust (`standup::chat_url`), because a hand-edited settings file bypasses a view-layer check (issue #180).
 - **A Keychain entry outlives an uninstall**, unlike everything else the app stores, and the user must be able to clear it from Settings.
 - **The Keychain can refuse.** A locked keychain or a denied prompt is an ordinary Model Access failure with a line saying why, not a crash — the same routine-path treatment Meeting Import gives a refused calendar grant.

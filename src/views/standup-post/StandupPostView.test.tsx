@@ -779,17 +779,18 @@ describe('Standup Post section', () => {
   })
 
   it.each([
-    [{ kind: 'model-access' }, 'Model Access is not configured'],
-    [{ kind: 'keychain' }, 'macOS is not letting Work Journal reach the API Key'],
-    [{ kind: 'offline' }, 'The model could not be reached'],
-    [{ kind: 'unauthorized' }, 'The model refused the API Key (401)'],
-    [{ kind: 'rate-limited' }, 'The model is rate limited (429)'],
-    [{ kind: 'timeout' }, 'The model took longer than 60 seconds'],
-    [{ kind: 'other', status: 502 }, 'The model answered with an error (502)'],
-    [{ kind: 'empty-response' }, 'The model returned nothing'],
-  ] as Array<[StandupFailure, string]>)(
-    'renders %s as a line and nothing else',
-    async (failure, line) => {
+    [{ kind: 'model-access' }, 'Model Access is not configured', true],
+    [{ kind: 'https-required' }, 'The Base URL must be https to send the API Key', true],
+    [{ kind: 'keychain' }, 'macOS is not letting Work Journal reach the API Key', false],
+    [{ kind: 'offline' }, 'The model could not be reached', false],
+    [{ kind: 'unauthorized' }, 'The model refused the API Key (401)', false],
+    [{ kind: 'rate-limited' }, 'The model is rate limited (429)', false],
+    [{ kind: 'timeout' }, 'The model took longer than 60 seconds', false],
+    [{ kind: 'other', status: 502 }, 'The model answered with an error (502)', false],
+    [{ kind: 'empty-response' }, 'The model returned nothing', false],
+  ] as Array<[StandupFailure, string, boolean]>)(
+    'renders %s as a line, with Settings only where the fix lives there',
+    async (failure, line, opensSettings) => {
       const user = userEvent.setup()
       const { journal, clock, desktop, settings } = await standupPostAt()
       await journalWithBothHalves(journal, clock)
@@ -801,6 +802,15 @@ describe('Standup Post section', () => {
       await user.click(screen.getByRole('button', { name: 'Generate' }))
 
       expect((await screen.findByRole('alert')).textContent).toContain(line)
+      // The way to the fix rides on the failures whose fix lives in Settings.
+      const settingsButton = screen.queryByRole('button', {
+        name: 'Open Settings',
+      })
+      if (opensSettings) {
+        expect(settingsButton).not.toBeNull()
+      } else {
+        expect(settingsButton).toBeNull()
+      }
       // No failure touches the clipboard.
       expect(desktop.clipboard).toBeNull()
       // And none writes the journal: the Notes are exactly the two captured.

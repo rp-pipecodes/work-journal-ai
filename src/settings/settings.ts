@@ -50,7 +50,11 @@ export interface Settings {
   /**
    * Where the model is: any OpenAI-compatible endpoint, which is why this is a
    * field rather than a list of vendors. OpenAI's own to begin with, because a
-   * default nobody has to look up is worth more than a blank box.
+   * default nobody has to look up is worth more than a blank box. Kept as
+   * typed — the one rule on it is enforced where the key would be attached:
+   * a Base URL the API Key may not travel over is refused by the model call
+   * (`https`, or plaintext only to this machine's own loopback), never by
+   * this store.
    */
   modelBaseUrl: string
   /**

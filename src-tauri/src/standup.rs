@@ -4,6 +4,9 @@
 //! command that calls this reads it from the Keychain and hands it straight
 //! to the request's Authorization header; see
 //! docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md.
+//! That header is only ever attached to a transport that may carry it —
+//! https, or plaintext to this machine's own loopback — see
+//! `transport_allows`.
 //!
 //! Waiting, not streaming: a post cannot be acted on until it is complete, so
 //! there is one response shape and one 60-second timeout, and nothing else.
@@ -41,9 +44,16 @@ pub struct StandupPostRequest {
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum StandupFailure {
-    /// No Base URL, no Model, or no API Key: the call was refused before it
-    /// could spend anything, and the section links to Settings.
+    /// No Base URL, no Model, or no API Key — or a Base URL that is not a
+    /// URL at all: the call was refused before it could spend anything, and
+    /// the section links to Settings.
     ModelAccess,
+    /// The Base URL would carry the API Key and a day of journal content
+    /// over plaintext: not https, and not an endpoint on this machine's own
+    /// loopback — `localhost`, any of `127.0.0.0/8`, or `::1`. The call is
+    /// refused before the Key is ever attached — see `transport_allows` —
+    /// and Settings is where the URL is fixed.
+    HttpsRequired,
     /// The Keychain would not give up the key — locked, or a prompt refused.
     Keychain,
     /// The network could not be reached at all.
@@ -85,6 +95,21 @@ pub enum StandupPostResponse {
 pub async fn generate(request: StandupPostRequest, api_key: &str) -> StandupPostResponse {
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
+        // A redirect is another request, so the transport rule holds at every
+        // hop: following an endpoint that points the Key or the content back
+        // down to plaintext would undo the gate below. Stopped rather than
+        // followed — the 3xx answer is the refusal — and capped at the same
+        // ten hops the default allows, which a custom policy would otherwise
+        // not count for us.
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() > 10 {
+                attempt.error("too many redirects")
+            } else if transport_allows(attempt.url()) {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
         .build()
     {
         Ok(client) => client,
@@ -92,12 +117,14 @@ pub async fn generate(request: StandupPostRequest, api_key: &str) -> StandupPost
         Err(_) => return failed(StandupFailure::Offline),
     };
 
-    // A Base URL that ends in a slash is still the base: whatever the user
-    // typed, the endpoint's chat completions path is one request away.
-    let url = format!(
-        "{}/chat/completions",
-        request.base_url.trim_end_matches('/')
-    );
+    let url = match chat_url(&request.base_url) {
+        Ok(url) => url,
+        // Not a URL at all, or a URL the Key must not travel on: refused
+        // before the request, and Settings is where the Base URL is fixed.
+        // Enforced here rather than in the view, so a settings file edited
+        // by hand gets the same answer.
+        Err(failure) => return failed(failure),
+    };
     let body = completion_body(&request);
 
     let response = match client
@@ -141,6 +168,55 @@ pub async fn generate(request: StandupPostRequest, api_key: &str) -> StandupPost
 
     StandupPostResponse::Generated {
         markdown: content.to_string(),
+    }
+}
+
+/// The URL the call would go to, or why the call is refused before it can:
+/// a Base URL that is not a URL at all is a configuration problem like an
+/// empty one (`ModelAccess`), and a URL the Key must not travel on is the
+/// `HttpsRequired` refusal. A Base URL that ends in a slash is still the
+/// base: whatever the user typed, the endpoint's chat completions path is
+/// one request away.
+fn chat_url(base_url: &str) -> Result<reqwest::Url, StandupFailure> {
+    let url = match reqwest::Url::parse(&format!(
+        "{}/chat/completions",
+        base_url.trim_end_matches('/')
+    )) {
+        Ok(url) => url,
+        Err(_) => return Err(StandupFailure::ModelAccess),
+    };
+    if !transport_allows(&url) {
+        return Err(StandupFailure::HttpsRequired);
+    }
+    Ok(url)
+}
+
+/// Whether the API Key may be attached to a request to this URL: always
+/// over https, or over plaintext only to this machine's own loopback — a
+/// self-hosted Ollama-style endpoint on `localhost`, any of `127.0.0.0/8`,
+/// or `::1`. Every other plaintext hop would put the Key and the post's
+/// journal content on the wire for anyone on the way to read.
+fn transport_allows(url: &reqwest::Url) -> bool {
+    match url.scheme() {
+        "https" => true,
+        // The parsed host, not the typed one: `http://127.0.0.1.evil.com`
+        // is one name with an attacker's in it, and is refused like any
+        // other. The url crate has already folded odd spellings of an
+        // address (`http://2130706433/`) into a real IP before this sees it.
+        "http" => url.host_str().is_some_and(|host| {
+            host.eq_ignore_ascii_case("localhost")
+                // `host_str` keeps the brackets the URL form serializes an
+                // IPv6 address with, so an address parses only once they
+                // are off; a domain never parses as an IP at all.
+                || host
+                    .trim_start_matches('[')
+                    .trim_end_matches(']')
+                    .parse::<std::net::IpAddr>()
+                    .is_ok_and(|ip| ip.is_loopback())
+        }),
+        // Anything else — ftp, file, a bare word — is not a transport an
+        // HTTP Authorization header belongs on.
+        _ => false,
     }
 }
 
@@ -211,6 +287,10 @@ mod tests {
                 StandupFailure::ModelAccess,
                 r#"{"kind":"model-access"}"#,
             ),
+            (
+                StandupFailure::HttpsRequired,
+                r#"{"kind":"https-required"}"#,
+            ),
             (StandupFailure::Keychain, r#"{"kind":"keychain"}"#),
             (StandupFailure::Offline, r#"{"kind":"offline"}"#),
             (
@@ -234,6 +314,59 @@ mod tests {
 
         for (failure, expected) in pairs {
             assert_eq!(serde_json::to_string(&failure).unwrap(), expected);
+        }
+    }
+
+    /// The URL a call would go to, and the two ways a Base URL can be
+    /// refused before the Key is ever attached. The settings file is edited
+    /// by hand in exactly the way these cover: a plaintext endpoint, and a
+    /// string that is not a URL at all.
+    #[test]
+    fn a_base_url_that_plaintexts_the_key_is_refused() {
+        for refused in [
+            "http://api.openai.com/v1",
+            "http://example.com",
+            // A name that merely *ends* in a loopback is still a name on the
+            // open network, and a scheme uppercased is the same scheme.
+            "http://127.0.0.1.evil.com",
+            "http://localhost.evil.com",
+            "HTTP://EXAMPLE.COM",
+            "ftp://example.com",
+        ] {
+            assert!(matches!(
+                chat_url(refused),
+                Err(StandupFailure::HttpsRequired)
+            ), "{refused} should be refused");
+        }
+    }
+
+    #[test]
+    fn a_loopback_endpoint_stays_usable_over_plaintext() {
+        for allowed in [
+            "https://api.openai.com/v1",
+            "https://localhost/v1",
+            "http://localhost:11434/v1",
+            "http://127.0.0.1:11434/v1",
+            "http://127.0.0.1/v1/",
+            // The rest of the loopback range and IPv6's ::1 are loopback
+            // too, and the url crate folds these odd spellings of 127.0.0.1
+            // into a real address before the check.
+            "http://127.0.0.2/v1",
+            "http://[::1]:11434/v1",
+            "http://2130706433/v1",
+            "http://0x7f.0.0.1/v1",
+        ] {
+            assert!(chat_url(allowed).is_ok(), "{allowed} should be allowed");
+        }
+    }
+
+    #[test]
+    fn a_base_url_that_is_not_a_url_is_refused_as_configuration() {
+        for not_a_url in ["", "api.openai.com/v1"] {
+            assert!(matches!(
+                chat_url(not_a_url),
+                Err(StandupFailure::ModelAccess)
+            ), "{not_a_url:?} should be ModelAccess");
         }
     }
 
