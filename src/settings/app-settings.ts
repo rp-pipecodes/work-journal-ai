@@ -38,15 +38,18 @@ export interface AppSettings {
    * is changed first: an answer recorded but not honoured would leave Settings
    * claiming something the OS disagrees with. A save that lands is announced,
    * so every control reading the answer — the Settings row and the Onboarding
-   * flow's step both do — reflects what the OS came to hold.
+   * flow's step both do — reflects what the OS came to hold. Only the newest
+   * save announces: the OS and the file take each wish as it is made, so an
+   * older save that settles after a newer one has already been undone by it.
    */
   saveStartAtLogin(startAtLogin: boolean): Promise<void>
   /**
-   * A Start at Login save landed, in this window. Heard by the Settings row
-   * so a choice saved by the Onboarding flow reaches the mounted section
-   * without its state being rebuilt — the answer the OS holds is one fact,
-   * however many controls write it. Announced after the save settles, so a
-   * departure before it settles still reaches the control that stayed.
+   * A Start at Login save landed, in this window — and is still the newest
+   * one. Heard by the Settings row so a choice saved by the Onboarding flow
+   * reaches the mounted section without its state being rebuilt — the answer
+   * the OS holds is one fact, however many controls write it. Announced
+   * after the save settles, so a departure before it settles still reaches
+   * the control that stayed.
    */
   onStartAtLoginChanged(handle: (startAtLogin: boolean) => void): Unlisten
   /**
@@ -103,6 +106,13 @@ export function createAppSettings(desktop: Desktop): AppSettings {
   // and the two controls that do — the Settings row and the Onboarding step —
   // share this very instance.
   const startAtLoginChanged = new Set<(startAtLogin: boolean) => void>()
+  // How many Start at Login saves have been started in this window. The OS
+  // and the file take each wish as it is made, so a save that started before
+  // a newer one has been undone by it by the time it settles — announcing it
+  // would put a superseded answer back over the newer save's. Only the save
+  // that is still the newest when it settles speaks for the answer that came
+  // to hold.
+  let startAtLoginSaves = 0
 
   return {
     async load() {
@@ -121,12 +131,17 @@ export function createAppSettings(desktop: Desktop): AppSettings {
     onThemeChanged: (handle) => desktop.onThemeChanged(handle),
 
     async saveStartAtLogin(startAtLogin) {
+      const save = ++startAtLoginSaves
       await desktop.setStartAtLogin(startAtLogin)
       await writeStartAtLogin(await store(), startAtLogin)
       // After it took: a save still in flight when a window departs must
       // still reach the control that stayed mounted, and a control must never
-      // be told a change was saved before the OS has it.
-      for (const handle of startAtLoginChanged) handle(startAtLogin)
+      // be told a change was saved before the OS has it — nor told about a
+      // change a newer save has already undone, which is what makes an older
+      // save that settles later hold its tongue.
+      if (save === startAtLoginSaves) {
+        for (const handle of startAtLoginChanged) handle(startAtLogin)
+      }
     },
 
     onStartAtLoginChanged(handle) {

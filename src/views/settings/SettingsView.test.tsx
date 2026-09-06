@@ -499,6 +499,57 @@ describe('Start at login', () => {
     ).toBe(false)
     expect(desktop.stored.startAtLogin).toBe(false)
   })
+
+  it('discards an older Start at Login save completion once a newer press has landed', async () => {
+    // Press A turns the switch on; its file write is held. Press B turns it
+    // off while A's write is still held, and B's write lands first — the OS
+    // and the file both hold off. When A's write finally settles it must not
+    // announce the on it was asked for, or the switch would read on while
+    // the OS and the file held off.
+    const stored: Record<string, unknown> = { startAtLogin: false }
+    let release = () => {}
+    const firstWriteHeld = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let writes = 0
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          stored[key] = value
+          if (key === 'startAtLogin' && ++writes === 1) {
+            await firstWriteHeld
+          }
+        },
+      }),
+    })
+
+    showSettings(desktop)
+
+    const control = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    expect(isOn(control)).toBe(false)
+
+    control.click() // Press A: on, and its write is held.
+    await expect.poll(() => writes).toBe(1)
+    control.click() // Press B: off, and this write lands.
+    await expect.poll(() => writes).toBe(2)
+    expect(desktop.loginItem).toBe(false)
+    expect(desktop.stored.startAtLogin).toBe(false)
+
+    release() // A's write settles after B's: its on must not be announced.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(desktop.loginItem).toBe(false)
+    expect(desktop.stored.startAtLogin).toBe(false)
+    expect(isOn(control)).toBe(false)
+  })
 })
 
 describe('replaying the Onboarding flow', () => {
