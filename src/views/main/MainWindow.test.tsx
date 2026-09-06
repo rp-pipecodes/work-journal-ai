@@ -791,6 +791,37 @@ describe('automatic Onboarding', () => {
     await expect.poll(() => desktop.stored.startAtLogin).toBe(true)
   })
 
+  it('shows the choice the flow saved, when Settings is opened afterwards', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Continue' }),
+    )
+    await user.click(
+      await screen.findByRole('switch', { name: 'Start at login' }),
+    )
+    await expect.poll(() => desktop.loginItem).toBe(true)
+
+    // Finish into History, then open Settings: its switch is the same login
+    // item the flow just changed, so it must read the new answer back rather
+    // than the snapshot it took when the window opened.
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await showsHistory()
+    await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
+    await showsSettings()
+
+    const control = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    await expect
+      .poll(() => control.getAttribute('aria-checked'))
+      .toBe('true')
+  })
+
   it('reports a refused Start at Login choice, with retry and continuation', async () => {
     const user = userEvent.setup()
     vi.spyOn(console, 'error').mockImplementation(() => {})

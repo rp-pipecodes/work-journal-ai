@@ -208,14 +208,6 @@ struct OpenedTaskAlert(Mutex<Option<String>>);
 #[derive(Default)]
 struct CompletedTaskAlert(Mutex<Vec<TaskAlertCompletion>>);
 
-/// Whether this installation existed before this launch — the evidence the
-/// startup classification captures before plugin-sql's preload can create the
-/// journal and before the onboarding marker or the Hotkey defaults are
-/// written. Kept so the Hotkey migration settles against the same reading of
-/// the evidence the classification used, rather than against a settings file
-/// this very launch has since written into.
-struct InstallationEvidence(bool);
-
 /// Whether this launch opened the Main Window because automatic Onboarding is
 /// due. Read when the user quits, so that quitting during the introduction
 /// records the dismissal — and so that an instance which exits before it
@@ -303,9 +295,7 @@ pub fn run() {
                 .setup(
                     |app: &tauri::AppHandle<tauri::Wry>,
                      _api: tauri::plugin::PluginApi<tauri::Wry, ()>| {
-                    if let Some(existing) = settle_onboarding(app) {
-                        app.manage(InstallationEvidence(existing));
-                    }
+                    settle_onboarding(app);
                     Ok(())
                 })
                 .build(),
@@ -1036,26 +1026,24 @@ fn resolved_theme(app: &tauri::AppHandle) -> ResolvedTheme {
 /// because either side effect would make a genuinely fresh installation look
 /// like an established one on its very first launch.
 ///
-/// Returns whether this installation existed before this launch, so the Hotkey
-/// migration can settle against the same evidence the classification read —
-/// `None` when the settings could not be read, in which case nothing was
-/// written and the marker stays away (which reads as suppressed).
-fn settle_onboarding(app: &tauri::AppHandle) -> Option<bool> {
-    let store = match app.store(SETTINGS_FILE) {
-        Ok(store) => store,
-        Err(error) => {
-            // Unreadable settings must not become an introduction asked about
-            // on every launch, nor an app that opens a window uninvited.
-            log::error!("could not read the settings; automatic Onboarding stays suppressed: {error}");
-            return None;
-        }
+/// The marker written here is what the Hotkey settlement later reads: it is
+/// the durable record of this launch's classification, so a launch interrupted
+/// after the marker but before the Hotkeys keeps its fresh identity on the
+/// next one. When the settings cannot be read, nothing is written and the
+/// marker stays away (which reads as suppressed, and falls back to the
+/// evidence as it stands).
+fn settle_onboarding(app: &tauri::AppHandle) {
+    let Ok(store) = app.store(SETTINGS_FILE) else {
+        // Unreadable settings must not become an introduction asked about
+        // on every launch, nor an app that opens a window uninvited.
+        log::error!("could not read the settings; automatic Onboarding stays suppressed");
+        return;
     };
 
     // The evidence first — before the marker below makes the settings file
     // hold something, and before plugin-sql (which has yet to run) can create
     // the journal: a settings file with anything in it, or a journal already
-    // on disk, is an installation that was running before this launch, the
-    // same reading the Hotkey migration uses.
+    // on disk, is an installation that was running before this launch.
     let existing = onboarding::installation_existed(
         !store.is_empty(),
         journal_database_exists(app),
@@ -1071,8 +1059,6 @@ fn settle_onboarding(app: &tauri::AppHandle) -> Option<bool> {
             log::error!("could not record the Onboarding state: {error}");
         }
     }
-
-    Some(existing)
 }
 
 /// The stored Onboarding marker, when the settings say anything at all.
@@ -1174,14 +1160,7 @@ impl hotkey::Registrar for GlobalShortcuts {
 /// not take the app down with it: the Tray Menu still reaches both Entry
 /// Points, and Settings reports each failure against its own action.
 fn register_hotkeys(app: &tauri::AppHandle) {
-    // The evidence the startup classification captured before plugin-sql
-    // created the journal or the Onboarding marker was written. Absent only
-    // when the classification could not read the settings at all, in which
-    // case the settlement falls back to reading it here.
-    let evidence = app
-        .try_state::<InstallationEvidence>()
-        .map(|installation| installation.0);
-    settle_stored_hotkeys(app, evidence);
+    settle_stored_hotkeys(app);
 
     let registrar = GlobalShortcuts { app: app.clone() };
     let hotkeys = hotkey::register_both(
@@ -1203,12 +1182,15 @@ fn register_hotkeys(app: &tauri::AppHandle) {
 /// `hotkey::settle`'s decision; all that happens here is reading the settings
 /// file, telling it whether this installation predates Tasks, and saving.
 ///
-/// Whether it predates Tasks is the evidence the startup classification
-/// captured before this launch could create either side effect — a genuinely
-/// fresh installation must not read its own just-created journal or
-/// just-written Onboarding marker as evidence of an older one, and an
-/// existing installation's reading is unchanged.
-fn settle_stored_hotkeys(app: &tauri::AppHandle, evidence: Option<bool>) {
+/// Whether it predates Tasks is the Onboarding marker's to say — the durable
+/// record of the first launch's classification, written before this launch
+/// could create the journal or the defaults. A launch that was classified
+/// brand new and then interrupted keeps its fresh identity on the next one,
+/// rather than reading the journal and settings it created as evidence of an
+/// older installation. A marker that is absent or unknown — classification
+/// never ran, or a settings file edited by hand — reads the evidence as it
+/// stands, exactly as the Hotkey migration always has.
+fn settle_stored_hotkeys(app: &tauri::AppHandle) {
     let Ok(store) = app.store(SETTINGS_FILE) else {
         log::error!("could not read the settings; the Hotkeys keep their defaults");
         return;
@@ -1216,17 +1198,19 @@ fn settle_stored_hotkeys(app: &tauri::AppHandle, evidence: Option<bool>) {
 
     let stored_note = store.get(HOTKEY_KEY);
     let stored_task = store.get(TASK_HOTKEY_KEY);
+    let marker = store
+        .get(ONBOARDING_KEY)
+        .and_then(|value| value.as_str().map(str::to_string));
     let (note, task) = hotkey::settle(
         stored_note.as_ref().and_then(|value| value.as_str()),
         stored_task.as_ref().and_then(|value| value.as_str()),
-        evidence.unwrap_or_else(|| {
-            // The fallback for a classification that never ran: the same
-            // evidence read at this later moment.
+        onboarding::predates_tasks(
+            marker.as_deref(),
             onboarding::installation_existed(
                 !store.is_empty(),
                 journal_database_exists(app),
-            )
-        }),
+            ),
+        ),
     );
 
     if let Some(note) = note {

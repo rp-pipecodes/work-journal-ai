@@ -223,6 +223,12 @@ function StartAtLoginStep({
   // settings state does: a change made before the OS answers must not be put
   // back by the answer.
   const touched = useRef(false)
+  // How many changes have been started since this step mounted. A save that
+  // settles — or a rollback read that returns — belongs to the change that
+  // started it, and is discarded if a newer one has begun by then: the same
+  // per-attempt rule the seeded Settings switch lives under — see
+  // docs/adr/0028-the-initial-read-seeds-only-what-the-user-has-not-changed.md.
+  const attempts = useRef(0)
 
   useEffect(() => {
     void desktop.startsAtLogin().then((current) => {
@@ -231,24 +237,32 @@ function StartAtLoginStep({
     })
   }, [desktop])
 
+  /** Starts a change, in flight or not: every press and every retry lands here. */
   function toggle(next: boolean) {
     touched.current = true
+    const attempt = ++attempts.current
     setWish(next)
     setOutcome({ state: 'saving' })
-    save(next)
-  }
-
-  function save(next: boolean) {
     settings.saveStartAtLogin(next).then(
-      () => setOutcome({ state: 'saved', on: next }),
+      () => {
+        if (attempts.current !== attempt) return
+        setOutcome({ state: 'saved', on: next })
+      },
       (error: unknown) => {
         console.error('could not change the login item', error)
+        if (attempts.current !== attempt) return
         setOutcome({ state: 'refused', wanted: next })
         // Roll back to what the OS says now: the login item is changed before
-        // the file is written, and the switch must agree with the OS.
+        // the file is written, and the switch must agree with the OS. The
+        // read belongs to this attempt too, so a slower answer cannot undo a
+        // change that has since been started.
         void desktop.startsAtLogin().then(
-          (current) => setWish(current),
-          () => setWish(!next),
+          (current) => {
+            if (attempts.current === attempt) setWish(current)
+          },
+          () => {
+            if (attempts.current === attempt) setWish(!next)
+          },
         )
       },
     )
@@ -294,11 +308,7 @@ function StartAtLoginStep({
               variant="link"
               size="xs"
               aria-label="Try saving the Start at Login choice again"
-              onClick={() => {
-                touched.current = true
-                setOutcome({ state: 'saving' })
-                save(outcome.wanted)
-              }}
+              onClick={() => toggle(outcome.wanted)}
             >
               Try again
             </Button>

@@ -77,6 +77,27 @@ pub fn is_unfinished(stored: Option<&str>) -> bool {
     stored == Some(UNFINISHED)
 }
 
+/// Whether this installation predates the Task Hotkey — the question the one
+/// Hotkey settlement asks, answered from the same evidence the first launch
+/// was classified on.
+///
+/// The marker is the durable record of that classification: `unfinished`
+/// means the very first launch decided this installation was brand new — no
+/// journal, no saved settings, nothing that predates anything — so the
+/// journal and the defaults that launch then went on to create (or a crash
+/// that cut it short before the Hotkeys were written) cannot make the next
+/// launch treat it as an older installation. Everything else — suppressed, a
+/// marker absent because classification never ran, or one this build does
+/// not recognise — reads the evidence as it stands, exactly as the Hotkey
+/// migration always has.
+pub fn predates_tasks(stored: Option<&str>, installation_existed: bool) -> bool {
+    if is_unfinished(stored) {
+        false
+    } else {
+        installation_existed
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,5 +166,39 @@ mod tests {
         assert!(is_unfinished(Some(UNFINISHED)));
         assert!(!is_unfinished(Some(SUPPRESSED)));
         assert!(!is_unfinished(None));
+    }
+
+    /// An interrupted very first launch keeps the fresh Note Hotkey: the
+    /// journal and the marker-holding settings the launch created before it
+    /// died are its own doing, not evidence of an installation that predates
+    /// the Task Hotkey.
+    #[test]
+    fn an_interrupted_first_launch_keeps_the_fresh_hotkey_defaults() {
+        assert!(!predates_tasks(Some(UNFINISHED), true));
+        assert!(!predates_tasks(Some(UNFINISHED), false));
+    }
+
+    /// An installation that already existed keeps the legacy Note Hotkey the
+    /// migration preserves for it, whether its marker was settled on this
+    /// build or classification never ran.
+    #[test]
+    fn an_existing_installation_keeps_the_legacy_note_hotkey() {
+        assert!(predates_tasks(Some(SUPPRESSED), true));
+        assert!(predates_tasks(None, true));
+    }
+
+    /// A genuinely new installation never predates the Task Hotkey.
+    #[test]
+    fn a_new_installation_never_predates_tasks() {
+        assert!(!predates_tasks(None, false));
+        assert!(!predates_tasks(Some(UNFINISHED), false));
+    }
+
+    /// A marker this build does not recognise reads as the evidence does,
+    /// like any other absent answer.
+    #[test]
+    fn an_unrecognised_marker_reads_the_evidence() {
+        assert!(predates_tasks(Some("perhaps"), true));
+        assert!(!predates_tasks(Some("perhaps"), false));
     }
 }
