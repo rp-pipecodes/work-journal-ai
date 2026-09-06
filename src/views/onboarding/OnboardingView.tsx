@@ -30,14 +30,32 @@ export default function OnboardingView({
   desktop,
   settings,
   onDone,
+  onViewNote,
 }: {
   desktop: Desktop
   settings: AppSettings
   /** The user finished or deliberately skipped the whole flow. */
   onDone: () => void
+  /** The user asked to see the practice Note they saved, in History. */
+  onViewNote: (journalDay: string) => void
 }) {
   const [step, setStep] = useState<Step>('introduction')
   const [hotkeys, setHotkeys] = useState<HotkeyStatuses | null>(null)
+  // The Journal Day of the practice Note, once one has been saved. Null until
+  // then: practice is optional, and nothing about continuing requires one.
+  const [savedDay, setSavedDay] = useState<string | null>(null)
+  // Whether the real Capture window is open for practice. While it is, the
+  // arrival of a Note is that practice being submitted; the Main Window
+  // regaining focus without one is it being cancelled.
+  const [practicing, setPracticing] = useState(false)
+  const practicingRef = useRef(false)
+  // Whether Try it was ever pressed, and what the saved day currently is, for
+  // the race the window boundary leaves: the submission is announced before
+  // the window is put away, so focus can land before the Note does. A Note
+  // arriving after its own focus still belongs to the practice that has yet
+  // to record one; any other Capture is still ignored.
+  const attemptedRef = useRef(false)
+  const savedDayRef = useRef<string | null>(null)
 
   useEffect(() => {
     void desktop.hotkeyStatus().then(setHotkeys, (error: unknown) => {
@@ -45,11 +63,75 @@ export default function OnboardingView({
     })
   }, [desktop])
 
+  useEffect(() => {
+    practicingRef.current = practicing
+  }, [practicing])
+
+  useEffect(() => {
+    savedDayRef.current = savedDay
+  }, [savedDay])
+
+  useEffect(() => {
+    // An explicit submission is an ordinary Captured Note, announced the way
+    // any Capture announces one. Heard while practice is in flight — or after
+    // its own focus already landed, when no practice has yet recorded one —
+    // so an unrelated Capture never stands in for it.
+    const subscription = desktop.onNoteCaptured((journalDay) => {
+      if (practicingRef.current) {
+        practicingRef.current = false
+        setPracticing(false)
+        savedDayRef.current = journalDay
+        setSavedDay(journalDay)
+      } else if (attemptedRef.current && savedDayRef.current === null) {
+        savedDayRef.current = journalDay
+        setSavedDay(journalDay)
+      }
+    })
+
+    return () => {
+      void subscription.then((stop) => stop())
+    }
+  }, [desktop])
+
+  useEffect(() => {
+    // Cancellation has no announcement of its own: the Rust side returns
+    // focus to this window, so regaining it without a Note while practice is
+    // in flight is the cancellation.
+    const subscription = desktop.onWindowFocused(() => {
+      if (!practicingRef.current) return
+      practicingRef.current = false
+      setPracticing(false)
+    })
+
+    return () => {
+      void subscription.then((stop) => stop())
+    }
+  }, [desktop])
+
+  /** Opens the real Capture window without leaving the flow. */
+  function tryPractice() {
+    if (practicingRef.current) return
+    practicingRef.current = true
+    attemptedRef.current = true
+    setPracticing(true)
+    void desktop.beginPracticeCapture().catch((error: unknown) => {
+      console.error('could not open Capture for practice', error)
+      practicingRef.current = false
+      setPracticing(false)
+    })
+  }
+
   if (step === 'introduction') {
     return (
       <OnboardingShell desktop={desktop}>
         <Introduction
           hotkeys={hotkeys}
+          practicing={practicing}
+          savedDay={savedDay}
+          onTryIt={tryPractice}
+          onViewNote={() => {
+            if (savedDay !== null) onViewNote(savedDay)
+          }}
           onContinue={() => setStep('start-at-login')}
           onSkip={onDone}
         />
@@ -118,10 +200,20 @@ function OnboardingShell({
 
 function Introduction({
   hotkeys,
+  practicing,
+  savedDay,
+  onTryIt,
+  onViewNote,
   onContinue,
   onSkip,
 }: {
   hotkeys: HotkeyStatuses | null
+  /** Whether the practice Capture is open right now. */
+  practicing: boolean
+  /** The Journal Day of the practice Note, once one has been saved. */
+  savedDay: string | null
+  onTryIt: () => void
+  onViewNote: () => void
   onContinue: () => void
   onSkip: () => void
 }) {
@@ -179,11 +271,42 @@ function Introduction({
         </p>
       </section>
 
+      <section aria-label="Try capturing a Note" className="flex flex-col gap-2">
+        <h2 className="type-section">Try capturing a Note</h2>
+        <p className="type-body text-muted-foreground">
+          Optional — trying it opens the real Capture window, and nothing is
+          required to continue. A Note you save becomes part of the journal;
+          cancelling creates nothing.
+        </p>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            onClick={onTryIt}
+            disabled={practicing}
+          >
+            Try it
+          </Button>
+        </div>
+        <p aria-live="polite" className="type-meta min-h-4 text-muted-foreground">
+          {practicing && 'The Capture window is open — saving or cancelling returns here.'}
+          {!practicing && savedDay !== null && 'Saved — your Note is in the journal.'}
+        </p>
+      </section>
+
       <footer className="flex items-center justify-between gap-3 pt-2">
         <Button variant="ghost" onClick={onSkip}>
           Skip onboarding
         </Button>
-        <Button onClick={onContinue}>Continue</Button>
+        {savedDay === null ? (
+          <Button onClick={onContinue}>Continue</Button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={onViewNote}>
+              View your note
+            </Button>
+            <Button onClick={onContinue}>Continue setup</Button>
+          </div>
+        )}
       </footer>
     </>
   )

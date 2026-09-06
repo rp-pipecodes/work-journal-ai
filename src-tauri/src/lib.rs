@@ -216,6 +216,13 @@ struct CompletedTaskAlert(Mutex<Vec<TaskAlertCompletion>>);
 #[derive(Default)]
 struct OpenedForOnboarding(std::sync::atomic::AtomicBool);
 
+/// Whether the Capture now on screen was raised for Onboarding practice.
+/// Taken rather than read: the next dismissal returns focus to the Main
+/// Window showing Onboarding, and an ordinary Capture after that still hands
+/// focus back to whatever it interrupted.
+#[derive(Default)]
+struct PracticeCaptureReturn(Mutex<bool>);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -327,6 +334,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             dismiss_capture,
+            start_practice_capture,
             start_task_creation,
             dismiss_task_creation,
             hotkey_status,
@@ -407,6 +415,12 @@ pub fn run() {
             // Whoever is in front when a Capture begins, kept so that putting
             // the Capture away can hand focus back to them.
             app.manage(PreviousApplication::default());
+            // Whether the Capture now on screen was raised for Onboarding
+            // practice, kept so that putting it away can return focus to the
+            // Main Window showing Onboarding instead of to whoever was in
+            // front. Scoped to practice: an ordinary Capture still hands focus
+            // back as before.
+            app.manage(PracticeCaptureReturn::default());
             // Whether this launch opened the Main Window because automatic
             // Onboarding is due — set below, read when the user quits, so an
             // instance that exits before it could have shown the introduction
@@ -1974,9 +1988,31 @@ async fn journal_transaction(
 
 /// Ends a Capture, whether it committed a Note or discarded one. The window is
 /// only ever hidden — see docs/adr/0002-capture-window-is-hidden-never-closed.md.
+///
+/// A Capture raised for Onboarding practice returns focus to the Main Window
+/// showing Onboarding instead of to whoever was in front: the return
+/// destination was scoped to practice when it began, so an ordinary Capture
+/// still hands focus back as before.
 #[tauri::command]
 fn dismiss_capture(app: tauri::AppHandle) -> Result<(), String> {
-    hide_resident_window(&app, CAPTURE_WINDOW).map_err(|error| error.to_string())
+    if take_practice_return(&app) {
+        hide_capture_for_practice(&app).map_err(|error| error.to_string())
+    } else {
+        hide_resident_window(&app, CAPTURE_WINDOW).map_err(|error| error.to_string())
+    }
+}
+
+/// Raises the real resident Capture window for optional Onboarding practice.
+/// The Note it commits is an ordinary Captured Note; cancelling creates
+/// nothing. Saving and cancelling return focus to the Main Window showing
+/// Onboarding — the return destination scoped here, so ordinary Capture
+/// behavior elsewhere is unchanged.
+#[tauri::command]
+fn start_practice_capture(app: tauri::AppHandle) {
+    if let Ok(mut returning) = app.state::<PracticeCaptureReturn>().0.lock() {
+        *returning = true;
+    }
+    start_capture(&app);
 }
 
 /// A Task Entry Point reached from a webview — the New Task control in Tasks
@@ -2006,6 +2042,36 @@ fn hide_resident_window(app: &tauri::AppHandle, label: &str) -> tauri::Result<()
     // it away is what gives that back. Every other Work Journal window is left
     // exactly as it was, on screen and unfocused.
     hand_focus_back(app);
+
+    Ok(())
+}
+
+/// Takes the scoped practice return, if one is waiting. The next dismissal
+/// after practice began is the one it belongs to, however that dismissal was
+/// reached — an explicit submission or a cancellation.
+fn take_practice_return(app: &tauri::AppHandle) -> bool {
+    app.state::<PracticeCaptureReturn>()
+        .0
+        .lock()
+        .map(|mut returning| std::mem::replace(&mut *returning, false))
+        .unwrap_or(false)
+}
+
+/// Puts the practice Capture away and returns focus to the Main Window
+/// showing Onboarding. The Main Window is already open — practice begins
+/// there — so focusing it is the whole return. With no Main Window to return
+/// to, focus goes back to whoever was in front, exactly as an ordinary
+/// Capture would.
+fn hide_capture_for_practice(app: &tauri::AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(CAPTURE_WINDOW) {
+        window.hide()?;
+    }
+
+    if let Some(main) = app.get_webview_window(MAIN_WINDOW) {
+        main.set_focus()?;
+    } else {
+        hand_focus_back(app);
+    }
 
     Ok(())
 }

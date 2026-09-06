@@ -306,7 +306,11 @@ describe('the onboarding state and commands', () => {
     )?.[1]
     expect(handler, 'the invoke handler could not be read').toBeTruthy()
 
-    for (const command of ['onboarding_state', 'dismiss_onboarding']) {
+    for (const command of [
+      'onboarding_state',
+      'dismiss_onboarding',
+      'start_practice_capture',
+    ]) {
       expect(
         rustSource.match(new RegExp(`fn ${command}\\b`)),
         `${command} is not a command in ${RUST_FILE}`,
@@ -316,6 +320,14 @@ describe('the onboarding state and commands', () => {
         `${command} is not registered in the invoke handler`,
       ).toContain(command)
     }
+  })
+
+  it('invokes practice through the command the desktop surface names', () => {
+    // Practice reaches the real resident Capture window through the desktop
+    // boundary: a rename on either side is a Try it button that answers
+    // nothing.
+    const tauriSource = read('src/platform/tauri-desktop.ts')
+    expect(tauriSource).toContain("invoke('start_practice_capture'")
   })
 })
 

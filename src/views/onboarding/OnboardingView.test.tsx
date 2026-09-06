@@ -31,12 +31,13 @@ beforeAll(() => {
 function showFlow(desktop: FakeDesktop) {
   const settings = createAppSettings(desktop)
   const done = vi.fn()
+  const viewNote = vi.fn()
   render(
     <ThemeProvider settings={settings}>
-      <OnboardingView desktop={desktop} settings={settings} onDone={done} />
+      <OnboardingView desktop={desktop} settings={settings} onDone={done} onViewNote={viewNote} />
     </ThemeProvider>,
   )
-  return { done }
+  return { done, viewNote }
 }
 
 /** The switch at its step, found the way the user finds it. */

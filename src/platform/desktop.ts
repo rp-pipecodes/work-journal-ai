@@ -507,9 +507,19 @@ export interface Desktop {
 
   /**
    * Ends a Capture. Hiding the window is the Rust side's job: it also has to
-   * hand focus back to the application the Capture interrupted.
+   * hand focus back to the application the Capture interrupted — unless the
+   * Capture was practice, which returns to the Main Window instead; see
+   * `beginPracticeCapture`.
    */
   dismissCapture(): Promise<void>
+  /**
+   * Raises the real resident Capture window for optional Onboarding practice.
+   * The Note it commits is an ordinary Captured Note; cancelling creates
+   * nothing. Saving and cancelling return focus to the Main Window showing
+   * Onboarding, while an ordinary Capture still hands focus back to whatever
+   * it interrupted — the return destination is scoped to this call.
+   */
+  beginPracticeCapture(): Promise<void>
   /**
    * Fits the Capture window to the field plus whatever sits under it. Nothing
    * under it is the resting height — must match the size built in

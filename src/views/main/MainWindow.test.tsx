@@ -981,6 +981,199 @@ describe('replaying Onboarding from Settings', () => {
   })
 })
 
+describe('practicing Capture from Onboarding', () => {
+  it('opens the real Capture window without dismissing Onboarding', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Try it' }))
+
+    // Through the desktop boundary, and the introduction stays up: trying it
+    // is part of Onboarding, not a departure from it.
+    await expect.poll(() => desktop.practiceCapturesBegun).toBe(1)
+    expect(
+      screen.getByRole('heading', { name: 'Welcome to Work Journal' }),
+    ).toBeTruthy()
+    expect(allSectionsHidden()).toBe(true)
+    expect(desktop.onboarding).toBe('unfinished')
+  })
+
+  it('returns to the introduction when practice is cancelled, creating nothing', async () => {
+    const user = userEvent.setup()
+    const { desktop, core } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Try it' }))
+    await expect.poll(() => desktop.practiceCapturesBegun).toBe(1)
+
+    // Cancelling has no announcement of its own: the Main Window regaining
+    // focus without a Note is the cancellation returning here.
+    desktop.focus()
+
+    await expect.poll(() => screen.getByRole('button', { name: 'Try it' })).toBeTruthy()
+    expect(
+      screen.getByRole('heading', { name: 'Welcome to Work Journal' }),
+    ).toBeTruthy()
+    expect(
+      screen.queryByRole('button', { name: 'View your note' }),
+    ).toBeNull()
+    expect(desktop.onboarding).toBe('unfinished')
+    // Cancellation created nothing: the journal still holds Monday alone.
+    const notes = await core.notesForFilter({
+      from: '2000-01-01',
+      to: '2100-01-01',
+    })
+    expect(notes).toHaveLength(1)
+  })
+
+  it('offers View your note and Continue setup after a saved practice Note', async () => {
+    const user = userEvent.setup()
+    const { desktop, core, clock } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Try it' }))
+    await expect.poll(() => desktop.practiceCapturesBegun).toBe(1)
+
+    // An explicit submission is an ordinary Captured Note, announced the way
+    // any Capture announces one. Reuse that behavior rather than duplicating
+    // the Capture suite: the journal holds it, and the announcement carries
+    // its day.
+    clock.set(new Date('2026-03-09T15:00:00'))
+    const note = await core.capture('my practice note')
+    if (note === null) throw new Error('nothing was captured')
+    await desktop.announceCapturedNote(note.journalDay)
+    await desktop.announceJournalChanged()
+
+    // Saving returns to Onboarding with the next choice: viewing the Note or
+    // continuing setup. No Note is required to continue, and none was
+    // inserted on the user's behalf — this one is the submission itself.
+    expect(
+      await screen.findByRole('button', { name: 'View your note' }),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'Continue setup' }),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('heading', { name: 'Welcome to Work Journal' }),
+    ).toBeTruthy()
+    expect(desktop.onboarding).toBe('unfinished')
+    const notes = await core.notesForFilter({
+      from: '2000-01-01',
+      to: '2100-01-01',
+    })
+    expect(notes).toHaveLength(2)
+  })
+
+  it('continues setup after practice without dismissing Onboarding', async () => {
+    const user = userEvent.setup()
+    const { desktop, core, clock } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Try it' }))
+    clock.set(new Date('2026-03-09T15:00:00'))
+    const note = await core.capture('my practice note')
+    if (note === null) throw new Error('nothing was captured')
+    await desktop.announceCapturedNote(note.journalDay)
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Continue setup' }),
+    )
+
+    // Continuing setup walks on through the optional settings: the flow is
+    // still up, and still due.
+    await screen.findByRole('heading', { name: 'Start Work Journal at login?' })
+    expect(allSectionsHidden()).toBe(true)
+    expect(desktop.onboarding).toBe('unfinished')
+  })
+
+  it('views the saved Note on its day with Project Any, dismissing Onboarding', async () => {
+    const user = userEvent.setup()
+    const { desktop, core, clock } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Try it' }))
+    // Wednesday, so viewing has a day to move to rather than the day already
+    // open.
+    clock.set(new Date('2026-03-11T10:00:00'))
+    const note = await core.capture('my practice note')
+    if (note === null) throw new Error('nothing was captured')
+    await desktop.announceCapturedNote(note.journalDay)
+    await desktop.announceJournalChanged()
+
+    await user.click(
+      await screen.findByRole('button', { name: 'View your note' }),
+    )
+
+    // Viewing is navigating away: History shows the Note's day with Project
+    // Any, and automatic presentation is dismissed as it goes.
+    await showsHistory()
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+    expect(await screen.findByText('my practice note')).toBeTruthy()
+    expect(days().textContent).toContain('March 11')
+  })
+
+  it('resets an unrelated Filter left before replay when viewing the Note', async () => {
+    const user = userEvent.setup()
+    const { desktop, core, clock } = await showMainWindow({
+      captured: [
+        { at: '2026-03-09T10:00:00', body: '#alpha Monday' },
+        { at: '2026-03-09T11:00:00', body: '#beta Monday' },
+      ],
+      section: 'settings',
+    })
+    await showsSettings()
+
+    // A Filter narrowed before replay: Monday under #alpha. History stays
+    // mounted while Settings shows, so leaving it narrowed is leaving it.
+    await user.click(within(sidebar()).getByRole('button', { name: 'History' }))
+    await showsHistory()
+    const project = () =>
+      within(screen.getByRole('banner')).getByRole('combobox', {
+        name: /^Project/,
+      })
+    await user.click(project())
+    await user.click(await screen.findByRole('option', { name: '#alpha' }))
+    await expect.poll(() => project().textContent).toContain('#alpha')
+
+    await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
+    await showsSettings()
+    await user.click(
+      await screen.findByRole('button', { name: 'Replay introduction' }),
+    )
+    await screen.findByRole('heading', { name: 'Welcome to Work Journal' })
+
+    await user.click(screen.getByRole('button', { name: 'Try it' }))
+    await expect.poll(() => desktop.practiceCapturesBegun).toBe(1)
+    clock.set(new Date('2026-03-11T10:00:00'))
+    const note = await core.capture('my practice note')
+    if (note === null) throw new Error('nothing was captured')
+    await desktop.announceCapturedNote(note.journalDay)
+    await desktop.announceJournalChanged()
+
+    await user.click(
+      await screen.findByRole('button', { name: 'View your note' }),
+    )
+
+    // Whatever the Filter said before, the Note's day shows with Project Any:
+    // the earlier narrowing cannot hide the practice Note.
+    await showsHistory()
+    expect(await screen.findByText('my practice note')).toBeTruthy()
+    await expect.poll(() => project().textContent).toContain('Any')
+    expect(desktop.onboarding).toBe('suppressed')
+  })
+})
+
 describe('Escape', () => {
   it('reaches the section the Entry Point opened the window on', async () => {
     const { desktop } = await showMainWindow({
@@ -1118,7 +1311,7 @@ async function showMainWindow({
     await firstListShown(captured.length)
   }
 
-  return { desktop, core, created }
+  return { desktop, core, created, clock }
 }
 
 /** The sidebar, as the only thing on screen that lists the sections. */

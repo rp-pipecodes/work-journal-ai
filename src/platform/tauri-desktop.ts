@@ -154,6 +154,7 @@ export function createTauriDesktop(): Desktop {
     },
 
     dismissCapture: () => invoke('dismiss_capture'),
+    beginPracticeCapture: () => invoke('start_practice_capture'),
 
     // Built at the resting size in Rust; the height is worked out in one place
     // so the window and the panel drawn inside it cannot disagree.

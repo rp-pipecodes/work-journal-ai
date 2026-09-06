@@ -33,6 +33,8 @@ export interface FakeDesktop extends Desktop {
   showTaskCreation(): void
   /** How many times a Task Entry Point asked for the resident window. */
   taskCreationsBegun: number
+  /** How many times practice asked for the real Capture window. */
+  practiceCapturesBegun: number
   /** How many times the window the caller is in was closed. */
   windowsClosed: number
   /** How many times a Task Creation was dismissed. */
@@ -269,6 +271,7 @@ export function fakeDesktop({
     events,
     windowsClosed: 0,
     taskCreationsBegun: 0,
+    practiceCapturesBegun: 0,
     taskCreationsDismissed: 0,
     capturesDismissed: 0,
     taskCreationFits: [],
@@ -347,6 +350,12 @@ export function fakeDesktop({
 
     dismissCapture: async () => {
       desktop.capturesDismissed += 1
+    },
+    // Practice reaches the same resident window ordinary Capture does: the
+    // real one, counted separately so a test can tell practice asked for it.
+    beginPracticeCapture: async () => {
+      desktop.practiceCapturesBegun += 1
+      captureShown.announce(undefined)
     },
     fitCapture: async (fit) => {
       desktop.fits.push(fit)
