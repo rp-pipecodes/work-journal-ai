@@ -31,11 +31,20 @@ never form a backlog.
 Opening a series and resuming one are different questions, so they are answered
 by different arithmetic. Creation keeps `openingSlot` and its step back onto the
 latest *elapsed* slot, because a start date in the past is something the user
-deliberately chose. Editing prefers today's slot whenever the time just typed is
-still ahead — for a series with history this is what `advancedSlot` already
-computes from the newest kept slot, and for one with no history it is the point
-where the two derivations visibly disagree. Without the split, retiming a
-reminder to 23:00 at 14:00 opens *yesterday* at 23:00.
+deliberately chose. Editing uses `resumedSlot`, which is `openingSlot` without
+that step back: it prefers today's slot whenever the time just typed is still
+ahead. Without the split, retiming a reminder to 23:00 at 14:00 opens
+*yesterday* at 23:00.
+
+The head of an edited series is then the later of `resumedSlot` and the floor —
+not `advancedSlot` from the newest kept slot, which an earlier draft of this
+record wrongly claimed was equivalent. It is not, because `advancedSlot` skips
+every slot whose moment has already passed, and today's has when the user
+retimes to a time earlier than the clock. A monthly invoice anchored on 31
+January, kept in January and retimed from 09:00 to 07:00 at 08:00 on 28
+February, advances to 31 March under `advancedSlot` — February's commitment
+disappears without being kept. Taking the later of the floor and `resumedSlot`
+leaves it standing on 28 February as Overdue, which is what the user still owes.
 
 Nothing in the schema forbids two kept occurrences on the same slot: the unique
 index in migration 0006 constrains one *Open* occurrence per Task and no more.
