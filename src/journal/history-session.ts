@@ -22,6 +22,7 @@ import {
   describeCopiedDigest,
   groupByJournalDay,
   projectName,
+  rangeForJournalDay,
   type DayRange,
   type Digest,
   type Filter,
@@ -119,11 +120,20 @@ export interface HistorySession {
   moveTo(range: DayRange): Promise<void>
   /**
    * The other axis, on its own: the same days, narrowed to one Project, to
-   * Unfiled, or to nothing at all. Sticks for the session — nothing but the
-   * reader ever changes it — and takes the screen back to the Filter, since
-   * that is what it is about.
+   * Unfiled, or to nothing at all. Sticks for the session — the reader moves
+   * it, and so does revealing a practice Note (which always shows Any) — and
+   * takes the screen back to the Filter, since that is what it is about.
    */
   narrowTo(project: ProjectConstraint): Promise<void>
+  /**
+   * Shows one Journal Day with no Project constraint: the practice Note's day
+   * as Onboarding reveals it, whatever the Filter said before. Both axes move
+   * as one operation with a single read, so a day the reader picks while the
+   * read is in flight still wins by the session's newest-read rule — two
+   * separate moves would let the reveal's second half overwrite the reader's
+   * newer choice.
+   */
+  reveal(journalDay: string): Promise<void>
   /**
    * The term as it now reads, after every keystroke. Nothing is asked of the
    * journal until it has stood still for `SEARCH_DEBOUNCE_MS` and is at least
@@ -324,6 +334,30 @@ export function createHistorySession({
     await read(filter)
   }
 
+  /**
+   * One Journal Day with no Project constraint, as a single move: what
+   * revealing a practice Note asks for. The constraint is set before the one
+   * read that draws the list, so there is no moment where the screen shows a
+   * half-moved Filter — and a day the reader picks while that read is in
+   * flight stays the newest read, so it wins.
+   */
+  async function reveal(journalDay: string): Promise<void> {
+    project = ANY_PROJECT
+    abandonWaitingTerm()
+    const filter: Filter = {
+      ...rangeForJournalDay(journalDay),
+      project,
+    }
+    show({
+      filter,
+      searching: false,
+      nudgedDay: null,
+      confirmation: null,
+      problem: null,
+    })
+    await read(filter)
+  }
+
   /** One settled term, asked of the whole journal. */
   async function run(term: string): Promise<void> {
     const ticket = ++latestRead
@@ -394,6 +428,7 @@ export function createHistorySession({
     open,
     moveTo,
     narrowTo,
+    reveal,
     search,
 
     async noteArrived(journalDay) {

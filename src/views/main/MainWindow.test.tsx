@@ -18,6 +18,7 @@ import {
   journalHolding,
 } from '@/views/history/testing/history-view'
 import { holdFrames } from '@/views/settings/testing/frames'
+import CaptureView from '@/views/capture/CaptureView'
 import MainWindow from './MainWindow'
 
 // The Main Window as the user meets it: a sidebar naming the section on
@@ -1161,6 +1162,15 @@ describe('practicing Capture from Onboarding', () => {
     await desktop.announceCapturedNote(note.journalDay)
     await desktop.announceJournalChanged()
 
+    // Manual replay never touches the dismissal marker: count the calls
+    // rather than reading the default value back.
+    let dismissCalls = 0
+    const dismiss = desktop.dismissOnboarding.bind(desktop)
+    desktop.dismissOnboarding = async () => {
+      dismissCalls += 1
+      await dismiss()
+    }
+
     await user.click(
       await screen.findByRole('button', { name: 'View your note' }),
     )
@@ -1170,7 +1180,142 @@ describe('practicing Capture from Onboarding', () => {
     await showsHistory()
     expect(await screen.findByText('my practice note')).toBeTruthy()
     await expect.poll(() => project().textContent).toContain('Any')
+    expect(dismissCalls).toBe(0)
     expect(desktop.onboarding).toBe('suppressed')
+  })
+
+  it('does not claim an ordinary Capture after a cancelled practice', async () => {
+    const user = userEvent.setup()
+    const { desktop, core, clock } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Try it' }))
+    await expect.poll(() => desktop.practiceCapturesBegun).toBe(1)
+    desktop.focus()
+
+    // Let the deferred cancellation land: the Try it control is enabled
+    // again only once the attempt has closed.
+    await expect.poll(() => (screen.getByRole('button', { name: 'Try it' }) as HTMLButtonElement).disabled).toBe(false)
+
+    // An ordinary Capture from anywhere else — the hotkey, the Tray — after
+    // the cancellation belongs to no practice.
+    clock.set(new Date('2026-03-11T10:00:00'))
+    const ordinary = await core.capture('an ordinary note')
+    if (ordinary === null) throw new Error('nothing was captured')
+    await desktop.announceCapturedNote(ordinary.journalDay)
+    await desktop.announceJournalChanged()
+
+    expect(
+      screen.queryByRole('button', { name: 'View your note' }),
+    ).toBeNull()
+    expect(
+      screen.getByRole('heading', { name: 'Welcome to Work Journal' }),
+    ).toBeTruthy()
+    expect(desktop.onboarding).toBe('unfinished')
+  })
+
+  it('reveals the second day after two practices when focus precedes its announcement', async () => {
+    const user = userEvent.setup()
+    const { desktop, core, clock } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Try it' }))
+    clock.set(new Date('2026-03-11T10:00:00'))
+    const first = await core.capture('first practice note')
+    if (first === null) throw new Error('nothing was captured')
+    await desktop.announceCapturedNote(first.journalDay)
+    await screen.findByRole('button', { name: 'View your note' })
+
+    // A second attempt starts from no Note recorded yet.
+    await user.click(screen.getByRole('button', { name: 'Try it' }))
+    await expect.poll(() => desktop.practiceCapturesBegun).toBe(2)
+    expect(
+      screen.queryByRole('button', { name: 'View your note' }),
+    ).toBeNull()
+
+    clock.set(new Date('2026-03-12T10:00:00'))
+    const second = await core.capture('second practice note')
+    if (second === null) throw new Error('nothing was captured')
+    // The Rust side announces before putting the window away, so focus can
+    // land first: both in the same tick, the submission still wins.
+    desktop.focus()
+    await desktop.announceCapturedNote(second.journalDay)
+
+    await user.click(
+      await screen.findByRole('button', { name: 'View your note' }),
+    )
+
+    await showsHistory()
+    expect(await screen.findByText('second practice note')).toBeTruthy()
+    expect(days().textContent).toContain('March 12')
+  })
+
+  it('records a practice Note submitted through the real Capture window', async () => {
+    const user = userEvent.setup()
+    const { desktop, core, clock } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Try it' }))
+    await expect.poll(() => desktop.practiceCapturesBegun).toBe(1)
+
+    // The resident window the practice raised, driven for real: typing and
+    // Enter commit through CaptureView's own path, including its dismiss.
+    clock.set(new Date('2026-03-09T15:00:00'))
+    render(
+      <CaptureView desktop={desktop} journal={Promise.resolve(core)} />,
+    )
+    const field = (await screen.findByLabelText(
+      'What did you just do?',
+    )) as HTMLInputElement
+    fireEvent.change(field, { target: { value: 'my practice note' } })
+    fireEvent.keyDown(field, { key: 'Enter' })
+
+    expect(
+      await screen.findByRole('button', { name: 'View your note' }),
+    ).toBeTruthy()
+    await expect.poll(() => desktop.capturesDismissed).toBe(1)
+    const notes = await core.notesForFilter({
+      from: '2000-01-01',
+      to: '2100-01-01',
+    })
+    expect(notes).toHaveLength(2)
+  })
+
+  it('returns to the introduction when the real Capture window is abandoned', async () => {
+    const user = userEvent.setup()
+    const { desktop, core } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Try it' }))
+    await expect.poll(() => desktop.practiceCapturesBegun).toBe(1)
+
+    render(
+      <CaptureView desktop={desktop} journal={Promise.resolve(core)} />,
+    )
+    const field = (await screen.findByLabelText(
+      'What did you just do?',
+    )) as HTMLInputElement
+    fireEvent.keyDown(field, { key: 'Escape' })
+    await expect.poll(() => desktop.capturesDismissed).toBe(1)
+    desktop.focus()
+
+    await expect.poll(() => (screen.getByRole('button', { name: 'Try it' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(
+      screen.queryByRole('button', { name: 'View your note' }),
+    ).toBeNull()
+    const notes = await core.notesForFilter({
+      from: '2000-01-01',
+      to: '2100-01-01',
+    })
+    expect(notes).toHaveLength(1)
   })
 })
 

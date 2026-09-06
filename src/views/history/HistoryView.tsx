@@ -65,7 +65,6 @@ import {
 } from '@/journal/history-session'
 import { REVIEW_PROJECT_RULE } from '@/journal/review'
 import {
-  ANY_PROJECT,
   constraintOf,
   decideKeystroke,
   formatJournalDay,
@@ -107,10 +106,10 @@ export default function HistoryView({
   journal: Promise<Journal>
   /**
    * A practice Note to reveal: its Journal Day, shown with Project = Any
-   * whatever the Filter said before. The nonce tells one request from the
-   * next, so asking for the same day twice still lands.
+   * whatever the Filter said before. A new object per request, so asking for
+   * the same day twice still lands.
    */
-  reveal?: { day: string; nonce: number } | null
+  reveal?: { day: string } | null
 }) {
   const [snapshot, setSnapshot] = useState<HistorySnapshot>(openingSnapshot)
   const [session] = useState(() =>
@@ -180,17 +179,11 @@ export default function HistoryView({
   useEffect(() => {
     // A practice Note to reveal, asked from Onboarding: its Journal Day with
     // Project = Any, whatever the Filter said before manual replay left it.
-    // Narrowing first clears a named Project that would otherwise hide the
-    // Note; moving then shows its day. The nonce is the whole dependency: the
-    // same day asked twice is still two requests.
+    // One call through the session boundary, so both axes move atomically and
+    // a day the reader picks mid-read still wins.
     if (reveal === null) return
-    const day = reveal.day
-    void (async () => {
-      await session.narrowTo(ANY_PROJECT)
-      await session.moveTo(rangeForJournalDay(day))
-    })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reveal?.nonce])
+    void session.reveal(reveal.day)
+  }, [reveal, session])
 
   useEffect(() => {
     // Every session update is a new snapshot, so a copy is heard even when it

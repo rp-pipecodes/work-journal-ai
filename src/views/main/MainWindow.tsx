@@ -64,13 +64,12 @@ export default function MainWindow({
     null,
   )
   // The practice Note to reveal in History once Onboarding leaves for it: its
-  // Journal Day, with a nonce so the same day asked twice still lands. Null
-  // is the ordinary state: History opens where its Filter already is.
-  const [historyReveal, setHistoryReveal] = useState<{
-    day: string
-    nonce: number
-  } | null>(null)
-  const revealNonce = useRef(0)
+  // Journal Day. Null is the ordinary state: History opens where its Filter
+  // already is. A new object per request, so asking for the same day twice
+  // still lands.
+  const [historyReveal, setHistoryReveal] = useState<{ day: string } | null>(
+    null,
+  )
   // The section on screen, as the element the sidebar is not part of.
   const showing = useRef<HTMLDivElement>(null)
   // The flow's own mount state, read by the section switch that ends it.
@@ -133,8 +132,7 @@ export default function MainWindow({
    */
   const viewPracticeNote = useCallback(
     (journalDay: string) => {
-      revealNonce.current += 1
-      setHistoryReveal({ day: journalDay, nonce: revealNonce.current })
+      setHistoryReveal({ day: journalDay })
       openSection('history')
     },
     [openSection],

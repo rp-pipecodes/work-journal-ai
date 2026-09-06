@@ -41,21 +41,23 @@ export default function OnboardingView({
 }) {
   const [step, setStep] = useState<Step>('introduction')
   const [hotkeys, setHotkeys] = useState<HotkeyStatuses | null>(null)
-  // The Journal Day of the practice Note, once one has been saved. Null until
-  // then: practice is optional, and nothing about continuing requires one.
-  const [savedDay, setSavedDay] = useState<string | null>(null)
-  // Whether the real Capture window is open for practice. While it is, the
-  // arrival of a Note is that practice being submitted; the Main Window
-  // regaining focus without one is it being cancelled.
-  const [practicing, setPracticing] = useState(false)
-  const practicingRef = useRef(false)
-  // Whether Try it was ever pressed, and what the saved day currently is, for
-  // the race the window boundary leaves: the submission is announced before
-  // the window is put away, so focus can land before the Note does. A Note
-  // arriving after its own focus still belongs to the practice that has yet
-  // to record one; any other Capture is still ignored.
-  const attemptedRef = useRef(false)
-  const savedDayRef = useRef<string | null>(null)
+  // The practice attempt, as one fact with one owner. Each Try it replaces it
+  // wholesale: a new attempt id, open, and no Note recorded yet. A submission
+  // announced while open records its day and closes the attempt; regaining
+  // focus with nothing announced cancels it. Practice is optional, and
+  // nothing about continuing requires a Note.
+  const [practice, setPractice] = useState<Practice>({
+    attempt: 0,
+    open: false,
+    day: null,
+  })
+  const practiceRef = useRef(practice)
+
+  /** Replaces the attempt in both places event handlers read. */
+  function setPracticeState(next: Practice) {
+    practiceRef.current = next
+    setPractice(next)
+  }
 
   useEffect(() => {
     void desktop.hotkeyStatus().then(setHotkeys, (error: unknown) => {
@@ -64,28 +66,18 @@ export default function OnboardingView({
   }, [desktop])
 
   useEffect(() => {
-    practicingRef.current = practicing
-  }, [practicing])
-
-  useEffect(() => {
-    savedDayRef.current = savedDay
-  }, [savedDay])
-
-  useEffect(() => {
     // An explicit submission is an ordinary Captured Note, announced the way
-    // any Capture announces one. Heard while practice is in flight — or after
-    // its own focus already landed, when no practice has yet recorded one —
-    // so an unrelated Capture never stands in for it.
+    // any Capture announces one. Heard only while its own attempt is open, so
+    // a Capture from anywhere else — before the first Try it, after a
+    // cancellation, after a save — never stands in for practice.
     const subscription = desktop.onNoteCaptured((journalDay) => {
-      if (practicingRef.current) {
-        practicingRef.current = false
-        setPracticing(false)
-        savedDayRef.current = journalDay
-        setSavedDay(journalDay)
-      } else if (attemptedRef.current && savedDayRef.current === null) {
-        savedDayRef.current = journalDay
-        setSavedDay(journalDay)
-      }
+      const current = practiceRef.current
+      if (!current.open) return
+      setPracticeState({
+        attempt: current.attempt,
+        open: false,
+        day: journalDay,
+      })
     })
 
     return () => {
@@ -95,12 +87,20 @@ export default function OnboardingView({
 
   useEffect(() => {
     // Cancellation has no announcement of its own: the Rust side returns
-    // focus to this window, so regaining it without a Note while practice is
-    // in flight is the cancellation.
+    // focus to this window, so regaining it while an attempt is open is the
+    // cancellation — unless a submission announced just before it lands first.
+    // The Rust side announces the Note before putting the window away, so the
+    // two can arrive in either order; deferring the cancellation past the
+    // current tick lets an in-flight submission win over its own focus.
     const subscription = desktop.onWindowFocused(() => {
-      if (!practicingRef.current) return
-      practicingRef.current = false
-      setPracticing(false)
+      const current = practiceRef.current
+      if (!current.open) return
+      const attempt = current.attempt
+      queueMicrotask(() => {
+        const latest = practiceRef.current
+        if (latest.attempt !== attempt || !latest.open) return
+        setPracticeState({ attempt, open: false, day: null })
+      })
     })
 
     return () => {
@@ -110,14 +110,22 @@ export default function OnboardingView({
 
   /** Opens the real Capture window without leaving the flow. */
   function tryPractice() {
-    if (practicingRef.current) return
-    practicingRef.current = true
-    attemptedRef.current = true
-    setPracticing(true)
+    const current = practiceRef.current
+    if (current.open) return
+    const previous = current
+    const next: Practice = {
+      attempt: current.attempt + 1,
+      open: true,
+      day: null,
+    }
+    setPracticeState(next)
     void desktop.beginPracticeCapture().catch((error: unknown) => {
       console.error('could not open Capture for practice', error)
-      practicingRef.current = false
-      setPracticing(false)
+      // The window never opened, so this attempt never began: go back to
+      // what was there before it, but only if nothing has moved on since.
+      if (practiceRef.current.attempt === next.attempt) {
+        setPracticeState({ ...previous, open: false })
+      }
     })
   }
 
@@ -126,11 +134,12 @@ export default function OnboardingView({
       <OnboardingShell desktop={desktop}>
         <Introduction
           hotkeys={hotkeys}
-          practicing={practicing}
-          savedDay={savedDay}
+          practicing={practice.open}
+          savedDay={practice.day}
           onTryIt={tryPractice}
           onViewNote={() => {
-            if (savedDay !== null) onViewNote(savedDay)
+            const day = practiceRef.current.day
+            if (day !== null) onViewNote(day)
           }}
           onContinue={() => setStep('start-at-login')}
           onSkip={onDone}
@@ -154,6 +163,18 @@ export default function OnboardingView({
 
 /** The step that follows the introduction in this build. */
 type Step = 'introduction' | 'start-at-login'
+
+/**
+ * One practice attempt. Replaced wholesale on every Try it, so no flag from
+ * an earlier attempt — or from no practice at all — can be read by a later
+ * event. `open` is whether the Capture window is out for this attempt; `day`
+ * is the submitted Note's Journal Day once one has arrived.
+ */
+interface Practice {
+  attempt: number
+  open: boolean
+  day: string | null
+}
 
 /**
  * The window chrome around the flow: the strip the traffic lights sit in and

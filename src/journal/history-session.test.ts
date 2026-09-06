@@ -341,6 +341,63 @@ describe('narrowing the Filter by Project', () => {
   })
 })
 
+describe('revealing a practice Note', () => {
+  it('shows its day with no Project constraint, whatever narrowed before', async () => {
+    const { session } = await sessionOver([
+      { at: '2026-03-09T10:00:00', body: '#alpha Monday' },
+      { at: '2026-03-11T10:00:00', body: 'Wednesday practice' },
+    ])
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'alpha' })
+    await session.moveTo(rangeForJournalDay('2026-03-09'))
+
+    await session.reveal('2026-03-11')
+
+    expect(session.snapshot().filter).toEqual(anyProjectOn('2026-03-11'))
+    expect(bodiesOf(session.snapshot())).toEqual(['Wednesday practice'])
+  })
+
+  it('lets a day the reader picks mid-read win over the reveal', async () => {
+    const slow = gate()
+    const { session } = await sessionOver(
+      [
+        { at: '2026-03-09T10:00:00', body: 'Monday' },
+        { at: '2026-03-11T10:00:00', body: 'Wednesday practice' },
+        { at: '2026-03-13T10:00:00', body: 'Friday' },
+      ],
+      {
+        journal: (core) => ({
+          ...core,
+          async notesForFilter(filter) {
+            const notes = await core.notesForFilter(filter)
+            await slow.reached(filter.from)
+            return notes
+          },
+        }),
+      },
+    )
+
+    await session.open()
+    await session.narrowTo({ kind: 'named', name: 'alpha' })
+    slow.hold('2026-03-11')
+    slow.hold('2026-03-13')
+
+    // The reveal's single read is in flight when the reader picks Friday:
+    // the newer choice wins by the session's newest-read rule.
+    const revealing = session.reveal('2026-03-11')
+    const chosen = session.moveTo(rangeForJournalDay('2026-03-13'))
+    slow.release('2026-03-13')
+    await chosen
+    slow.release('2026-03-11')
+    await revealing
+
+    expect(session.snapshot().filter?.from).toBe('2026-03-13')
+    expect(session.snapshot().filter?.to).toBe('2026-03-13')
+    expect(bodiesOf(session.snapshot())).toEqual(['Friday'])
+  })
+})
+
 describe('a Note arriving while History is open', () => {
   it('shows a Note filed under a day in the Filter', async () => {
     const { session, capture } = await sessionOver([
