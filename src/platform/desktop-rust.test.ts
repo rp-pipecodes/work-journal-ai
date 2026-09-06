@@ -22,6 +22,7 @@ import {
   HISTORY_SECTION,
   MAIN_WINDOW,
   ONBOARDING_KEY,
+  PRACTICE_ENDED_EVENT,
   SECTION_REQUESTED_EVENT,
   STANDUP_POST_SECTION,
   SETTINGS_FILE,
@@ -86,6 +87,7 @@ const shared: Record<string, string> = {
   SETTINGS_FILE,
   THEME_KEY,
   ONBOARDING_KEY,
+  PRACTICE_ENDED_EVENT,
   DATABASE_URL,
 }
 
@@ -310,6 +312,7 @@ describe('the onboarding state and commands', () => {
       'onboarding_state',
       'dismiss_onboarding',
       'start_practice_capture',
+      'dismiss_practice_capture',
     ]) {
       expect(
         rustSource.match(new RegExp(`fn ${command}\\b`)),
@@ -328,6 +331,26 @@ describe('the onboarding state and commands', () => {
     // nothing.
     const tauriSource = read('src/platform/tauri-desktop.ts')
     expect(tauriSource).toContain("invoke('start_practice_capture'")
+  })
+
+  it('spells the practice outcome the same on both sides', () => {
+    // The Capture view reports how its practice showing ended, and the Main
+    // Window closes the attempt on it: a drift between the two is a practice
+    // that never lands, or one that lands as the wrong outcome.
+    const rustOutcomes = rustVariants(rustSource, 'PracticeEnded').map(kebab)
+    const tsOutcomes = tsUnionKinds(desktop, 'PracticeEnded')
+
+    expect(rustOutcomes).toEqual(['submitted', 'cancelled'])
+    expect(tsOutcomes).toEqual(rustOutcomes)
+  })
+
+  it('dismisses practice with the outcome the command receives', () => {
+    // The webview sends the outcome under the name the command receives it
+    // under; a rename on either side refuses the call before its body runs.
+    const tauriSource = read('src/platform/tauri-desktop.ts')
+    expect(tauriSource).toContain(
+      "invoke('dismiss_practice_capture', { ended })",
+    )
   })
 })
 

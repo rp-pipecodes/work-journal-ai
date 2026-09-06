@@ -98,9 +98,19 @@ const THEME_KEY: &str = "theme";
 
 /// Told to the capture window every time it is shown. It is long-lived, so it
 /// clears its field and takes focus on this rather than on being built — see
-/// docs/adr/0002-capture-window-is-hidden-never-closed.md. Must match
+/// docs/adr/0002-capture-window-is-hidden-never-closed.md. Carries whether
+/// the showing was raised for Onboarding practice, so the view can route its
+/// dismissal. Must match
 /// `CAPTURE_SHOWN_EVENT` in `src/platform/desktop.ts`, as `src/platform/desktop-rust.test.ts` checks.
 const CAPTURE_SHOWN_EVENT: &str = "capture://shown";
+
+/// A practice Capture ended, submitted or cancelled. Reported by the Capture
+/// view through its dismissal — or announced on its own when a showing raised
+/// for practice is displaced by an ordinary one — and heard by the Main Window
+/// holding the practice attempt, which closes it on this alone. Must match
+/// `PRACTICE_ENDED_EVENT` in `src/platform/desktop.ts`, as
+/// `src/platform/desktop-rust.test.ts` checks.
+const PRACTICE_ENDED_EVENT: &str = "practice://ended";
 
 /// Told to the Task Creation window every time it is shown, for the same
 /// reason: it is resident and hidden between uses rather than rebuilt — see
@@ -216,13 +226,6 @@ struct CompletedTaskAlert(Mutex<Vec<TaskAlertCompletion>>);
 #[derive(Default)]
 struct OpenedForOnboarding(std::sync::atomic::AtomicBool);
 
-/// Whether the Capture now on screen was raised for Onboarding practice.
-/// Taken rather than read: the next dismissal returns focus to the Main
-/// Window showing Onboarding, and an ordinary Capture after that still hands
-/// focus back to whatever it interrupted.
-#[derive(Default)]
-struct PracticeCaptureReturn(Mutex<bool>);
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -334,6 +337,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             dismiss_capture,
+            dismiss_practice_capture,
             start_practice_capture,
             start_task_creation,
             dismiss_task_creation,
@@ -415,12 +419,6 @@ pub fn run() {
             // Whoever is in front when a Capture begins, kept so that putting
             // the Capture away can hand focus back to them.
             app.manage(PreviousApplication::default());
-            // Whether the Capture now on screen was raised for Onboarding
-            // practice, kept so that putting it away can return focus to the
-            // Main Window showing Onboarding instead of to whoever was in
-            // front. Scoped to practice: an ordinary Capture still hands focus
-            // back as before.
-            app.manage(PracticeCaptureReturn::default());
             // Whether this launch opened the Main Window because automatic
             // Onboarding is due — set below, read when the user quits, so an
             // instance that exits before it could have shown the introduction
@@ -568,17 +566,27 @@ fn build_resident_window(
 /// place, and none can fail loudly enough to be worth more than a log: the user
 /// asked for a Capture, not for an error.
 fn start_capture(app: &tauri::AppHandle) {
-    show_resident_window(app, CAPTURE_WINDOW, CAPTURE_SHOWN_EVENT)
+    show_resident_window(app, CAPTURE_WINDOW, CAPTURE_SHOWN_EVENT, false)
 }
 
 /// What every Task Entry Point does — the Task Hotkey, New Task in the Tray
 /// Menu, and the New Task control in Tasks View all arrive here.
 fn start_task_creation_window(app: &tauri::AppHandle) {
-    show_resident_window(app, TASK_CREATION_WINDOW, TASK_CREATION_SHOWN_EVENT)
+    show_resident_window(
+        app,
+        TASK_CREATION_WINDOW,
+        TASK_CREATION_SHOWN_EVENT,
+        false,
+    )
 }
 
-fn show_resident_window(app: &tauri::AppHandle, label: &str, shown_event: &str) {
-    if let Err(error) = raise_resident_window(app, label, shown_event) {
+fn show_resident_window(
+    app: &tauri::AppHandle,
+    label: &str,
+    shown_event: &str,
+    practice: bool,
+) {
+    if let Err(error) = raise_resident_window(app, label, shown_event, practice) {
         log::error!("could not show the {label} window: {error}");
     }
 }
@@ -596,6 +604,7 @@ fn raise_resident_window(
     app: &tauri::AppHandle,
     label: &str,
     shown_event: &str,
+    practice: bool,
 ) -> tauri::Result<()> {
     let Some(window) = app.get_webview_window(label) else {
         log::error!("the {label} window is missing");
@@ -620,9 +629,20 @@ fn raise_resident_window(
 
     window.show()?;
     window.set_focus()?;
-    window.emit(shown_event, ())?;
+    window.emit(shown_event, CaptureShown { practice })?;
 
     Ok(())
+}
+
+/// What a resident window is told every time it is shown: whether this
+/// showing was raised for Onboarding practice. The Capture view routes its
+/// dismissal on it — a practice ending returns focus to the Main Window and
+/// reports its outcome, an ordinary one hands focus back as before — so the
+/// return destination is carried by the showing itself rather than by any
+/// flag that could outlive it. The Task Creation view ignores the payload.
+#[derive(Clone, serde::Serialize)]
+struct CaptureShown {
+    practice: bool,
 }
 
 /// The resident window that is not this one. There are exactly two.
@@ -1988,31 +2008,46 @@ async fn journal_transaction(
 
 /// Ends a Capture, whether it committed a Note or discarded one. The window is
 /// only ever hidden — see docs/adr/0002-capture-window-is-hidden-never-closed.md.
-///
-/// A Capture raised for Onboarding practice returns focus to the Main Window
-/// showing Onboarding instead of to whoever was in front: the return
-/// destination was scoped to practice when it began, so an ordinary Capture
-/// still hands focus back as before.
 #[tauri::command]
 fn dismiss_capture(app: tauri::AppHandle) -> Result<(), String> {
-    if take_practice_return(&app) {
-        hide_capture_for_practice(&app).map_err(|error| error.to_string())
-    } else {
-        hide_resident_window(&app, CAPTURE_WINDOW).map_err(|error| error.to_string())
+    hide_resident_window(&app, CAPTURE_WINDOW).map_err(|error| error.to_string())
+}
+
+/// Ends a Capture raised for Onboarding practice, whether it committed a Note
+/// or discarded one. Hidden rather than closed, like any Capture — but focus
+/// returns to the Main Window showing Onboarding instead of to whoever was in
+/// front, and the outcome is reported for the Main Window holding the practice
+/// attempt. Which dismiss command the Capture view calls is what scopes the
+/// return destination to practice: there is no flag to go stale, so a Capture
+/// put away for something else and dismissed later still hands focus back as
+/// before.
+#[tauri::command]
+fn dismiss_practice_capture(app: tauri::AppHandle, ended: PracticeEnded) -> Result<(), String> {
+    hide_capture_for_practice(&app).map_err(|error| error.to_string())?;
+    if let Err(error) = app.emit(PRACTICE_ENDED_EVENT, ended) {
+        log::warn!("could not report the practice outcome: {error}");
     }
+    Ok(())
+}
+
+/// How a practice Capture ended: submitted with the Note's Journal Day, or
+/// cancelled with nothing created. Must match `PracticeEnded` in
+/// `src/platform/desktop.ts`, as `src/platform/desktop-rust.test.ts` checks.
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", tag = "outcome")]
+pub enum PracticeEnded {
+    Submitted { journal_day: String },
+    Cancelled,
 }
 
 /// Raises the real resident Capture window for optional Onboarding practice.
 /// The Note it commits is an ordinary Captured Note; cancelling creates
-/// nothing. Saving and cancelling return focus to the Main Window showing
-/// Onboarding — the return destination scoped here, so ordinary Capture
-/// behavior elsewhere is unchanged.
+/// nothing. The showing carries that it is practice, so the Capture view can
+/// route its dismissal back to the Main Window — ordinary Capture behavior
+/// elsewhere is unchanged.
 #[tauri::command]
 fn start_practice_capture(app: tauri::AppHandle) {
-    if let Ok(mut returning) = app.state::<PracticeCaptureReturn>().0.lock() {
-        *returning = true;
-    }
-    start_capture(&app);
+    show_resident_window(&app, CAPTURE_WINDOW, CAPTURE_SHOWN_EVENT, true);
 }
 
 /// A Task Entry Point reached from a webview — the New Task control in Tasks
@@ -2044,17 +2079,6 @@ fn hide_resident_window(app: &tauri::AppHandle, label: &str) -> tauri::Result<()
     hand_focus_back(app);
 
     Ok(())
-}
-
-/// Takes the scoped practice return, if one is waiting. The next dismissal
-/// after practice began is the one it belongs to, however that dismissal was
-/// reached — an explicit submission or a cancellation.
-fn take_practice_return(app: &tauri::AppHandle) -> bool {
-    app.state::<PracticeCaptureReturn>()
-        .0
-        .lock()
-        .map(|mut returning| std::mem::replace(&mut *returning, false))
-        .unwrap_or(false)
 }
 
 /// Puts the practice Capture away and returns focus to the Main Window

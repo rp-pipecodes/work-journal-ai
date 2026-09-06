@@ -36,6 +36,7 @@ import {
   IMPORT_CHANGED_EVENT,
   JOURNAL_CHANGED_EVENT,
   NOTE_CAPTURED_EVENT,
+  PRACTICE_ENDED_EVENT,
   SETTINGS_FILE,
   SECTION_REQUESTED_EVENT,
   SYSTEM_WOKE_EVENT,
@@ -55,6 +56,7 @@ import {
   type ExportedFile,
   type MainSection,
   type OnboardingState,
+  type PracticeEnded,
   type StandupPostRequest,
   type StandupPostResponse,
   type TaskAlertCompletion,
@@ -155,6 +157,13 @@ export function createTauriDesktop(): Desktop {
 
     dismissCapture: () => invoke('dismiss_capture'),
     beginPracticeCapture: () => invoke('start_practice_capture'),
+    dismissPracticeCapture: (ended) =>
+      invoke('dismiss_practice_capture', { ended }),
+    announcePracticeEnded: (ended) => emit(PRACTICE_ENDED_EVENT, ended),
+    onPracticeEnded: (handle) =>
+      listen<PracticeEnded>(PRACTICE_ENDED_EVENT, ({ payload }) =>
+        handle(payload),
+      ),
 
     // Built at the resting size in Rust; the height is worked out in one place
     // so the window and the panel drawn inside it cannot disagree.
@@ -163,7 +172,10 @@ export function createTauriDesktop(): Desktop {
         new LogicalSize(CAPTURE_WIDTH, captureWindowHeight(fit)),
       ),
 
-    onCaptureShown: (handle) => listen(CAPTURE_SHOWN_EVENT, () => handle()),
+    onCaptureShown: (handle) =>
+      listen<{ practice: boolean }>(CAPTURE_SHOWN_EVENT, ({ payload }) =>
+        handle(payload.practice),
+      ),
 
     beginTaskCreation: () => invoke('start_task_creation'),
     dismissTaskCreation: () => invoke('dismiss_task_creation'),

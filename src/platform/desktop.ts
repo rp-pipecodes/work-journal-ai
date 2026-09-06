@@ -257,6 +257,27 @@ export const NOTE_CAPTURED_EVENT = 'note://captured'
 export const THEME_CHANGED_EVENT = 'settings://theme'
 
 /**
+ * A practice Capture ended, submitted or cancelled. Reported by the Capture
+ * window through its dismissal — or announced on its own when a showing
+ * raised for practice is displaced by an ordinary one — and heard by the Main
+ * Window holding the practice attempt, which closes it on this alone. Must
+ * match `PRACTICE_ENDED_EVENT` in `src-tauri/src/lib.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
+ */
+export const PRACTICE_ENDED_EVENT = 'practice://ended'
+
+/**
+ * How a practice Capture ended: submitted with the Note's Journal Day, or
+ * cancelled with nothing created. One event closes one attempt, so there is
+ * no race between a submission and the focus that follows it. Must match
+ * `PracticeEnded` in `src-tauri/src/lib.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
+ */
+export type PracticeEnded =
+  | { outcome: 'submitted'; journalDay: string }
+  | { outcome: 'cancelled' }
+
+/**
  * Import was turned on or off, or the ticked calendars changed. Spoken by
  * Settings and heard by the window that sweeps, which is a different one: a
  * change the user just made should show up in the journal now rather than at
@@ -507,17 +528,32 @@ export interface Desktop {
 
   /**
    * Ends a Capture. Hiding the window is the Rust side's job: it also has to
-   * hand focus back to the application the Capture interrupted — unless the
-   * Capture was practice, which returns to the Main Window instead; see
-   * `beginPracticeCapture`.
+   * hand focus back to the application the Capture interrupted.
    */
   dismissCapture(): Promise<void>
   /**
+   * Ends a Capture raised for Onboarding practice, submitted or abandoned.
+   * Hiding the window is the Rust side's job, as with an ordinary Capture —
+   * except focus returns to the Main Window showing Onboarding, and the
+   * outcome is reported for the Main Window holding the practice attempt.
+   * Which dismiss command the Capture view calls is what scopes the return
+   * to practice, so ordinary Capture behavior elsewhere is unchanged.
+   */
+  dismissPracticeCapture(ended: PracticeEnded): Promise<void>
+  /**
+   * Says how a practice Capture ended without putting it away: what a showing
+   * raised for practice reports when an ordinary showing displaces it. Heard
+   * by the Main Window holding the practice attempt, like the dismissal's own
+   * report.
+   */
+  announcePracticeEnded(ended: PracticeEnded): Promise<void>
+  /** A practice Capture ended, submitted or cancelled. */
+  onPracticeEnded(handle: (ended: PracticeEnded) => void): Promise<Unlisten>
+  /**
    * Raises the real resident Capture window for optional Onboarding practice.
    * The Note it commits is an ordinary Captured Note; cancelling creates
-   * nothing. Saving and cancelling return focus to the Main Window showing
-   * Onboarding, while an ordinary Capture still hands focus back to whatever
-   * it interrupted — the return destination is scoped to this call.
+   * nothing. The showing carries that it is practice, so the Capture view can
+   * route its dismissal and report its outcome.
    */
   beginPracticeCapture(): Promise<void>
   /**
@@ -526,8 +562,12 @@ export interface Desktop {
    * `build_capture_window` on the Rust side.
    */
   fitCapture(fit: CaptureFit): Promise<void>
-  /** A Capture is beginning: the window has just been shown. */
-  onCaptureShown(handle: () => void): Promise<Unlisten>
+  /**
+   * A Capture is beginning: the window has just been shown, and whether this
+   * showing was raised for Onboarding practice. The Capture view routes its
+   * dismissal and its outcome report on it.
+   */
+  onCaptureShown(handle: (practice: boolean) => void): Promise<Unlisten>
 
   /**
    * Every Task Entry Point — the Task Hotkey, New Task in the Tray Menu, and

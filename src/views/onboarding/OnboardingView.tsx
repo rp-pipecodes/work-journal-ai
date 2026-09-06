@@ -42,10 +42,11 @@ export default function OnboardingView({
   const [step, setStep] = useState<Step>('introduction')
   const [hotkeys, setHotkeys] = useState<HotkeyStatuses | null>(null)
   // The practice attempt, as one fact with one owner. Each Try it replaces it
-  // wholesale: a new attempt id, open, and no Note recorded yet. A submission
-  // announced while open records its day and closes the attempt; regaining
-  // focus with nothing announced cancels it. Practice is optional, and
-  // nothing about continuing requires a Note.
+  // wholesale: a new attempt id, open, and no Note recorded yet. The attempt
+  // closes on the Capture window's explicit outcome alone — submitted with
+  // the Note's day, or cancelled with nothing created — never on focus
+  // arriving, so a submission and the focus that follows it cannot race.
+  // Practice is optional, and nothing about continuing requires a Note.
   const [practice, setPractice] = useState<Practice>({
     attempt: 0,
     open: false,
@@ -66,40 +67,17 @@ export default function OnboardingView({
   }, [desktop])
 
   useEffect(() => {
-    // An explicit submission is an ordinary Captured Note, announced the way
-    // any Capture announces one. Heard only while its own attempt is open, so
-    // a Capture from anywhere else — before the first Try it, after a
-    // cancellation, after a save — never stands in for practice.
-    const subscription = desktop.onNoteCaptured((journalDay) => {
+    // How the practice attempt ended, as the Capture window reports it. Heard
+    // only while its own attempt is open, so a Capture from anywhere else —
+    // before the first Try it, after a cancellation, after a save — never
+    // stands in for practice.
+    const subscription = desktop.onPracticeEnded((ended) => {
       const current = practiceRef.current
       if (!current.open) return
       setPracticeState({
         attempt: current.attempt,
         open: false,
-        day: journalDay,
-      })
-    })
-
-    return () => {
-      void subscription.then((stop) => stop())
-    }
-  }, [desktop])
-
-  useEffect(() => {
-    // Cancellation has no announcement of its own: the Rust side returns
-    // focus to this window, so regaining it while an attempt is open is the
-    // cancellation — unless a submission announced just before it lands first.
-    // The Rust side announces the Note before putting the window away, so the
-    // two can arrive in either order; deferring the cancellation past the
-    // current tick lets an in-flight submission win over its own focus.
-    const subscription = desktop.onWindowFocused(() => {
-      const current = practiceRef.current
-      if (!current.open) return
-      const attempt = current.attempt
-      queueMicrotask(() => {
-        const latest = practiceRef.current
-        if (latest.attempt !== attempt || !latest.open) return
-        setPracticeState({ attempt, open: false, day: null })
+        day: ended.outcome === 'submitted' ? ended.journalDay : null,
       })
     })
 
@@ -111,7 +89,14 @@ export default function OnboardingView({
   /** Opens the real Capture window without leaving the flow. */
   function tryPractice() {
     const current = practiceRef.current
-    if (current.open) return
+    if (current.open) {
+      // The attempt is already open but its window was put away for something
+      // else: raise it again under the same attempt rather than starting over.
+      void desktop.beginPracticeCapture().catch((error: unknown) => {
+        console.error('could not open Capture for practice', error)
+      })
+      return
+    }
     const previous = current
     const next: Practice = {
       attempt: current.attempt + 1,
