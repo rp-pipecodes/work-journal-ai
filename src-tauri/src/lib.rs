@@ -453,6 +453,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0006_task_recurrence.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 7,
+            description: "task occurrences one kept per slot",
+            sql: include_str!("../migrations/0007_task_occurrences_one_kept_per_slot.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
