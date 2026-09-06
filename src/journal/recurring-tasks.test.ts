@@ -1269,6 +1269,9 @@ describe('the schema keeps one occurrence per slot', () => {
    */
   async function journalAtVersion6() {
     const database = new DatabaseSync(':memory:')
+    // Production is sqlx, which enables foreign keys by default. The harness
+    // must match, or these tests run against a laxer database than ships.
+    database.exec('PRAGMA foreign_keys = ON')
     const migrations = migrationSql().slice(0, 6)
     for (const sql of migrations) database.exec(sql)
 

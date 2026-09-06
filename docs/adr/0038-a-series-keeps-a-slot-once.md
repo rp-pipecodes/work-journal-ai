@@ -45,9 +45,8 @@ Re-pointed rather than cleared, because the earliest completion on file is
 still the latest completion of the series: undoing it restores the slot it
 stands for. A pointer naming a slot that holds no completion finds no keeper
 and is cleared. The re-pointing runs before the removal, because the
-self-reference is
-immediate: taking a stray away first would refuse the very delete that makes
-room for the index.
+self-reference is immediate: taking a stray away first would refuse the very
+delete that makes room for the index.
 
 ## The index is partial: kept occurrences only
 

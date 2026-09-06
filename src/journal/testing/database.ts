@@ -19,6 +19,10 @@ export async function openTestDatabase(): Promise<{
 }> {
   const database = new DatabaseSync(':memory:')
 
+  // Production is sqlx, which enables foreign keys by default. The harness
+  // must match, or the suite tests a laxer database than the one that ships.
+  database.exec('PRAGMA foreign_keys = ON')
+
   for (const sql of migrationSql()) {
     database.exec(sql)
   }
