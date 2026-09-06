@@ -106,9 +106,9 @@ export const DEFAULT_SETTINGS: Settings = {
 }
 
 /**
- * The store keys. The Hotkey's own key is written from Rust, and start at login
- * is imported rather than declared here because the Rust side reads that one —
- * every name shared with it lives in `src/platform/desktop.ts`.
+ * The store keys. The Hotkey's own key is written from Rust; start at login
+ * and the Onboarding marker used to be shared with it too, and the names that
+ * were once shared live in `src/platform/desktop.ts`.
  */
 const IMPORT_MEETINGS_KEY = 'importMeetings'
 const IMPORT_CALENDARS_KEY = 'importCalendars'
@@ -226,15 +226,4 @@ export async function writeStartAtLogin(
   startAtLogin: boolean,
 ): Promise<void> {
   await store.set(START_AT_LOGIN_KEY, startAtLogin)
-}
-
-/**
- * Whether start at login has ever been asked about. The question is offered
- * once, on first run, and a "no" has to count — otherwise the app would ask
- * again every launch until it got the answer it wanted.
- */
-export function hasAnsweredStartAtLogin(
-  store: SettingsStore,
-): Promise<boolean> {
-  return store.has(START_AT_LOGIN_KEY)
 }

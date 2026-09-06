@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_SETTINGS,
   DEFAULT_STANDUP_PROMPT,
-  hasAnsweredStartAtLogin,
   OPENAI_BASE_URL,
   readSettings,
   writeImportCalendars,
@@ -148,25 +147,4 @@ describe('the Standup Prompt', () => {
   })
 })
 
-describe('hasAnsweredStartAtLogin', () => {
-  it('is unanswered until the question has been answered', async () => {
-    const store = emptyStore()
 
-    expect(await hasAnsweredStartAtLogin(store)).toBe(false)
-  })
-
-  it('counts declining as an answer, so the question is asked once', async () => {
-    const store = emptyStore()
-    await writeStartAtLogin(store, false)
-
-    expect(await hasAnsweredStartAtLogin(store)).toBe(true)
-    expect((await readSettings(store)).startAtLogin).toBe(false)
-  })
-
-  it('counts accepting as an answer too', async () => {
-    const store = emptyStore()
-    await writeStartAtLogin(store, true)
-
-    expect(await hasAnsweredStartAtLogin(store)).toBe(true)
-  })
-})

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_STANDUP_PROMPT } from './settings'
+import { START_AT_LOGIN_KEY } from '../platform/desktop'
 import { fakeDesktop } from '../platform/testing/desktop'
+import { DEFAULT_STANDUP_PROMPT } from './settings'
 import { createAppSettings } from './app-settings'
 
 // The settings as a running window has them: the core's rules over the
@@ -54,15 +55,14 @@ describe('start at login', () => {
     expect((await settings.load()).startAtLogin).toBe(true)
   })
 
-  it('counts a decline as an answer, so the question is not asked again', async () => {
+  it('removes the login item when switched off, and records it', async () => {
     const desktop = fakeDesktop()
     const settings = createAppSettings(desktop)
-    expect(await settings.hasBeenAskedAboutStartAtLogin()).toBe(false)
 
     await settings.saveStartAtLogin(false)
 
     expect(desktop.loginItem).toBe(false)
-    expect(await settings.hasBeenAskedAboutStartAtLogin()).toBe(true)
+    expect((await settings.load()).startAtLogin).toBe(false)
   })
 
   it('records nothing the OS refused to do', async () => {
@@ -71,7 +71,56 @@ describe('start at login', () => {
     const settings = createAppSettings(desktop)
 
     await expect(settings.saveStartAtLogin(true)).rejects.toThrow()
-    expect(await settings.hasBeenAskedAboutStartAtLogin()).toBe(false)
+    expect((await settings.load()).startAtLogin).toBe(false)
+  })
+
+  it('does not announce an older save once a newer one has landed', async () => {
+    // Save A turns the login item on and starts writing the file; save B
+    // turns it off while that write is still held, and B's write lands
+    // first — the OS and the file both hold off. When A's write finally
+    // settles it must not announce the on it was asked for: B superseded it,
+    // and a control hearing A would read on while the OS and the file held
+    // off. The newer save speaks for the answer that came to hold.
+    const stored: Record<string, unknown> = { startAtLogin: false }
+    let release = () => {}
+    const firstWriteHeld = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let writes = 0
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          stored[key] = value
+          if (key === START_AT_LOGIN_KEY && ++writes === 1) {
+            await firstWriteHeld
+          }
+        },
+      }),
+    })
+    const settings = createAppSettings(desktop)
+    const heard: boolean[] = []
+    settings.onStartAtLoginChanged((next) => heard.push(next))
+
+    const older = settings.saveStartAtLogin(true)
+    await expect.poll(() => writes).toBe(1)
+    await settings.saveStartAtLogin(false)
+
+    expect(desktop.loginItem).toBe(false)
+    expect(stored.startAtLogin).toBe(false)
+    expect(heard).toEqual([false])
+
+    release()
+    await older
+
+    // The older save settled after the newer one: its on stays unannounced.
+    expect(heard).toEqual([false])
   })
 })
 

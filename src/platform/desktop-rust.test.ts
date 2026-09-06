@@ -21,11 +21,11 @@ import {
   DATABASE_URL,
   HISTORY_SECTION,
   MAIN_WINDOW,
+  ONBOARDING_KEY,
   SECTION_REQUESTED_EVENT,
   STANDUP_POST_SECTION,
   SETTINGS_FILE,
   SETTINGS_SECTION,
-  START_AT_LOGIN_KEY,
   SYSTEM_WOKE_EVENT,
   TASK_ALERT_COMPLETED_EVENT,
   TASK_ALERT_OPENED_EVENT,
@@ -85,7 +85,7 @@ const shared: Record<string, string> = {
   TASK_ALERT_OPENED_EVENT,
   SETTINGS_FILE,
   THEME_KEY,
-  START_AT_LOGIN_KEY,
+  ONBOARDING_KEY,
   DATABASE_URL,
 }
 
@@ -120,6 +120,11 @@ const typeScriptOnly = new Set([
   'JOURNAL_CHANGED_EVENT',
   'TASKS_CHANGED_EVENT',
   'TASK_ALERTS_RECONCILED_EVENT',
+  // The start-at-login answer is this side's own now: it is stored in the
+  // settings file, but no startup decision reads it any more — the first-run
+  // question it answered was replaced by the Onboarding flow, whose state the
+  // Rust side keeps under ONBOARDING_KEY instead.
+  'START_AT_LOGIN_KEY',
 ])
 
 /** `const NAME: &str = "value";`, which is how every shared name is declared. */
@@ -269,6 +274,47 @@ describe('the names shared with the Rust side', () => {
     expect(claims.length).toBeGreaterThan(0)
     for (const { comment } of claims) {
       expect(comment, comment).toContain(TEST_FILE)
+    }
+  })
+})
+
+/**
+ * The Onboarding marker's two states and its commands, checked the way the
+ * shared strings are: a state name that drifts between the Rust side's writer
+ * and the frontend's reader is silent — a first launch would still be
+ * classified, but the introduction would never present itself — and a command
+ * the webview calls by a name the handler does not register answers nothing.
+ */
+describe('the onboarding state and commands', () => {
+  const onboardingSource = read('src-tauri/src/onboarding.rs')
+
+  it('spells the two states the same on both sides', () => {
+    const rustStates = [
+      ...onboardingSource.matchAll(/^pub const ([A-Z_]+): &str = "([^"]*)";/gm),
+    ].map(([, , value]) => value)
+
+    expect(rustStates).toEqual(['unfinished', 'suppressed'])
+    expect(tsUnionKinds(desktop, 'OnboardingState')).toEqual(rustStates)
+  })
+
+  it('registers the commands the desktop surface names', () => {
+    // The webview calls these by name; a rename on either side is a Main
+    // Window that never presents or never dismisses Onboarding. Each must be
+    // both declared as a command and listed in the invoke handler.
+    const handler = rustSource.match(
+      /invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\)/,
+    )?.[1]
+    expect(handler, 'the invoke handler could not be read').toBeTruthy()
+
+    for (const command of ['onboarding_state', 'dismiss_onboarding']) {
+      expect(
+        rustSource.match(new RegExp(`fn ${command}\\b`)),
+        `${command} is not a command in ${RUST_FILE}`,
+      ).toBeTruthy()
+      expect(
+        handler,
+        `${command} is not registered in the invoke handler`,
+      ).toContain(command)
     }
   })
 })

@@ -25,8 +25,7 @@ import type { SettingsInitialState } from './SettingsInitialState'
  * The third element is the ref that remembers whether this value has been
  * touched since the snapshot. It is per value, not per group: each seeded
  * state guards itself, and a press on one never silences another's seed.
- * What it exists for is the parts of the read that are not seeds — the
- * calendars a granted Import reads, say, or the first-run question: a group
+ * What it exists for is the parts of the read that are not seeds — a group
  * reads the ref in its own effect to silence those parts of the arriving
  * read too.
  */
