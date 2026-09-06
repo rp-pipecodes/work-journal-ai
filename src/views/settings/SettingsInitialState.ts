@@ -11,7 +11,6 @@ import type { Settings } from '@/settings/settings'
 export interface SettingsInitialState {
   hotkeys: HotkeyStatuses
   startAtLogin: boolean
-  startAtLoginAnswered: boolean
   stored: Settings
   calendarAccess: CalendarAccess
   taskAlertPermission: TaskAlertPermission
@@ -19,19 +18,18 @@ export interface SettingsInitialState {
 
 /**
  * Keep the window's initial answers on the same boundary they had before the
- * settings were split. In particular, the first-run question must not appear
- * while another setting is still being read.
+ * settings were split: one snapshot every group seeds from, so a group never
+ * reads the file while another is still writing its own first answer.
  */
 export async function loadSettingsInitialState(
   desktop: Desktop,
   settings: AppSettings,
 ): Promise<SettingsInitialState | null> {
   try {
-    const [hotkeys, startAtLogin, startAtLoginAnswered, stored, calendarAccess, taskAlertPermission] =
+    const [hotkeys, startAtLogin, stored, calendarAccess, taskAlertPermission] =
       await Promise.all([
         desktop.hotkeyStatus(),
         desktop.startsAtLogin(),
-        settings.hasBeenAskedAboutStartAtLogin(),
         settings.load(),
         desktop.calendarAccess(),
         desktop.taskAlertPermission(),
@@ -40,7 +38,6 @@ export async function loadSettingsInitialState(
     return {
       hotkeys,
       startAtLogin,
-      startAtLoginAnswered,
       stored,
       calendarAccess,
       taskAlertPermission,

@@ -72,13 +72,34 @@ export const SETTINGS_FILE = 'settings.json'
 export const THEME_KEY = 'theme'
 
 /**
- * Whether the app starts at login. The one settings key declared here rather
- * than in `src/settings/settings.ts` with the rest: the Rust side reads it too,
- * to decide whether this is a first run and the question is worth asking. Must
- * match `START_AT_LOGIN_KEY` in `src-tauri/src/lib.rs`, as
- * `src/platform/desktop-rust.test.ts` checks.
+ * Whether the app starts at login. Declared here rather than in
+ * `src/settings/settings.ts` with the rest because it used to be shared with
+ * the Rust side — it answered the standalone first-run question — and a name
+ * that stops being shared is safest left where it was. Nothing on the Rust
+ * side reads it any more: the question it answered was replaced by the
+ * Onboarding flow, whose state the Rust side keeps under `ONBOARDING_KEY`.
  */
 export const START_AT_LOGIN_KEY = 'startAtLogin'
+
+/**
+ * Where automatic Onboarding stands. Written by the Rust side at startup —
+ * before the journal or the default settings exist, so a genuinely fresh
+ * installation is classified while it still has nothing on disk — and read by
+ * the Main Window as it opens. Must match `ONBOARDING_KEY` in
+ * `src-tauri/src/lib.rs`, as `src/platform/desktop-rust.test.ts` checks.
+ */
+export const ONBOARDING_KEY = 'onboarding'
+
+/**
+ * The durable Onboarding state, as the Rust side keeps it: whether automatic
+ * presentation is still due (`unfinished`) or will not be offered again on its
+ * own (`suppressed`). The two names must match `UNFINISHED` and `SUPPRESSED`
+ * in `src-tauri/src/onboarding.rs`, as
+ * `src/platform/desktop-rust.test.ts` checks.
+ */
+export type OnboardingState =
+  | 'unfinished'
+  | 'suppressed'
 
 /**
  * Where a window is told its Resolved Theme, before its document is parsed and
@@ -440,6 +461,19 @@ export interface Desktop {
   windowLabel(): string
   /** The configured app version and whether this bundle is a development build. */
   appIdentity(): Promise<AppIdentity>
+  /**
+   * Where automatic Onboarding stands. Asked by the Main Window as it opens,
+   * so it can present the introduction on its own when the installation is
+   * still due — and never when it has been dismissed.
+   */
+  onboardingState(): Promise<OnboardingState>
+  /**
+   * Records that automatic Onboarding will not be offered again on its own:
+   * what Finish, Skip onboarding, Close, explicit Quit and navigation away
+   * all settle on. Replaying the introduction from Settings never calls this,
+   * so a dismissed installation stays dismissed.
+   */
+  dismissOnboarding(): Promise<void>
   /** Closes the window the caller is in. */
   closeWindow(): Promise<void>
   /** The window lost focus — for a Capture, a discard. */

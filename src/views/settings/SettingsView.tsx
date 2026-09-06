@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Toaster } from '@/components/ui/sonner'
+import {
+  SettingsGroup,
+  SettingsRow,
+} from './SettingsGroup'
 import WindowTitleBar from '@/components/WindowTitleBar'
 import type { Journal } from '@/journal/journal'
 import type { AppIdentity, Desktop } from '@/platform/desktop'
@@ -41,10 +46,17 @@ export default function SettingsView({
   desktop,
   settings,
   journal,
+  onReplayOnboarding = () => {},
 }: {
   desktop: Desktop
   settings: AppSettings
   journal: Promise<Journal>
+  /**
+   * The Main Window's way of showing the Onboarding flow again, in place of
+   * the sections. Replaying starts at the introduction, reflects current
+   * settings, and never re-enables automatic presentation.
+   */
+  onReplayOnboarding?: () => void
 }) {
   const [appIdentity, setAppIdentity] = useState<AppIdentity | null>(null)
   const page = useRef<HTMLDivElement>(null)
@@ -71,8 +83,8 @@ export default function SettingsView({
   }, [desktop, settings])
 
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>) {
-    // HotkeyRecorder and the first-run question stop Escape before it reaches
-    // this shell while they own the keystroke.
+    // HotkeyRecorder stops Escape before it reaches this shell while it owns
+    // the keystroke.
     if (event.key === 'Escape') {
       void desktop.closeWindow()
     }
@@ -148,6 +160,22 @@ export default function SettingsView({
         {/* Last, beside the version in the footer: both are about the build
             rather than about the journal it holds. */}
         <UpdateSettings desktop={desktop} />
+        <Separator />
+
+        {/* The introduction itself, offered again. An action rather than a
+            setting: it changes nothing that is saved, so it sits with the
+            window's other actions rather than with a group that reads or
+            writes a value. */}
+        <SettingsGroup>
+          <SettingsRow
+            label="Onboarding"
+            explanation="See the introduction and the optional setup again, with your current Hotkeys and settings."
+          >
+            <Button variant="outline" onClick={onReplayOnboarding}>
+              Replay introduction
+            </Button>
+          </SettingsRow>
+        </SettingsGroup>
 
         {appIdentity !== null && (
           <>

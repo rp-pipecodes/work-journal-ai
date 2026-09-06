@@ -152,14 +152,15 @@ describe('the section the Main Window opens on', () => {
     await showsHistory()
   })
 
-  it('does not show Settings’ first-run question while History is selected', async () => {
-    await showMainWindow({ captured: [MONDAY], stored: {} })
+  it('presents the introduction instead when the window opens on its own', async () => {
+    // A fresh installation — no Entry Point named a section — is offered the
+    // introduction automatically rather than shown a section it has never
+    // seen explained.
+    await showMainWindow({ captured: [MONDAY], onboarding: 'unfinished' })
 
-    // Wait for Settings' asynchronous initial read to finish. Its footer is
-    // hidden while History is selected, but it is still the real SettingsView
-    // mounted by this integration seam.
-    await screen.findByText('test')
-    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(
+      await screen.findByRole('heading', { name: 'Welcome to Work Journal' }),
+    ).toBeTruthy()
   })
 })
 
@@ -639,49 +640,242 @@ describe('a section that is not showing', () => {
   })
 })
 
-describe('the first-run question', () => {
-  it('is off the screen while another section is showing, and back on returning', async () => {
+describe('automatic Onboarding', () => {
+  it('introduces the app over the sections, with the current Hotkeys', async () => {
+    await showMainWindow({ captured: [MONDAY], onboarding: 'unfinished' })
+
+    // The introduction is what is on screen: it names the app and explains
+    // the Note and Task Entry Points with the combinations that actually
+    // apply.
+    expect(
+      await screen.findByRole('heading', { name: 'Welcome to Work Journal' }),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('group', { name: 'Current Note Hotkey' }),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('group', { name: 'Current Task Hotkey' }),
+    ).toBeTruthy()
+    // Every section is off the accessibility tree while the flow is up.
+    expect(allSectionsHidden()).toBe(true)
+  })
+
+  it('keeps the flow on Back, without dismissing anything', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Continue' }),
+    )
+    await screen.findByRole('heading', { name: 'Start Work Journal at login?' })
+
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+
+    // Back is a step of the walk, not a departure: the introduction returns
+    // and the flow is still due.
+    expect(
+      screen.getByRole('heading', { name: 'Welcome to Work Journal' }),
+    ).toBeTruthy()
+    expect(desktop.onboarding).toBe('unfinished')
+  })
+
+  it('records Skip onboarding as the dismissal', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Skip onboarding' }),
+    )
+
+    await showsHistory()
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+  })
+
+  it('records Open History — Finish — as the dismissal, and lands in History', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Continue' }),
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Open History' }),
+    )
+
+    await showsHistory()
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+  })
+
+  it('records choosing a section from the sidebar as the dismissal', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+    await screen.findByRole('heading', { name: 'Welcome to Work Journal' })
+
+    await user.click(within(sidebar()).getByRole('button', { name: 'Tasks' }))
+
+    await showsTasks()
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+  })
+
+  it('records an Entry Point naming a section as the dismissal', async () => {
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+    await screen.findByRole('heading', { name: 'Welcome to Work Journal' })
+
+    // The Tray Menu's "View Tasks", reaching the window while the
+    // introduction is up: navigating away is leaving the flow.
+    desktop.requestSection('tasks')
+
+    await showsTasks()
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+  })
+
+  it('records closing the window as the dismissal', async () => {
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+    await screen.findByRole('heading', { name: 'Welcome to Work Journal' })
+
+    desktop.requestClose()
+
+    // The write lands before the window can be gone: the next launch opens
+    // normally rather than offering the introduction again.
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+  })
+
+  it('records Escape — which closes the window — as the dismissal too', async () => {
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+    await screen.findByRole('heading', { name: 'Welcome to Work Journal' })
+
+    await userEvent.setup().keyboard('{Escape}')
+
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+    await expect.poll(() => desktop.windowsClosed).toBe(1)
+  })
+
+  it('saves a Start at Login choice made during the flow', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Continue' }),
+    )
+    await user.click(
+      await screen.findByRole('switch', { name: 'Start at login' }),
+    )
+
+    // The same operating-system behaviour the Settings switch drives, saved
+    // the moment it is made.
+    await expect.poll(() => desktop.loginItem).toBe(true)
+    await expect.poll(() => desktop.stored.startAtLogin).toBe(true)
+  })
+
+  it('reports a refused Start at Login choice, with retry and continuation', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+    desktop.setStartAtLogin = () => Promise.reject(new Error('macOS refused'))
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Continue' }),
+    )
+    await user.click(
+      await screen.findByRole('switch', { name: 'Start at login' }),
+    )
+
+    // The refusal is said plainly, the retry stays available, and the way on
+    // is never blocked by it.
+    expect(
+      await screen.findByText(
+        'Could not change whether Work Journal starts at login.',
+      ),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('button', {
+        name: 'Try saving the Start at Login choice again',
+      }),
+    ).toBeTruthy()
+    expect(desktop.loginItem).toBe(false)
+
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+
+    await showsHistory()
+    // Nothing was saved on the user's behalf.
+    expect(desktop.loginItem).toBe(false)
+  })
+})
+
+describe('replaying Onboarding from Settings', () => {
+  it('opens the flow with the current saved Start at Login choice', async () => {
     const user = userEvent.setup()
     const { desktop } = await showMainWindow({
       captured: [MONDAY],
       section: 'settings',
-      stored: {},
+      stored: { startAtLogin: true },
     })
-    expect(await screen.findByRole('alertdialog')).toBeTruthy()
-
-    // The Tray Menu's "View Notes", which reaches the window whatever is on
-    // screen — the question is modal, and the sidebar is behind it.
-    desktop.requestSection('history')
-    await showsHistory()
-    await expect.poll(() => screen.queryByRole('alertdialog')).toBeNull()
-
-    // And Tasks View, which is no more the place to answer it than History is.
-    await user.click(within(sidebar()).getByRole('button', { name: 'Tasks' }))
-    await showsTasks()
-    expect(screen.queryByRole('alertdialog')).toBeNull()
-
-    await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
+    // An earlier run left the login item there, which is what the choice is
+    // really stored as.
+    desktop.loginItem = true
     await showsSettings()
 
-    // Unanswered is unanswered: the question is still the one thing the app is
-    // waiting on, and Settings is where it is asked.
-    expect(await screen.findByRole('alertdialog')).toBeTruthy()
+    await user.click(
+      await screen.findByRole('button', { name: 'Replay introduction' }),
+    )
+    expect(
+      await screen.findByRole('heading', { name: 'Welcome to Work Journal' }),
+    ).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+
+    // The step reads the setting back, not a reset to the default.
+    const control = await screen.findByRole('switch', { name: 'Start at login' })
+    await expect
+      .poll(() => control.getAttribute('aria-checked'))
+      .toBe('true')
   })
 
-  it('records Not now when the window closes after a visit to another section', async () => {
+  it('finishes into History without re-enabling automatic presentation', async () => {
+    const user = userEvent.setup()
     const { desktop } = await showMainWindow({
       captured: [MONDAY],
       section: 'settings',
-      stored: {},
     })
-    await screen.findByRole('alertdialog')
+    await showsSettings()
 
-    desktop.requestSection('history')
+    await user.click(
+      await screen.findByRole('button', { name: 'Replay introduction' }),
+    )
+    await screen.findByRole('heading', { name: 'Welcome to Work Journal' })
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+
     await showsHistory()
-    desktop.requestClose()
-
-    // Closing without answering is an answer, wherever the window was left.
-    await expect.poll(() => desktop.stored.startAtLogin).toBe(false)
+    // Replaying by hand is a replay: it never puts the automatic offer back.
+    expect(desktop.onboarding).toBe('suppressed')
   })
 })
 
@@ -759,6 +953,7 @@ async function showMainWindow({
   whileStartingUp,
   alertFor,
   stored = { startAtLogin: false },
+  onboarding,
 }: {
   captured: Array<{ at: string; body: string }>
   /** The Tasks the journal already holds, in the order they were created. */
@@ -772,8 +967,13 @@ async function showMainWindow({
   whileStartingUp?: (desktop: FakeDesktop) => void
   /** The Task a clicked Alert was about, as its position in `tasks`. */
   alertFor?: number
-  /** Values in the settings store; empty means the first-run question is due. */
+  /** Values in the settings store. */
   stored?: Record<string, unknown>
+  /**
+   * Where automatic Onboarding stands, as the marker the Rust side leaves:
+   * `unfinished` is a fresh installation still due the introduction.
+   */
+  onboarding?: 'unfinished' | 'suppressed'
 }) {
   const { driver, core, clock } = await journalHolding(captured)
 
@@ -783,6 +983,7 @@ async function showMainWindow({
   }
 
   const desktop = fakeDesktop({ driver, stored })
+  if (onboarding !== undefined) desktop.onboarding = onboarding
   const settings = createAppSettings(desktop)
   if (section !== undefined) desktop.requestSection(section)
   if (alertFor !== undefined) {
@@ -808,6 +1009,9 @@ async function showMainWindow({
     await screen.findByText('Note Hotkey')
   } else if (section === 'standup-post') {
     await screen.findByRole('heading', { name: 'Standup Post' })
+  } else if (onboarding === 'unfinished') {
+    // A fresh installation opens on the introduction, not on a section.
+    await screen.findByRole('heading', { name: 'Welcome to Work Journal' })
   } else {
     await firstListShown(captured.length)
   }
@@ -874,6 +1078,18 @@ function sectionOnScreen(): MainSection {
   return within(header).queryByLabelText('Search') === null
     ? 'tasks'
     : 'history'
+}
+
+/**
+ * Whether every section is hidden — the state while the Onboarding flow is
+ * up in their place. Read from the DOM because the sections stay mounted.
+ */
+function allSectionsHidden(): boolean {
+  const sections = [...document.querySelectorAll('[data-main-section]')]
+  return (
+    sections.length > 0 &&
+    sections.every((section) => (section as HTMLElement).hidden)
+  )
 }
 
 /** The row for one Task, as the click on its Alert leaves it. */

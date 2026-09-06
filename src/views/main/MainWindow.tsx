@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Clock, Journal } from '@/journal/journal'
-import type { Desktop, MainSection } from '@/platform/desktop'
+import type { Desktop, MainSection, Unlisten } from '@/platform/desktop'
 import OnScreenContext from '@/components/on-screen-context'
 import type { AppSettings } from '@/settings/app-settings'
 import HistoryView from '@/views/history/HistoryView'
 import SettingsView from '@/views/settings/SettingsView'
 import StandupPostView from '@/views/standup-post/StandupPostView'
 import TasksView from '@/views/tasks/TasksView'
+import OnboardingView from '@/views/onboarding/OnboardingView'
 import SectionSidebar from './SectionSidebar'
 import { SECTIONS } from './sections'
 
@@ -31,6 +32,17 @@ import { SECTIONS } from './sections'
  * tested. The one thing they are told is whether they are on screen — see
  * `on-screen-context` — because hiding a section hides only what it holds, and
  * a dialog it portalled out of the document stays on screen without it.
+ *
+ * Onboarding is a temporary guided flow shown in place of the sections while
+ * it runs — see docs/onboarding.md. It appears on its own when a fresh
+ * installation is still due, and when Settings asks to replay it. While it is
+ * up the sections stay mounted and hidden exactly as they do when another
+ * section is showing, so leaving the flow — Finish, Skip onboarding, or a
+ * sidebar choice — returns to the section that was there. Leaving it is also
+ * what dismisses automatic presentation: a fresh installation is offered the
+ * introduction until it is finished, skipped, closed, quit out of, or left by
+ * navigating away, and manual replay from Settings never re-enables any of
+ * that.
  */
 export default function MainWindow({
   desktop,
@@ -45,8 +57,66 @@ export default function MainWindow({
   clock: Clock
 }) {
   const [section, setSection] = useState<MainSection>('history')
+  // The Onboarding flow currently showing in place of the sections, and
+  // whether it was offered automatically (a fresh installation still due) or
+  // replayed by hand from Settings. Null is the ordinary state: sections.
+  const [onboarding, setOnboarding] = useState<{ automatic: boolean } | null>(
+    null,
+  )
   // The section on screen, as the element the sidebar is not part of.
   const showing = useRef<HTMLDivElement>(null)
+  // The flow's own mount state, read by the section switch that ends it.
+  const onboardingRef = useRef(onboarding)
+  useEffect(() => {
+    onboardingRef.current = onboarding
+  }, [onboarding])
+  // Whether an Entry Point named a section for this window — written down as
+  // the section lands, so the automatic-presentation read can tell a window
+  // opened on the introduction from one the user opened on a section.
+  const sectionRequested = useRef(false)
+  // Whether automatic Onboarding was dismissed already, so a later close of
+  // the same window does not write the marker twice.
+  const dismissed = useRef(false)
+
+  /**
+   * Ends automatic presentation for good: what Finish, Skip onboarding,
+   * Close and navigation away all settle on. The marker write is the Rust
+   * side's — one-way, so replaying the flow never re-enables it — and a
+   * refusal is logged rather than allowed to keep the flow on screen.
+   */
+  const dismissAutomaticOnboarding = useCallback(() => {
+    if (dismissed.current) return Promise.resolve()
+    dismissed.current = true
+    return desktop.dismissOnboarding().catch((error: unknown) => {
+      console.error('could not dismiss automatic Onboarding', error)
+    })
+  }, [desktop])
+
+  /**
+   * Takes the flow off the screen, keeping every section it was hiding. An
+   * automatic flow records its dismissal as it leaves; a manual replay
+   * changes nothing, so a dismissed installation stays dismissed.
+   */
+  const leaveOnboarding = useCallback(() => {
+    const presenting = onboardingRef.current
+    if (presenting === null) return
+    setOnboarding(null)
+    if (presenting.automatic) void dismissAutomaticOnboarding()
+  }, [dismissAutomaticOnboarding])
+
+  /**
+   * Shows a section. While the flow is up this is what leaving it means —
+   * the sidebar's choice, or an Entry Point naming the section — and for an
+   * automatic flow that leaving is the dismissal.
+   */
+  const openSection = useCallback(
+    (next: MainSection) => {
+      sectionRequested.current = true
+      leaveOnboarding()
+      setSection(next)
+    },
+    [leaveOnboarding],
+  )
 
   useEffect(() => {
     // An Entry Point says the section twice — written down for a window that
@@ -67,7 +137,7 @@ export default function MainWindow({
       void desktop.requestedSection().catch((error: unknown) => {
         console.error('could not claim the section that was announced', error)
       })
-      setSection(requested)
+      openSection(requested)
     })
 
     void listening.then(() => desktop.requestedSection()).then(
@@ -75,7 +145,7 @@ export default function MainWindow({
         // An announcement that has already landed is the later word: the
         // window was told a section while this claim was still crossing, and
         // what it came back with cannot undo that.
-        if (requested !== null && !announced) setSection(requested)
+        if (requested !== null && !announced) openSection(requested)
       },
       (error: unknown) => {
         console.error('could not read the section this window opened on', error)
@@ -85,7 +155,42 @@ export default function MainWindow({
     return () => {
       void listening.then((stop) => stop())
     }
-  }, [desktop])
+  }, [desktop, openSection])
+
+  useEffect(() => {
+    // A fresh installation — or one whose unfinished Onboarding a crash
+    // interrupted — is offered the introduction automatically, but only when
+    // the window was not opened on a section an Entry Point named. Opening on
+    // a named section is the user navigating there, and navigation away is a
+    // dismissal.
+    let cancelled = false
+    let stopClose: Unlisten | null = null
+
+    void desktop.onboardingState().then((state) => {
+      if (cancelled) return
+      if (state !== 'unfinished') return
+
+      // Closing the window rather than answering is a dismissal too, exactly
+      // as it was for the first-run question this flow replaced. Heard for as
+      // long as the window is open: the write has to land before the window
+      // closes, or the introduction would return on the next launch.
+      void desktop.onCloseRequested(dismissAutomaticOnboarding).then((stop) => {
+        if (cancelled) stop()
+        else stopClose = stop
+      })
+
+      if (sectionRequested.current) {
+        void dismissAutomaticOnboarding()
+        return
+      }
+      setOnboarding({ automatic: true })
+    })
+
+    return () => {
+      cancelled = true
+      stopClose?.()
+    }
+  }, [desktop, dismissAutomaticOnboarding])
 
   useEffect(() => {
     // A section takes focus as it mounts, but the section switched to has been
@@ -93,29 +198,44 @@ export default function MainWindow({
     // sidebar button, or nothing at all when an Entry Point named the section.
     // Escape belongs to the section, bound to its own root, so the root is
     // handed focus here exactly as it takes it when a window opens on it.
+    if (onboarding !== null) return
     const root = showing.current?.firstElementChild
     if (root instanceof HTMLElement) root.focus()
-  }, [section])
+  }, [section, onboarding])
+
+  const sectionsOffScreen = onboarding !== null
 
   return (
     <div className="flex h-screen bg-background">
       <SectionSidebar
         sections={SECTIONS}
         current={section}
-        onChoose={setSection}
+        onChoose={openSection}
       />
-      <Section section="history" on={section === 'history'} onScreen={showing}>
+      {onboarding !== null && (
+        <OnboardingView
+          desktop={desktop}
+          settings={settings}
+          onDone={() => openSection('history')}
+        />
+      )}
+      <Section section="history" on={!sectionsOffScreen && section === 'history'} onScreen={showing}>
         <HistoryView desktop={desktop} journal={journal} />
       </Section>
-      <Section section="tasks" on={section === 'tasks'} onScreen={showing}>
+      <Section section="tasks" on={!sectionsOffScreen && section === 'tasks'} onScreen={showing}>
         <TasksView desktop={desktop} journal={journal} clock={clock} />
       </Section>
-      <Section section="settings" on={section === 'settings'} onScreen={showing}>
-        <SettingsView desktop={desktop} settings={settings} journal={journal} />
+      <Section section="settings" on={!sectionsOffScreen && section === 'settings'} onScreen={showing}>
+        <SettingsView
+          desktop={desktop}
+          settings={settings}
+          journal={journal}
+          onReplayOnboarding={() => setOnboarding({ automatic: false })}
+        />
       </Section>
       <Section
         section="standup-post"
-        on={section === 'standup-post'}
+        on={!sectionsOffScreen && section === 'standup-post'}
         onScreen={showing}
       >
         <StandupPostView

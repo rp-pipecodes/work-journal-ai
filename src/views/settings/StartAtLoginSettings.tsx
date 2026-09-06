@@ -1,15 +1,3 @@
-import { useEffect, useState } from 'react'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import { useOnScreen } from '@/components/on-screen-context'
 import { useOnScreenToast } from '@/components/on-screen-toast'
 import { Switch } from '@/components/ui/switch'
 import type { Desktop } from '@/platform/desktop'
@@ -20,7 +8,13 @@ import { useSeededState } from './useSeededState'
 import { saySettled } from './saySettled'
 import { SettingsGroup, SettingsRow } from './SettingsGroup'
 
-/** The start-at-login preference, including its first-run question. */
+/**
+ * The start-at-login preference. Its own first-run question is gone: a fresh
+ * installation is invited to start at login inside the Onboarding flow
+ * instead, once, so the app never asks about it in two places — see
+ * docs/onboarding.md. What remains is the switch, which reads and writes the
+ * same login item it always did.
+ */
 export default function StartAtLoginSettings({
   desktop,
   settings,
@@ -31,54 +25,16 @@ export default function StartAtLoginSettings({
   initialSettings: Promise<SettingsInitialState | null> | null
 }) {
   // Whether the switch was answered while the read was still landing: the
-  // read must not put its older value back over that answer, and the question
-  // must not follow it — the switch is the same answer the question would
-  // collect.
-  const [startAtLogin, setStartAtLogin, touched] = useSeededState(
+  // read must not put its older value back over that answer.
+  const [startAtLogin, setStartAtLogin] = useSeededState(
     initialSettings,
     (initial) => initial.startAtLogin,
     DEFAULT_SETTINGS.startAtLogin,
   )
-  // The first-run question, asked once and never again — whichever way it is
-  // answered. False until the store has been asked whether it was answered.
-  const [asking, setAsking] = useState(false)
-  // Whether this view is the one on screen. The question is portalled out of
-  // whatever is hiding this setting, so only the visible section may show it.
-  const onScreen = useOnScreen()
   // The switch has no other answer than itself: what the OS made of it — or
   // what refused it — is said rather than left to be discovered at the next
   // login.
   const says = useOnScreenToast()
-
-  useEffect(() => {
-    if (initialSettings === null) return
-
-    void initialSettings.then((initial) => {
-      if (initial === null) return
-      if (touched.current) return
-      setAsking(!initial.startAtLoginAnswered)
-    })
-  }, [initialSettings, touched])
-
-  useEffect(() => {
-    if (!asking) return
-
-    // Closing the window rather than choosing is an answer too, and the same
-    // one: the app is not added to the login items. It has to be recorded, or
-    // the question would return on every launch until it heard a yes. Listened
-    // for whether or not this view is the one on screen: the question is
-    // unanswered wherever the user left the window, and closing it from
-    // another section is the same silence.
-    const closeRequested = desktop.onCloseRequested(() =>
-      settings.saveStartAtLogin(false).catch((error: unknown) => {
-        console.error('could not record the answer', error)
-      }),
-    )
-
-    return () => {
-      void closeRequested.then((stop) => stop())
-    }
-  }, [asking, desktop, settings])
 
   function toggleStartAtLogin(next: boolean) {
     const rollback = setStartAtLogin(next)
@@ -102,72 +58,19 @@ export default function StartAtLoginSettings({
     })
   }
 
-  /** The first-run answer, which is an answer either way. */
-  function answerStartAtLogin(next: boolean) {
-    setAsking(false)
-    toggleStartAtLogin(next)
-  }
-
   return (
-    <>
-      <SettingsGroup>
-        <SettingsRow
-          label="Start at login"
-          explanation="Whether Work Journal launches when you log in."
-          controls="start-at-login"
-        >
-          <Switch
-            id="start-at-login"
-            checked={startAtLogin}
-            onCheckedChange={toggleStartAtLogin}
-          />
-        </SettingsRow>
-      </SettingsGroup>
-
-      <FirstRunQuestion
-        open={onScreen && asking}
-        onAnswer={answerStartAtLogin}
-      />
-    </>
-  )
-}
-
-/**
- * The one question the app asks on its own, and it asks it once. Declining is
- * an answer: the app never adds itself to the login items uninvited, and never
- * asks again once told.
- */
-function FirstRunQuestion({
-  open,
-  onAnswer,
-}: {
-  open: boolean
-  onAnswer: (startAtLogin: boolean) => void
-}) {
-  return (
-    <AlertDialog open={open}>
-      <AlertDialogContent
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') event.stopPropagation()
-        }}
+    <SettingsGroup>
+      <SettingsRow
+        label="Start at login"
+        explanation="Whether Work Journal launches when you log in."
+        controls="start-at-login"
       >
-        <AlertDialogHeader>
-          <AlertDialogTitle>Start Work Journal at login?</AlertDialogTitle>
-          <AlertDialogDescription>
-            Work Journal lives in the menu bar and is only useful while it is
-            running. It will not add itself to your login items unless you say
-            so, and you can change this here at any time.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={() => onAnswer(false)}>
-            Not now
-          </AlertDialogCancel>
-          <AlertDialogAction onClick={() => onAnswer(true)}>
-            Start at login
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+        <Switch
+          id="start-at-login"
+          checked={startAtLogin}
+          onCheckedChange={toggleStartAtLogin}
+        />
+      </SettingsRow>
+    </SettingsGroup>
   )
 }

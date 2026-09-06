@@ -54,6 +54,7 @@ import {
   type Desktop,
   type ExportedFile,
   type MainSection,
+  type OnboardingState,
   type StandupPostRequest,
   type StandupPostResponse,
   type TaskAlertCompletion,
@@ -84,6 +85,11 @@ export function createTauriDesktop(): Desktop {
         isDevelopment: import.meta.env.DEV,
       }
     },
+
+    // The marker is the Rust side's to read and write: it is settled before
+    // this window (or the journal it reads) exists, which is the whole point.
+    onboardingState: () => invoke<OnboardingState>('onboarding_state'),
+    dismissOnboarding: () => invoke<void>('dismiss_onboarding'),
 
     closeWindow: () => getCurrentWindow().close(),
 

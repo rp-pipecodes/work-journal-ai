@@ -10,7 +10,6 @@
 
 import type { Desktop, Unlisten } from '@/platform/desktop'
 import {
-  hasAnsweredStartAtLogin,
   readSettings,
   writeImportCalendars,
   writeImportMeetings,
@@ -40,8 +39,6 @@ export interface AppSettings {
    * claiming something the OS disagrees with.
    */
   saveStartAtLogin(startAtLogin: boolean): Promise<void>
-  /** Whether the first-run question has been answered — either way. */
-  hasBeenAskedAboutStartAtLogin(): Promise<boolean>
   /**
    * Whether meetings are swept, remembered and announced. Announced because
    * the window that sweeps is not the window this is changed in, and a change
@@ -110,10 +107,6 @@ export function createAppSettings(desktop: Desktop): AppSettings {
     async saveStartAtLogin(startAtLogin) {
       await desktop.setStartAtLogin(startAtLogin)
       await writeStartAtLogin(await store(), startAtLogin)
-    },
-
-    async hasBeenAskedAboutStartAtLogin() {
-      return hasAnsweredStartAtLogin(await store())
     },
 
     async saveImportMeetings(importMeetings) {

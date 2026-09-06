@@ -336,53 +336,6 @@ describe('Start at login', () => {
     expect(desktop.stored.startAtLogin).toBe(true)
   })
 
-  it('asks the first-run question once, and counts a closed window as no', async () => {
-    // Never asked before: the store holds no answer at all.
-    const desktop = fakeDesktop({ stored: {} })
-
-    showSettings(desktop)
-
-    await screen.findByText('Start Work Journal at login?')
-    // The window is dismissed with the question still on screen.
-    desktop.requestClose()
-
-    await expect.poll(() => desktop.stored.startAtLogin).toBe(false)
-  })
-
-  it('keeps the window open when Escape belongs to the first-run question', async () => {
-    const desktop = fakeDesktop({ stored: {} })
-    let closed = 0
-    desktop.closeWindow = async () => {
-      closed += 1
-    }
-
-    showSettings(desktop)
-
-    const question = await screen.findByRole('alertdialog')
-    escape(question)
-
-    expect(closed).toBe(0)
-    expect(screen.getByRole('alertdialog')).toBeTruthy()
-  })
-
-  it('keeps the Theme Toggle available while the first-run question is open', async () => {
-    const desktop = fakeDesktop({ stored: {} })
-
-    showSettings(desktop)
-
-    const question = await screen.findByRole('alertdialog')
-    question.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'd',
-        metaKey: true,
-        shiftKey: true,
-        bubbles: true,
-      }),
-    )
-
-    await expect.poll(() => desktop.stored.theme).toBe('dark')
-  })
-
   it('opens on the stored start-at-login choice', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: true } })
     // The switch is seeded from the login item the OS reports, which an
@@ -425,34 +378,6 @@ describe('Start at login', () => {
     expect(
       isOn(screen.getByRole('switch', { name: 'Start at login' })),
     ).toBe(true)
-    await expect.poll(() => desktop.stored.startAtLogin).toBe(true)
-  })
-
-  it('does not ask the first-run question after the switch was already answered', async () => {
-    // Never asked before, and answered by hand while the file is still
-    // opening: the arriving read must not follow that answer with the
-    // question.
-    const stored: Record<string, unknown> = {
-      model: 'gpt-stored',
-    }
-    const deferred = deferredStore(stored)
-    const desktop = fakeDesktop({
-      stored,
-      openSettingsStore: deferred.openSettingsStore,
-    })
-
-    showSettings(desktop)
-
-    const control = await screen.findByRole('switch', {
-      name: 'Start at login',
-    })
-    control.click()
-
-    deferred.openTheStore()
-    await readLanded()
-
-    // The switch was the answer; the question must not follow it.
-    expect(screen.queryByRole('alertdialog')).toBeNull()
     await expect.poll(() => desktop.stored.startAtLogin).toBe(true)
   })
 
@@ -573,6 +498,30 @@ describe('Start at login', () => {
       isOn(screen.getByRole('switch', { name: 'Start at login' })),
     ).toBe(false)
     expect(desktop.stored.startAtLogin).toBe(false)
+  })
+})
+
+describe('replaying the Onboarding flow', () => {
+  it('offers the introduction again from Settings', async () => {
+    const desktop = fakeDesktop()
+    const replayed = vi.fn()
+    const settings = createAppSettings(desktop)
+    render(
+      <ThemeProvider settings={settings}>
+        <SettingsView
+          desktop={desktop}
+          settings={settings}
+          journal={new Promise<Journal>(() => {})}
+          onReplayOnboarding={replayed}
+        />
+      </ThemeProvider>,
+    )
+
+    ;(await screen.findByRole('button', { name: 'Replay introduction' })).click()
+
+    // The button is an action rather than a setting: this view only says it
+    // was pressed, and the window shows the flow.
+    expect(replayed).toHaveBeenCalledTimes(1)
   })
 })
 

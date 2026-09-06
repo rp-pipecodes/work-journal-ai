@@ -54,15 +54,14 @@ describe('start at login', () => {
     expect((await settings.load()).startAtLogin).toBe(true)
   })
 
-  it('counts a decline as an answer, so the question is not asked again', async () => {
+  it('removes the login item when switched off, and records it', async () => {
     const desktop = fakeDesktop()
     const settings = createAppSettings(desktop)
-    expect(await settings.hasBeenAskedAboutStartAtLogin()).toBe(false)
 
     await settings.saveStartAtLogin(false)
 
     expect(desktop.loginItem).toBe(false)
-    expect(await settings.hasBeenAskedAboutStartAtLogin()).toBe(true)
+    expect((await settings.load()).startAtLogin).toBe(false)
   })
 
   it('records nothing the OS refused to do', async () => {
@@ -71,7 +70,7 @@ describe('start at login', () => {
     const settings = createAppSettings(desktop)
 
     await expect(settings.saveStartAtLogin(true)).rejects.toThrow()
-    expect(await settings.hasBeenAskedAboutStartAtLogin()).toBe(false)
+    expect((await settings.load()).startAtLogin).toBe(false)
   })
 })
 

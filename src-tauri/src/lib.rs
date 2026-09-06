@@ -6,6 +6,7 @@ mod export;
 mod frontmost;
 mod hotkey;
 mod keychain;
+mod onboarding;
 mod standup;
 
 use alerts::{Permission, TaskAlert, TaskAlertCompletion};
@@ -84,10 +85,12 @@ const HOTKEY_KEY: &str = "hotkey";
 /// The Task Hotkey, stored beside it and independent in every other respect.
 const TASK_HOTKEY_KEY: &str = "taskHotkey";
 
-/// Whether the app starts at login. Only its presence is read here: an absent
-/// answer is a first run, and a first run is when the question gets asked. Must
-/// match `START_AT_LOGIN_KEY` in `src/platform/desktop.ts`, as `src/platform/desktop-rust.test.ts` checks.
-const START_AT_LOGIN_KEY: &str = "startAtLogin";
+/// Where automatic Onboarding stands — `unfinished` while it is still due,
+/// `suppressed` once it has been dismissed or was never due — written by the
+/// startup classification before plugin-sql creates the journal or defaults
+/// are saved, and read again when a window asks. Must match `ONBOARDING_KEY`
+/// in `src/platform/desktop.ts`, as `src/platform/desktop-rust.test.ts` checks.
+const ONBOARDING_KEY: &str = "onboarding";
 
 /// The Theme the user settled on. Must match `THEME_KEY` in
 /// `src/platform/desktop.ts`, as `src/platform/desktop-rust.test.ts` checks.
@@ -205,6 +208,22 @@ struct OpenedTaskAlert(Mutex<Option<String>>);
 #[derive(Default)]
 struct CompletedTaskAlert(Mutex<Vec<TaskAlertCompletion>>);
 
+/// Whether this installation existed before this launch — the evidence the
+/// startup classification captures before plugin-sql's preload can create the
+/// journal and before the onboarding marker or the Hotkey defaults are
+/// written. Kept so the Hotkey migration settles against the same reading of
+/// the evidence the classification used, rather than against a settings file
+/// this very launch has since written into.
+struct InstallationEvidence(bool);
+
+/// Whether this launch opened the Main Window because automatic Onboarding is
+/// due. Read when the user quits, so that quitting during the introduction
+/// records the dismissal — and so that an instance which exits before it
+/// could ever have shown it (a second launch handed off to the first) never
+/// dismisses it for the instance that is actually showing it.
+#[derive(Default)]
+struct OpenedForOnboarding(std::sync::atomic::AtomicBool);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -271,6 +290,26 @@ pub fn run() {
                 })
                 .build(),
         )
+        // Automatic Onboarding's one classification, before plugin-sql creates
+        // the journal: a genuinely fresh installation has nothing on disk
+        // yet, and the very first launch must not manufacture the evidence of
+        // an older one. Registered after the restore (which may rename a
+        // journal in) and before the sql plugin (whose preload creates the
+        // journal) — the same ordering seam the restore uses — and it writes
+        // the unfinished state down before the sql plugin or the Hotkey
+        // settlement below can make this launch look established.
+        .plugin(
+            tauri::plugin::Builder::new("onboarding")
+                .setup(
+                    |app: &tauri::AppHandle<tauri::Wry>,
+                     _api: tauri::plugin::PluginApi<tauri::Wry, ()>| {
+                    if let Some(existing) = settle_onboarding(app) {
+                        app.manage(InstallationEvidence(existing));
+                    }
+                    Ok(())
+                })
+                .build(),
+        )
         .plugin(
             tauri_plugin_sql::Builder::new()
                 .add_migrations(DATABASE_URL, migrations())
@@ -324,7 +363,9 @@ pub fn run() {
             automatic_backups,
             backup_journal,
             reveal_backups,
-            stage_restore
+            stage_restore,
+            onboarding_state,
+            dismiss_onboarding
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -376,6 +417,11 @@ pub fn run() {
             // Whoever is in front when a Capture begins, kept so that putting
             // the Capture away can hand focus back to them.
             app.manage(PreviousApplication::default());
+            // Whether this launch opened the Main Window because automatic
+            // Onboarding is due — set below, read when the user quits, so an
+            // instance that exits before it could have shown the introduction
+            // never dismisses it on another instance's behalf.
+            app.manage(OpenedForOnboarding::default());
 
             // Told to whichever window is sweeping the calendar. Set up after
             // the capture window, because that is the window that hears it.
@@ -391,24 +437,39 @@ pub fn run() {
             // path: see take_automatic_snapshot.
             take_automatic_snapshot(app.handle().clone());
 
-            // Start at login is offered once, and only once: the app must
-            // never add itself to the login items without being asked, and
-            // must not keep asking after being told no.
-            if !has_answered_start_at_login(app.handle()) {
-                open_settings(app.handle());
+            // A genuinely new installation meets the introduction automatically;
+            // so does one whose unfinished Onboarding a crash interrupted — the
+            // state written by the startup classification before the journal or
+            // the defaults existed takes precedence over them on every later
+            // launch. An existing installation, or one that has dismissed
+            // Onboarding, opens nothing on its own, exactly as it always has.
+            if onboarding::is_unfinished(onboarding_marker(app.handle()).as_deref()) {
+                app.state::<OpenedForOnboarding>()
+                    .0
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                open_main_window(app.handle(), None);
             }
 
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
-        .run(|_app, _event| {
+        .run(|app, event| {
+            // An explicit Quit while automatic Onboarding is still due counts
+            // as dismissing it — the same deliberate departure as Skip,
+            // Finish, Close and navigation away. Recorded here, at the one
+            // moment every Quit passes through, so the next launch opens
+            // normally rather than offering the introduction again.
+            if matches!(&event, tauri::RunEvent::ExitRequested { .. }) {
+                dismiss_onboarding_on_quit(app);
+            }
+
             // A click on the Dock icon. It names no section, so it raises a
             // Main Window that is already open on whatever it is showing, and
             // opens a new one on the section it opens on by default — History.
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { .. } = _event {
-                open_main_window(_app, None);
+            if let tauri::RunEvent::Reopen { .. } = &event {
+                open_main_window(app, None);
             }
         });
 }
@@ -886,10 +947,10 @@ fn show_presence(app: &tauri::AppHandle, presence: Option<Presence>) {
 }
 
 /// Opens the Main Window on Settings, building it if it is not already open.
-/// The Tray Menu and the first-run question reach it here; a Standup Post
-/// showing a Model Access failure links there from inside the window, where
-/// the section switch is its own host's — no command crosses the boundary
-/// for a trip the sidebar already makes.
+/// The Tray Menu reaches it here; a Standup Post showing a Model Access
+/// failure links there from inside the window, where the section switch is its
+/// own host's — no command crosses the boundary for a trip the sidebar already
+/// makes.
 fn open_settings(app: &tauri::AppHandle) {
     open_main_window(app, Some(SETTINGS_SECTION));
 }
@@ -969,18 +1030,111 @@ fn resolved_theme(app: &tauri::AppHandle) -> ResolvedTheme {
     }
 }
 
-/// Whether the app has ever been told what to do about starting at login. Only
-/// the presence of an answer matters here — honouring it is the frontend's job,
-/// since that is where the autostart plugin is driven from.
-fn has_answered_start_at_login(app: &tauri::AppHandle) -> bool {
-    match app.store(SETTINGS_FILE) {
-        Ok(store) => store.has(START_AT_LOGIN_KEY),
+/// Classifies this installation and writes the Onboarding marker down — the
+/// one startup operation that has to happen before plugin-sql's preload can
+/// create the journal and before the Hotkey settlement writes the defaults,
+/// because either side effect would make a genuinely fresh installation look
+/// like an established one on its very first launch.
+///
+/// Returns whether this installation existed before this launch, so the Hotkey
+/// migration can settle against the same evidence the classification read —
+/// `None` when the settings could not be read, in which case nothing was
+/// written and the marker stays away (which reads as suppressed).
+fn settle_onboarding(app: &tauri::AppHandle) -> Option<bool> {
+    let store = match app.store(SETTINGS_FILE) {
+        Ok(store) => store,
         Err(error) => {
-            // Unreadable settings must not turn into a question asked on every
-            // launch, nor into an app that adds itself to the login items.
-            log::error!("could not read the settings: {error}");
-            true
+            // Unreadable settings must not become an introduction asked about
+            // on every launch, nor an app that opens a window uninvited.
+            log::error!("could not read the settings; automatic Onboarding stays suppressed: {error}");
+            return None;
         }
+    };
+
+    // The evidence first — before the marker below makes the settings file
+    // hold something, and before plugin-sql (which has yet to run) can create
+    // the journal: a settings file with anything in it, or a journal already
+    // on disk, is an installation that was running before this launch, the
+    // same reading the Hotkey migration uses.
+    let existing = onboarding::installation_existed(
+        !store.is_empty(),
+        journal_database_exists(app),
+    );
+
+    let stored = store
+        .get(ONBOARDING_KEY)
+        .and_then(|value| value.as_str().map(str::to_string));
+
+    if let Some(next) = onboarding::settle(stored.as_deref(), existing) {
+        store.set(ONBOARDING_KEY, next);
+        if let Err(error) = store.save() {
+            log::error!("could not record the Onboarding state: {error}");
+        }
+    }
+
+    Some(existing)
+}
+
+/// The stored Onboarding marker, when the settings say anything at all.
+fn onboarding_marker(app: &tauri::AppHandle) -> Option<String> {
+    app.store(SETTINGS_FILE)
+        .ok()
+        .and_then(|store| store.get(ONBOARDING_KEY))
+        .and_then(|value| value.as_str().map(str::to_string))
+}
+
+/// What automatic Onboarding's state is, for whichever window asks: the Main
+/// Window presents the introduction when it is still due.
+#[tauri::command]
+fn onboarding_state(app: tauri::AppHandle) -> String {
+    if onboarding::is_unfinished(onboarding_marker(&app).as_deref()) {
+        onboarding::UNFINISHED.to_string()
+    } else {
+        // A marker that says nothing — including a settings store that would
+        // not answer — reads as suppressed: an introduction nobody asked for
+        // is worse than one asked for a launch late.
+        onboarding::SUPPRESSED.to_string()
+    }
+}
+
+/// Records that automatic Onboarding will not be offered again on its own —
+/// what Finish, Skip onboarding, Close, explicit Quit and navigation away all
+/// settle on. Writing it again when it already says so is harmless: replaying
+/// the introduction from Settings must never re-enable automatic
+/// presentation, so the write is one-way.
+#[tauri::command]
+fn dismiss_onboarding(app: tauri::AppHandle) -> Result<(), String> {
+    let store = app.store(SETTINGS_FILE).map_err(|error| error.to_string())?;
+    store.set(ONBOARDING_KEY, onboarding::SUPPRESSED);
+    store.save().map_err(|error| error.to_string())
+}
+
+/// Records the dismissal an explicit Quit is, but only when this launch was
+/// the one actually offering the introduction: a second instance handed off to
+/// the first exits before it could show anything, and must not dismiss
+/// Onboarding for the instance that is showing it.
+fn dismiss_onboarding_on_quit(app: &tauri::AppHandle) {
+    if !app
+        .state::<OpenedForOnboarding>()
+        .0
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        return;
+    }
+    if !onboarding::is_unfinished(onboarding_marker(app).as_deref()) {
+        return;
+    }
+
+    let store = match app.store(SETTINGS_FILE) {
+        Ok(store) => store,
+        Err(error) => {
+            log::error!("could not record the Onboarding dismissal on quit: {error}");
+            return;
+        }
+    };
+    store.set(ONBOARDING_KEY, onboarding::SUPPRESSED);
+    if let Err(error) = store.save() {
+        log::error!("could not record the Onboarding dismissal on quit: {error}");
     }
 }
 
@@ -1020,7 +1174,14 @@ impl hotkey::Registrar for GlobalShortcuts {
 /// not take the app down with it: the Tray Menu still reaches both Entry
 /// Points, and Settings reports each failure against its own action.
 fn register_hotkeys(app: &tauri::AppHandle) {
-    settle_stored_hotkeys(app);
+    // The evidence the startup classification captured before plugin-sql
+    // created the journal or the Onboarding marker was written. Absent only
+    // when the classification could not read the settings at all, in which
+    // case the settlement falls back to reading it here.
+    let evidence = app
+        .try_state::<InstallationEvidence>()
+        .map(|installation| installation.0);
+    settle_stored_hotkeys(app, evidence);
 
     let registrar = GlobalShortcuts { app: app.clone() };
     let hotkeys = hotkey::register_both(
@@ -1041,7 +1202,13 @@ fn register_hotkeys(app: &tauri::AppHandle) {
 /// Writes both combinations down explicitly, once. What each should be is
 /// `hotkey::settle`'s decision; all that happens here is reading the settings
 /// file, telling it whether this installation predates Tasks, and saving.
-fn settle_stored_hotkeys(app: &tauri::AppHandle) {
+///
+/// Whether it predates Tasks is the evidence the startup classification
+/// captured before this launch could create either side effect — a genuinely
+/// fresh installation must not read its own just-created journal or
+/// just-written Onboarding marker as evidence of an older one, and an
+/// existing installation's reading is unchanged.
+fn settle_stored_hotkeys(app: &tauri::AppHandle, evidence: Option<bool>) {
     let Ok(store) = app.store(SETTINGS_FILE) else {
         log::error!("could not read the settings; the Hotkeys keep their defaults");
         return;
@@ -1052,9 +1219,14 @@ fn settle_stored_hotkeys(app: &tauri::AppHandle) {
     let (note, task) = hotkey::settle(
         stored_note.as_ref().and_then(|value| value.as_str()),
         stored_task.as_ref().and_then(|value| value.as_str()),
-        // A settings file with anything in it, or a journal already on disk:
-        // either is an installation that was running before Tasks existed.
-        !store.is_empty() || journal_database_exists(app),
+        evidence.unwrap_or_else(|| {
+            // The fallback for a classification that never ran: the same
+            // evidence read at this later moment.
+            onboarding::installation_existed(
+                !store.is_empty(),
+                journal_database_exists(app),
+            )
+        }),
     );
 
     if let Some(note) = note {

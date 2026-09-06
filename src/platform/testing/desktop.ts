@@ -13,6 +13,7 @@ import type {
   Desktop,
   ExportedFile,
   MainSection,
+  OnboardingState,
   StandupPostRequest,
   StandupPostResponse,
   TaskAlertCompletion,
@@ -42,6 +43,12 @@ export interface FakeDesktop extends Desktop {
   taskCreationFits: boolean[]
   /** What the settings store holds, readable without going through a facade. */
   stored: Record<string, unknown>
+  /**
+   * Where automatic Onboarding stands, as the marker the Rust side keeps.
+   * Writable, as the classification writes it before this window exists — a
+   * test of automatic presentation sets it to `unfinished`.
+   */
+  onboarding: OnboardingState
   /** Whether the login item is there, as the OS would report it. */
   loginItem: boolean
   /** Every export written, most recent last. */
@@ -242,6 +249,7 @@ export function fakeDesktop({
 
   const desktop: FakeDesktop = {
     stored,
+    onboarding: 'suppressed',
     loginItem: false,
     exported: [],
     chosenBackupLocation: null,
@@ -293,8 +301,19 @@ export function fakeDesktop({
 
     windowLabel: () => 'main',
     appIdentity: async () => appIdentity,
+    // The marker is the Rust side's to write; this only reports it and flips
+    // it to suppressed on a dismissal, exactly as the commands do.
+    onboardingState: async () => desktop.onboarding,
+    dismissOnboarding: async () => {
+      desktop.onboarding = 'suppressed'
+    },
     closeWindow: async () => {
       desktop.windowsClosed += 1
+      // Every path that closes the window — the traffic lights, Escape, a
+      // view's own Close — reaches the same OS close the real desktop
+      // funnels through `onCloseRequested`, so the answers registered there
+      // (an automatic Onboarding dismissal) run for each of them.
+      closeRequested.announce(undefined)
     },
     windowVisible: true,
     blur: () => windowBlurred.announce(undefined),
