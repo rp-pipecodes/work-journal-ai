@@ -1628,7 +1628,37 @@ export function createJournal({
         !ruleChanged && !dateChanged && task.recurrenceAnchor !== null
           ? task.recurrenceAnchor
           : scheduled!.date
-      const opening = openingSlot(anchor, cadence, time, now)
+      // An edit never reopens a slot the series has kept: the head is floored
+      // at the first slot strictly after the newest kept occurrence, for every
+      // schedule edit rather than only a change of time — see
+      // docs/adr/0037-an-edit-never-reopens-a-slot-the-series-has-kept.md. The
+      // head is the later of that floor and `resumedSlot`, which prefers
+      // today's slot whenever the time just typed is still ahead: retiming to
+      // an earlier time that has already passed today keeps today Overdue
+      // rather than skipping it, while a long-overdue series still collapses
+      // forward to today. The floor is against kept occurrences only, never
+      // against the current Open one, so an overdue series with nothing
+      // completed may still collapse forward.
+      const occurrences = await readOccurrences(driver, id)
+      let newestKept: string | null = null
+      for (const occurrence of occurrences) {
+        if (
+          occurrence.completedAt !== null &&
+          (newestKept === null || occurrence.scheduledDate > newestKept)
+        ) {
+          newestKept = occurrence.scheduledDate
+        }
+      }
+      const resumed = resumedSlot(anchor, cadence, time, now)
+      let opening = resumed
+      if (newestKept !== null) {
+        const floor = slotDate(
+          anchor,
+          cadence,
+          (slotIndexOnOrBefore(anchor, cadence, newestKept) ?? -1) + 1,
+        )
+        if (floor > opening) opening = floor
+      }
       const reanchored: Task = {
         ...task,
         description: said,
@@ -2896,9 +2926,9 @@ function slotHasPassed(
 }
 
 /**
- * The slot a series opens on, whether it was just created or an edit has just
- * reanchored it: its first, unless that has already elapsed, in which case its
- * latest elapsed one — which is Overdue on screen.
+ * The slot a series opens on when it is created: its first, unless that has
+ * already elapsed, in which case its latest elapsed one — which is Overdue on
+ * screen.
  *
  * A series started in the past therefore opens on one occurrence rather than
  * on every slot it missed: a backlog of cloned commitments after time away is
@@ -2923,6 +2953,27 @@ export function openingSlot(
   return slotHasPassed({ date: latest, time }, now, timeZone)
     ? latest
     : slotDate(anchor, recurrence, Math.max(index - 1, 0))
+}
+
+/**
+ * The slot an edited series resumes on: like `openingSlot` but preferring
+ * today's slot whenever the time just typed is still ahead, rather than
+ * stepping back onto the latest elapsed one. Without the split, retiming a
+ * reminder to 23:00 at 14:00 would open yesterday at 23:00 — see
+ * docs/adr/0037-an-edit-never-reopens-a-slot-the-series-has-kept.md.
+ */
+export function resumedSlot(
+  anchor: string,
+  recurrence: Recurrence,
+  time: string | null,
+  now: Date,
+  timeZone: string = localTimeZone(),
+): string {
+  const first = slotDate(anchor, recurrence, 0)
+  if (!slotHasPassed({ date: first, time }, now, timeZone)) return first
+
+  const index = slotIndexOnOrBefore(anchor, recurrence, civilDateIn(now, timeZone)) ?? 0
+  return slotDate(anchor, recurrence, index)
 }
 
 /**

@@ -7,6 +7,7 @@ import {
   formatRecurrence,
   openOccurrence,
   openingSlot,
+  resumedSlot,
   sameRecurrence,
   type Journal,
   type Recurrence,
@@ -554,6 +555,89 @@ describe('editing a Recurring Task', () => {
     expect(moved.scheduledTime).toBe('09:00')
   })
 
+  it('never reopens a kept slot when only the time changes', async () => {
+    const { journal, clock } = await journalAt('2026-06-01T08:00:00')
+
+    const task = await journal.createTask(
+      'stand-up',
+      { date: '2026-06-01', time: '09:00' },
+      every(1, 'day'),
+    )
+
+    for (let day = 1; day <= 15; day += 1) {
+      const label = `2026-06-${String(day).padStart(2, '0')}`
+      clock.set(new Date(`${label}T10:00:00`))
+      await journal.completeTask(task.id)
+    }
+    expect(openOccurrence(await journal.occurrencesOf(task.id))!.scheduledDate).toBe(
+      '2026-06-16',
+    )
+
+    clock.set(new Date('2026-06-15T14:00:00'))
+    const retimed = await journal.editTask(task.id, {
+      description: 'stand-up',
+      schedule: { date: '2026-06-16', time: '10:00' },
+      recurrence: every(1, 'day'),
+    })
+
+    expect(retimed.scheduledDate).toBe('2026-06-16')
+    const kept = completedOccurrences(await journal.occurrencesOf(task.id))
+    expect(kept).toHaveLength(15)
+    expect(kept.map((one) => one.scheduledDate)).not.toContain('2026-06-16')
+
+    clock.set(new Date('2026-06-16T10:00:00'))
+    await journal.completeTask(task.id)
+    const dates = completedOccurrences(await journal.occurrencesOf(task.id)).map(
+      (one) => one.scheduledDate,
+    )
+    expect(dates.filter((date) => date === '2026-06-15')).toHaveLength(1)
+    expect(dates.filter((date) => date === '2026-06-16')).toHaveLength(1)
+  })
+
+  it('prefers today when a series with no history is retimed to later today', async () => {
+    const { journal, clock } = await journalAt('2026-06-01T08:00:00')
+
+    const task = await journal.createTask(
+      'stand-up',
+      { date: '2026-06-01', time: '09:00' },
+      every(1, 'day'),
+    )
+
+    clock.set(new Date('2026-06-15T14:00:00'))
+    const retimed = await journal.editTask(task.id, {
+      description: 'stand-up',
+      schedule: { date: '2026-06-01', time: '23:00' },
+      recurrence: every(1, 'day'),
+    })
+
+    expect(retimed.scheduledDate).toBe('2026-06-15')
+  })
+
+  it('floors a cadence change past the kept history too', async () => {
+    const { journal, clock } = await journalAt('2026-06-01T08:00:00')
+
+    const task = await journal.createTask(
+      'stand-up',
+      { date: '2026-06-01', time: '09:00' },
+      every(1, 'day'),
+    )
+
+    for (let day = 1; day <= 15; day += 1) {
+      const label = `2026-06-${String(day).padStart(2, '0')}`
+      clock.set(new Date(`${label}T10:00:00`))
+      await journal.completeTask(task.id)
+    }
+
+    clock.set(new Date('2026-06-15T14:00:00'))
+    const changed = await journal.editTask(task.id, {
+      description: 'stand-up',
+      schedule: { date: '2026-06-01', time: '09:00' },
+      recurrence: every(1, 'week', [1]),
+    })
+
+    expect(changed.scheduledDate).toBe('2026-06-22')
+  })
+
   it('leaves the series exactly where it stands when only the wording changes', async () => {
     const { journal } = await journalAt('2026-03-16T08:00:00')
 
@@ -1076,6 +1160,16 @@ describe('openingSlot and advancedSlot as pure calendar arithmetic', () => {
         'Europe/Lisbon',
       ),
     ).toBe('2026-06-02')
+  })
+
+  it('resumes on today when today is still ahead, where opening steps back', () => {
+    // 10:00 UTC on 16 March is 10:00 in Lisbon, so 23:00 today is ahead.
+    expect(
+      openingSlot('2026-03-01', every(1, 'day'), '23:00', now, 'Europe/Lisbon'),
+    ).toBe('2026-03-15')
+    expect(
+      resumedSlot('2026-03-01', every(1, 'day'), '23:00', now, 'Europe/Lisbon'),
+    ).toBe('2026-03-16')
   })
 })
 
