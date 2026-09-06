@@ -36,9 +36,19 @@ export interface AppSettings {
   /**
    * The answer to start at login, acted on and then remembered. The login item
    * is changed first: an answer recorded but not honoured would leave Settings
-   * claiming something the OS disagrees with.
+   * claiming something the OS disagrees with. A save that lands is announced,
+   * so every control reading the answer — the Settings row and the Onboarding
+   * flow's step both do — reflects what the OS came to hold.
    */
   saveStartAtLogin(startAtLogin: boolean): Promise<void>
+  /**
+   * A Start at Login save landed, in this window. Heard by the Settings row
+   * so a choice saved by the Onboarding flow reaches the mounted section
+   * without its state being rebuilt — the answer the OS holds is one fact,
+   * however many controls write it. Announced after the save settles, so a
+   * departure before it settles still reaches the control that stayed.
+   */
+  onStartAtLoginChanged(handle: (startAtLogin: boolean) => void): Unlisten
   /**
    * Whether meetings are swept, remembered and announced. Announced because
    * the window that sweeps is not the window this is changed in, and a change
@@ -88,6 +98,12 @@ export function createAppSettings(desktop: Desktop): AppSettings {
     return loading
   }
 
+  // Who is listening for a Start at Login save, in this window. In-window
+  // rather than a Desktop announcement: no other window reads the login item,
+  // and the two controls that do — the Settings row and the Onboarding step —
+  // share this very instance.
+  const startAtLoginChanged = new Set<(startAtLogin: boolean) => void>()
+
   return {
     async load() {
       return readSettings(await store())
@@ -107,6 +123,17 @@ export function createAppSettings(desktop: Desktop): AppSettings {
     async saveStartAtLogin(startAtLogin) {
       await desktop.setStartAtLogin(startAtLogin)
       await writeStartAtLogin(await store(), startAtLogin)
+      // After it took: a save still in flight when a window departs must
+      // still reach the control that stayed mounted, and a control must never
+      // be told a change was saved before the OS has it.
+      for (const handle of startAtLoginChanged) handle(startAtLogin)
+    },
+
+    onStartAtLoginChanged(handle) {
+      startAtLoginChanged.add(handle)
+      return () => {
+        startAtLoginChanged.delete(handle)
+      }
     },
 
     async saveImportMeetings(importMeetings) {

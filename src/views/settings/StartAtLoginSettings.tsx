@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useOnScreenToast } from '@/components/on-screen-toast'
 import { Switch } from '@/components/ui/switch'
 import type { Desktop } from '@/platform/desktop'
@@ -31,6 +32,21 @@ export default function StartAtLoginSettings({
     (initial) => initial.startAtLogin,
     DEFAULT_SETTINGS.startAtLogin,
   )
+
+  useEffect(() => {
+    // A Start at Login save landed — this switch's own, or the Onboarding
+    // flow's. The login item is one fact the OS holds, however many controls
+    // write it, and every control has to agree with it: the flow may change
+    // it while this section is mounted but hidden, and the section's state
+    // must not be rebuilt to hear of it — that would throw away what else
+    // the user has unsaved in Settings. The announced value is newer than
+    // anything this row seeded, so it is applied as a change of its own; a
+    // rollback still in flight from an earlier press is discarded by the
+    // attempt that this starts.
+    return settings.onStartAtLoginChanged((next) => {
+      setStartAtLogin(next)
+    })
+  }, [settings, setStartAtLogin])
   // The switch has no other answer than itself: what the OS made of it — or
   // what refused it — is said rather than left to be discovered at the next
   // login.

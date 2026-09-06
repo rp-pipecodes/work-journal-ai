@@ -63,12 +63,6 @@ export default function MainWindow({
   const [onboarding, setOnboarding] = useState<{ automatic: boolean } | null>(
     null,
   )
-  // Bumped every time the Onboarding flow leaves, so Settings mounts afresh
-  // the next time it is asked for. Settings took its one initial snapshot
-  // when the window opened — before the flow could change anything it reads,
-  // the Start at Login switch above all — and a section that keeps its
-  // mounted state would keep claiming the old answer forever.
-  const [settingsRead, setSettingsRead] = useState(0)
   // The section on screen, as the element the sidebar is not part of.
   const showing = useRef<HTMLDivElement>(null)
   // The flow's own mount state, read by the section switch that ends it.
@@ -107,7 +101,6 @@ export default function MainWindow({
     const presenting = onboardingRef.current
     if (presenting === null) return
     setOnboarding(null)
-    setSettingsRead((seen) => seen + 1)
     if (presenting.automatic) void dismissAutomaticOnboarding()
   }, [dismissAutomaticOnboarding])
 
@@ -234,7 +227,6 @@ export default function MainWindow({
       </Section>
       <Section section="settings" on={!sectionsOffScreen && section === 'settings'} onScreen={showing}>
         <SettingsView
-          key={settingsRead}
           desktop={desktop}
           settings={settings}
           journal={journal}

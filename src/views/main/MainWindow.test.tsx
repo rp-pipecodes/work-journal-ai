@@ -822,6 +822,51 @@ describe('automatic Onboarding', () => {
       .toBe('true')
   })
 
+  it('reflects a Start at Login save that settles after the flow has left', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+    // The login item takes its time: the step is left before the save
+    // settles, which is exactly when the Settings row must still hear it.
+    let releaseLogin = () => {}
+    const loginHeld = new Promise<void>((resolve) => {
+      releaseLogin = resolve
+    })
+    const realSet = desktop.setStartAtLogin.bind(desktop)
+    desktop.setStartAtLogin = async (value) => {
+      await loginHeld
+      await realSet(value)
+    }
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Continue' }),
+    )
+    await user.click(
+      await screen.findByRole('switch', { name: 'Start at login' }),
+    )
+
+    // Open History while the save is still settling.
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await showsHistory()
+
+    releaseLogin()
+    await expect.poll(() => desktop.loginItem).toBe(true)
+
+    await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
+    await showsSettings()
+
+    // The save finished after the flow had gone: the row that stayed mounted
+    // still heard it, rather than the window's snapshot keeping the old no.
+    const control = await screen.findByRole('switch', {
+      name: 'Start at login',
+    })
+    await expect
+      .poll(() => control.getAttribute('aria-checked'))
+      .toBe('true')
+  })
+
   it('reports a refused Start at Login choice, with retry and continuation', async () => {
     const user = userEvent.setup()
     vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -887,6 +932,32 @@ describe('replaying Onboarding from Settings', () => {
     await expect
       .poll(() => control.getAttribute('aria-checked'))
       .toBe('true')
+  })
+
+  it('keeps unsaved Settings input through a replay of the flow', async () => {
+    const user = userEvent.setup()
+    await showMainWindow({ captured: [MONDAY], section: 'settings' })
+    await showsSettings()
+
+    // A key being typed, on its way out of the window — not saved yet, so it
+    // lives only in the input. A replay of the flow must not take it.
+    await user.type(await screen.findByLabelText('API Key'), 'sk-replay-secret')
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Replay introduction' }),
+    )
+    await screen.findByRole('heading', { name: 'Welcome to Work Journal' })
+    await user.click(screen.getByRole('button', { name: 'Skip onboarding' }))
+    await showsHistory()
+
+    await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
+    await showsSettings()
+
+    // The section stayed mounted, so the half-typed key is still under the
+    // cursor.
+    expect((screen.getByLabelText('API Key') as HTMLInputElement).value).toBe(
+      'sk-replay-secret',
+    )
   })
 
   it('finishes into History without re-enabling automatic presentation', async () => {
