@@ -46,7 +46,7 @@ pub const DATABASE_FILE_NAME: &str = "work-journal.db";
 /// snapshot is accepted and migrated forward by the immutable list; a newer
 /// one is refused before anything is touched. Every future migration raises
 /// this.
-pub const SUPPORTED_MIGRATION_VERSION: i64 = 6;
+pub const SUPPORTED_MIGRATION_VERSION: i64 = 7;
 
 /// The staged file a validated candidate is copied to, beside the live
 /// journal. Not a snapshot name, so pruning never touches it, and never
@@ -662,7 +662,8 @@ fn expected_schema(version: i64) -> &'static [(&'static str, &'static [&'static 
     ];
     // Migration 1 creates `notes`; 2 appends `project`; 3 appends `origin`
     // and creates `imported_meetings`; 4 creates `tasks`; 5 appends its
-    // schedule; 6 appends its recurrence and creates `task_occurrences`.
+    // schedule; 6 appends its recurrence and creates `task_occurrences`;
+    // 7 adds an index and no table or column of its own.
     match version {
         1 => &[("notes", &["id", "body", "captured_at", "journal_day", "edited_at"])],
         2 => &[(
@@ -1331,13 +1332,14 @@ mod tests {
 
     /// The six migration files, in version order — the very files
     /// `migrations()` in `lib.rs` serves plugin-sql.
-    const REAL_MIGRATIONS: [&str; 6] = [
+    const REAL_MIGRATIONS: [&str; 7] = [
         include_str!("../migrations/0001_create_notes.sql"),
         include_str!("../migrations/0002_notes_project.sql"),
         include_str!("../migrations/0003_note_origin_and_imported_meetings.sql"),
         include_str!("../migrations/0004_create_tasks.sql"),
         include_str!("../migrations/0005_task_schedule.sql"),
         include_str!("../migrations/0006_task_recurrence.sql"),
+        include_str!("../migrations/0007_task_occurrences_one_kept_per_slot.sql"),
     ];
 
     /// Seeds `pool` with the real schema up to `up_to`, recording each
@@ -1897,15 +1899,15 @@ mod tests {
         apply_staged_restore(&config.path, SystemTime::now()).expect("apply must succeed");
 
         // The existing immutable list brings the restored file forward: the
-        // version 6 DDL — the same file `migrations()` in `lib.rs` serves
-        // plugin-sql for version 6 — applies cleanly on top of it.
+        // version 7 DDL — the same file `migrations()` in `lib.rs` serves
+        // plugin-sql for version 7 — applies cleanly on top of it.
         let url = format!("sqlite:{}?mode=rwc", live.display());
         let pool = SqlitePool::connect(&url).await.expect("could not open");
-        let migration: &str = include_str!("../migrations/0006_task_recurrence.sql");
+        let migration: &str = include_str!("../migrations/0007_task_occurrences_one_kept_per_slot.sql");
         sqlx::query(migration)
             .execute(&pool)
             .await
-            .expect("the older snapshot must be migratable to version 6");
+            .expect("the older snapshot must be migratable to version 7");
         let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM task_occurrences")
             .fetch_one(&pool)
             .await
@@ -1977,8 +1979,8 @@ mod tests {
         // accepted and must stay migratable. A migration that adds a table,
         // or a column to an existing table, without teaching `expected_schema`
         // fails here. The helper below hardcodes one entry per migration
-        // file, and `.take()` truncates silently — so a seventh migration
-        // would compare a v6 schema against `expected_schema(7)` and pass
+        // file, and `.take()` truncates silently — so an eighth migration
+        // would compare a v7 schema against `expected_schema(8)` and pass
         // exactly when the guard is needed. The lengths move together or this
         // fails first.
         assert_eq!(REAL_MIGRATIONS.len(), crate::migrations().len());

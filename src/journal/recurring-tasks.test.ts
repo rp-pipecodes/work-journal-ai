@@ -1,3 +1,4 @@
+import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   advancedSlot,
@@ -14,8 +15,9 @@ import {
   type SqlDriver,
   type SqlStatement,
   type Task,
+  type TaskOccurrence,
 } from './journal'
-import { fixedClock, openTestDatabase } from './testing/database'
+import { fixedClock, migrationSql, openTestDatabase } from './testing/database'
 
 // Every test drives the core through its public operations, against the same
 // SQL the app ships — including the index that permits exactly one Open
@@ -1255,5 +1257,256 @@ describe('exporting a Recurring Task', () => {
     await journal.editTask(task.id, { description: 'gym', schedule: null })
 
     expect((await journal.exportJournal()).markdown).toContain('## Open\n- [ ] gym')
+  })
+})
+
+describe('the schema keeps one occurrence per slot', () => {
+  /**
+   * An in-memory database built by migrations 1–6 alone — the shape a journal
+   * carried before migration 7 — so the de-duplication runs against what the
+   * bug actually left behind, not against a hand-shaped copy. Six files, by
+   * position: the seventh is the one under test, applied by hand below.
+   */
+  async function journalAtVersion6() {
+    const database = new DatabaseSync(':memory:')
+    const migrations = migrationSql().slice(0, 6)
+    for (const sql of migrations) database.exec(sql)
+
+    // The whole of a script at once, the way sqlx runs a migration — one
+    // transaction, every statement. The per-statement driver below is the app's
+    // ordinary writes; the migration under test is a script.
+    const execScript = (sql: string) => database.exec(sql)
+
+    /** Direct SQL, as the de-duplication itself is written. */
+    const driver: SqlDriver = {
+      async execute(sql, params) {
+        database.prepare(sql).run(...(params as never[]))
+      },
+      async select<Row>(sql: string, params: unknown[]) {
+        return database.prepare(sql).all(...(params as never[])) as Row[]
+      },
+      async transaction(statements) {
+        database.exec('BEGIN')
+        try {
+          for (const { sql, params } of statements) {
+            database.prepare(sql).run(...(params as never[]))
+          }
+          database.exec('COMMIT')
+        } catch (error) {
+          database.exec('ROLLBACK')
+          throw error
+        }
+      },
+    }
+    return { driver, execScript, close: () => database.close() }
+  }
+
+  /**
+   * A series that has kept through June 15th: one row per day, the newest kept
+   * pointing back at the one whose completion advanced to it — the chain
+   * `canUndoCompletion` reads. Seeded by hand, exactly as the app's own writes
+   * left it before migration 7.
+   */
+  async function seedSeriesThroughJune15th(driver: SqlDriver): Promise<void> {
+    await driver.execute(
+      `INSERT INTO tasks (id, description, created_at, scheduled_date, scheduled_time,
+                          recurrence_unit, recurrence_interval, recurrence_anchor_date)
+       VALUES ('t1', 'stand-up', '2026-05-20T09:00:00.000Z', '2026-06-16', '09:00',
+               'day', 1, '2026-06-01')`,
+      [],
+    )
+
+    let previous = ''
+    for (let day = 1; day <= 15; day += 1) {
+      const date = `2026-06-${String(day).padStart(2, '0')}`
+      const id = `occ-${date}`
+      await driver.execute(
+        `INSERT INTO task_occurrences (id, task_id, scheduled_date, scheduled_time,
+                                       completed_at, created_at, advanced_from)
+         VALUES (?, 't1', ?, '09:00', ?, ?, ?)`,
+        [id, date, `2026-06-${String(day).padStart(2, '0')}T10:00:00.000Z`,
+         `2026-06-${String(day).padStart(2, '0')}T10:00:00.000Z`, day === 1 ? null : previous],
+      )
+      previous = id
+    }
+
+    // The Open occurrence the completion on the 15th advanced to.
+    await driver.execute(
+      `INSERT INTO task_occurrences (id, task_id, scheduled_date, scheduled_time,
+                                     completed_at, created_at, advanced_from)
+       VALUES ('occ-open', 't1', '2026-06-16', '09:00', NULL,
+               '2026-06-15T10:00:00.000Z', 'occ-2026-06-15')`,
+      [],
+    )
+  }
+
+  /**
+   * The history-corruption route behind #186 and ADR 0037: a retimed edit
+   * landed the Open occurrence on a slot the series had already kept, and
+   * completing it wrote a second completion for the same day. Reproduced by
+   * hand against the version 6 schema, which cannot refuse it.
+   */
+  async function seedDuplicatedSlot(driver: SqlDriver): Promise<void> {
+    await seedSeriesThroughJune15th(driver)
+    await driver.execute(
+      `INSERT INTO task_occurrences (id, task_id, scheduled_date, scheduled_time,
+                                     completed_at, created_at, advanced_from)
+       VALUES ('occ-2026-06-15-later', 't1', '2026-06-15', '14:00',
+               '2026-06-15T14:30:00.000Z', '2026-06-15T14:30:00.000Z', NULL)`,
+      [],
+    )
+  }
+
+  it('de-duplicates a kept slot to the earliest completion and leaves Undo safe', async () => {
+    const { driver, execScript, close } = await journalAtVersion6()
+    openJournals.push(close)
+    await seedDuplicatedSlot(driver)
+
+    execScript(migrationSql().at(-1)!)
+
+    const rows = await driver.select<{ id: string; completed_at: string }>(
+      `SELECT id, completed_at FROM task_occurrences
+       WHERE task_id = 't1' AND scheduled_date = '2026-06-15'`,
+      [],
+    )
+    expect(rows.map((row) => row.id)).toEqual(['occ-2026-06-15'])
+    expect(rows[0].completed_at).toBe('2026-06-15T10:00:00.000Z')
+
+    // The chain the de-duplication must not break: the Open occurrence still
+    // points at the surviving completion, so Undo Completion stays on offer.
+    const open = await driver.select<{ advanced_from: string }>(
+      `SELECT advanced_from FROM task_occurrences WHERE id = 'occ-open'`,
+      [],
+    )
+    expect(open[0].advanced_from).toBe('occ-2026-06-15')
+  })
+
+  it('re-points advanced_from when the pointer names the occurrence that goes', async () => {
+    const { driver, execScript, close } = await journalAtVersion6()
+    openJournals.push(close)
+    // This time the Open occurrence points at the later completion, so the
+    // de-duplication has to move the pointer to what survives.
+    await seedSeriesThroughJune15th(driver)
+    await driver.execute(
+      `INSERT INTO task_occurrences (id, task_id, scheduled_date, scheduled_time,
+                                     completed_at, created_at, advanced_from)
+       VALUES ('occ-2026-06-15-later', 't1', '2026-06-15', '14:00',
+               '2026-06-15T14:30:00.000Z', '2026-06-15T14:30:00.000Z', NULL)`,
+      [],
+    )
+    await driver.execute(
+      `UPDATE task_occurrences SET advanced_from = 'occ-2026-06-15-later'
+       WHERE id = 'occ-open'`,
+      [],
+    )
+
+    execScript(migrationSql().at(-1)!)
+
+    const open = await driver.select<{ advanced_from: string }>(
+      `SELECT advanced_from FROM task_occurrences WHERE id = 'occ-open'`,
+      [],
+    )
+    expect(open[0].advanced_from).toBe('occ-2026-06-15')
+  })
+
+  it('still reads Undo Completion as safe after de-duplication', async () => {
+    const { driver, execScript, close } = await journalAtVersion6()
+    openJournals.push(close)
+    await seedDuplicatedSlot(driver)
+    execScript(migrationSql().at(-1)!)
+
+    const occurrences = await driver.select<{
+      id: string
+      completed_at: string | null
+      advanced_from: string | null
+    }>('SELECT id, completed_at, advanced_from FROM task_occurrences WHERE task_id = \'t1\'', [])
+    const mapped: TaskOccurrence[] = occurrences.map((row) => ({
+      id: row.id,
+      taskId: 't1',
+      scheduledDate: '',
+      scheduledTime: null,
+      completedAt: row.completed_at,
+      createdAt: '',
+      advancedFrom: row.advanced_from,
+    }))
+
+    expect(canUndoCompletion(mapped)).toBe(true)
+  })
+
+  it('the schema refuses a second kept occurrence on a slot the series kept', async () => {
+    const { journal, driver } = await journalAt('2026-03-16T08:00:00')
+    const task = await journal.createTask(
+      'gym',
+      { date: '2026-03-16', time: null },
+      every(1, 'day'),
+    )
+    await journal.completeTask(task.id)
+
+    // The route ADR 0037 closed in the application, now closed in the schema:
+    // no route may write a second completion for the same day again.
+    await expect(
+      driver.execute(
+        `INSERT INTO task_occurrences
+           (id, task_id, scheduled_date, scheduled_time, completed_at, created_at, advanced_from)
+         VALUES ('second', ?, '2026-03-16', '14:00', '2026-03-16T14:00:00.000Z',
+                 '2026-03-16T14:00:00.000Z', NULL)`,
+        [task.id],
+      ),
+    ).rejects.toThrow()
+  })
+
+  it('migrates a journal whose Open occurrence stands on a kept date', async () => {
+    const { driver, execScript, close } = await journalAtVersion6()
+    openJournals.push(close)
+    await seedSeriesThroughJune15th(driver)
+    // Pre-0037: the head was retimed onto the day just kept. Nothing is
+    // duplicated yet, but the kept 15th and the Open 15th are both there — a
+    // naive index over all rows would refuse the migrated state and fail the
+    // launch that runs migration 7.
+    await driver.execute(
+      `UPDATE task_occurrences
+       SET scheduled_date = '2026-06-15', scheduled_time = '14:00', advanced_from = NULL
+       WHERE id = 'occ-open'`,
+      [],
+    )
+
+    expect(() => execScript(migrationSql().at(-1)!)).not.toThrow()
+
+    const rows = await driver.select<{ id: string; completed_at: string | null }>(
+      `SELECT id, completed_at FROM task_occurrences
+       WHERE task_id = 't1' AND scheduled_date = '2026-06-15'`,
+      [],
+    )
+    expect(rows).toHaveLength(2)
+    expect(rows.find((row) => row.id === 'occ-open')!.completed_at).toBeNull()
+    expect(rows.find((row) => row.id === 'occ-2026-06-15')!.completed_at).not.toBeNull()
+  })
+
+  it('does not constrain the Open occurrence, which may stand on a kept date', async () => {
+    const { journal, driver } = await journalAt('2026-03-16T08:00:00')
+    const task = await journal.createTask(
+      'gym',
+      { date: '2026-03-16', time: null },
+      every(1, 'day'),
+    )
+    await journal.completeTask(task.id)
+
+    // The undo middle state: the successor is gone, the series' one Open
+    // occurrence reopening on the date it kept. The one-Open index governs
+    // how many Open rows there are; the slot index governs only kept ones —
+    // which is what makes it partial.
+    await driver.execute(
+      'DELETE FROM task_occurrences WHERE task_id = ? AND completed_at IS NULL',
+      [task.id],
+    )
+    await expect(
+      driver.execute(
+        `INSERT INTO task_occurrences
+           (id, task_id, scheduled_date, scheduled_time, completed_at, created_at, advanced_from)
+         VALUES ('open-on-kept-date', ?, '2026-03-16', NULL, NULL,
+                 '2026-03-16T12:00:00.000Z', NULL)`,
+        [task.id],
+      ),
+    ).resolves.toBeUndefined()
   })
 })
