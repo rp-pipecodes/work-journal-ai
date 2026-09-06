@@ -115,6 +115,10 @@ _Avoid_: Autocomplete, suggestion chip, typeahead
 
 ## Getting in
 
+**Onboarding**:
+A short introduction to capturing a Note and finding it again, followed by optional setup for the features the user wants; neither practice nor integrations are required for successful Onboarding. Offered automatically to new installations until finished or explicitly dismissed, and available manually from Settings to everyone, while existing users retain their normal startup experience.
+_Avoid_: Required setup, activation
+
 **Entry Point**:
 A way to begin either a Capture or Task creation. Notes and Tasks have distinct Entry Points so choosing one is always explicit.
 _Avoid_: Trigger, invocation, inference
@@ -258,5 +262,5 @@ The palette actually on screen once the OS has been asked: only `light` or `dark
 Cmd+Shift+D, from any window. Never a bare `d`, and it stands aside entirely wherever text is being entered: this app is a text field with a window around it, and a shortcut that could fire mid-word would eat the Capture it was meant to serve. Using it settles the Theme on a palette — after a toggle the app no longer follows the OS.
 
 **Start at Login**:
-Whether the app launches when the user logs in. Off until the user says otherwise, and asked once on first run so the app never adds itself to the login items uninvited. Declining is an answer, and so is closing the window without answering — from whichever section it was left on: the question is not asked again.
+Whether the app launches when the user logs in. Off until the user says otherwise and offered as optional setup during Onboarding; dismissing or replaying Onboarding preserves any saved choice.
 _Avoid_: Autostart, launch at startup, open at boot
