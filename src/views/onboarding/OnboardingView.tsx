@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import { Switch } from '@/components/ui/switch'
+import { Input } from '@/components/ui/input'
 import WindowTitleBar from '@/components/WindowTitleBar'
 import type { CalendarAccess, CalendarInfo, Desktop } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
@@ -10,9 +11,18 @@ import {
   HOTKEY_ACTIONS,
   type HotkeyStatuses,
 } from '@/settings/hotkey'
+import { useModelAccessState } from '@/components/model-access-state'
+import {
+  apiKeyStatus,
+  keychainRetryLabel,
+  modelAccessTransportAllows,
+  type ModelAccessAnswers,
+  typeTheKeyAgainLine,
+} from '@/settings/model-access'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 import { CalendarTicks } from '@/components/CalendarTicks'
 import { describeCalendarAccess } from '@/settings/calendar-access'
+import { notStored } from '@/views/settings/SettingsGroup'
 
 /**
  * The guided Onboarding flow, shown inside the Main Window — see
@@ -24,11 +34,10 @@ import { describeCalendarAccess } from '@/settings/calendar-access'
  * second owner of any setting: the controls reach the same `AppSettings` the
  * Settings section does.
  *
- * The steps themselves come and go: the sibling tickets add optional practice
- * and the remaining setup steps around these, so the flow is a short walk
- * over an ordered list rather than a fixed screen. The order is introduction
- * and optional practice → Start at Login → Meeting Import → Model Access
- * (once its ticket lands) → Finish in History.
+ * The flow is a short walk over an ordered list rather than a fixed screen:
+ * the introduction and optional practice → Start at Login → Meeting Import →
+ * Model Access → Finish in History, each step skippable on its own without
+ * the flow growing or the walk getting stuck.
  */
 export default function OnboardingView({
   desktop,
@@ -64,7 +73,7 @@ export default function OnboardingView({
     setPractice(next)
   }
 
-  // The Meeting Import answers kept for the life of the window, so Back
+  // The optional-setup answers kept for the life of the window, so Back
   // shows what was just chosen without re-reading the file mid-save — the
   // same reason the practice attempt lives here rather than in the step. A
   // remount re-reading the file while the previous mount's write is still in
@@ -72,6 +81,7 @@ export default function OnboardingView({
   // mount of this view — a replay — starts with nothing kept and reads the
   // file again.
   const meetingKept = useRef<MeetingKept | null>(null)
+  const modelKept = useRef<ModelAccessKept | null>(null)
 
   useEffect(() => {
     void desktop.hotkeyStatus().then(setHotkeys, (error: unknown) => {
@@ -160,14 +170,28 @@ export default function OnboardingView({
     )
   }
 
+  if (step === 'meeting-import') {
+    return (
+      <OnboardingShell desktop={desktop}>
+        <MeetingImportStep
+          desktop={desktop}
+          settings={settings}
+          kept={meetingKept}
+          onBack={() => setStep('start-at-login')}
+          onNext={() => setStep('model-access')}
+          onSkipOnboarding={onDone}
+        />
+      </OnboardingShell>
+    )
+  }
+
   return (
     <OnboardingShell desktop={desktop}>
-      <MeetingImportStep
+      <ModelAccessStep
         desktop={desktop}
         settings={settings}
-        kept={meetingKept}
-        onBack={() => setStep('start-at-login')}
-        onSkipStep={onDone}
+        kept={modelKept}
+        onBack={() => setStep('meeting-import')}
         onSkipOnboarding={onDone}
         onOpenHistory={onDone}
       />
@@ -175,12 +199,8 @@ export default function OnboardingView({
   )
 }
 
-/**
- * The optional setup steps in walking order. Model Access joins after
- * Meeting Import once its ticket lands; until then Meeting Import is the last
- * available setup step and finishes directly in History.
- */
-type Step = 'introduction' | 'start-at-login' | 'meeting-import'
+/** The optional setup steps in walking order. */
+type Step = 'introduction' | 'start-at-login' | 'meeting-import' | 'model-access'
 
 /**
  * One practice attempt. Replaced wholesale on every Try it, so no flag from
@@ -209,6 +229,18 @@ interface MeetingKept {
   problem: string | null
   known: boolean
   failed: boolean
+  seeded: boolean
+}
+
+/**
+ * The Model Access answers a step left behind, in the shared shape the step
+ * and the hook both speak — plus whether the saved answers were ever read at
+ * all. Kept in the flow rather than the step, so Back and Continue show what
+ * was just saved instead of re-reading the file while a save is still in
+ * flight. What the Keychain holds is never kept here: only whether it holds
+ * one.
+ */
+interface ModelAccessKept extends ModelAccessAnswers {
   seeded: boolean
 }
 
@@ -527,28 +559,25 @@ function StartAtLoginStep({
  *
  * A change is saved immediately; a refusal, an empty selection, and a failed
  * save are each said plainly, offer a retry or recovery, and never block the
- * way on. This is the last available setup step until the Model Access ticket
- * lands, so continuing finishes directly in History.
+ * way on to Model Access.
  */
 function MeetingImportStep({
   desktop,
   settings,
   kept,
   onBack,
-  onSkipStep,
+  onNext,
   onSkipOnboarding,
-  onOpenHistory,
 }: {
   desktop: Desktop
   settings: AppSettings
   /** The answers the flow keeps for the step across Back and Continue. */
   kept: { current: MeetingKept | null }
   onBack: () => void
-  /** The walk finishes, skipped or not: this is the last setup step. */
-  onSkipStep: () => void
+  /** The walk advances to Model Access, skipped or not. */
+  onNext: () => void
   /** The whole flow is deliberately dismissed. */
   onSkipOnboarding: () => void
-  onOpenHistory: () => void
 }) {
   // The wish for Import and the ticked calendars, seeded from what the file
   // holds — the same answers Settings reads — or from what the flow kept,
@@ -1032,6 +1061,320 @@ function MeetingImportStep({
        * merely appearing. The alerts above announce themselves, so while one
        * of them is up this stays quiet.
        */}
+      <p
+        role="status"
+        aria-live="polite"
+        className="type-meta min-h-4 text-muted-foreground"
+      >
+        {statusText}
+      </p>
+
+      <footer className="flex items-center justify-between gap-3 pt-2">
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" onClick={onBack}>
+            Back
+          </Button>
+          <Button variant="ghost" onClick={onNext}>
+            Skip this step
+          </Button>
+          <Button variant="ghost" onClick={onSkipOnboarding}>
+            Skip onboarding
+          </Button>
+        </div>
+        <Button onClick={onNext}>Continue</Button>
+      </footer>
+    </>
+  )
+}
+
+/**
+ * The optional Model Access step. It offers the same Model Access the Settings
+ * section offers — a Base URL, a Model name and an API Key — through the same
+ * shared `useModelAccessState` the Settings group runs on, so a choice made
+ * here is the choice Settings reads, and replaying the flow later reads back
+ * whatever was saved. The step owns only its own frame: the words around the
+ * facts, and the walk's Back-and-Continue memory.
+ *
+ * The three parts are saved the moment they are made, exactly as in Settings:
+ * the Base URL and the Model on every keystroke, the Key when Save is pressed.
+ * Nothing here sends a model request, and nothing claims the endpoint was
+ * tried: saving configuration is not a connection test, the step says the
+ * configuration is unverified, and the first explicitly requested Standup Post
+ * is what exercises it — and a Base URL the Key may not travel to is
+ * needs-attention, never configured. A refusal is said plainly with a retry,
+ * and never blocks the way on. This is the last setup step, so continuing
+ * finishes directly in History.
+ */
+function ModelAccessStep({
+  desktop,
+  settings,
+  kept,
+  onBack,
+  onSkipOnboarding,
+  onOpenHistory,
+}: {
+  desktop: Desktop
+  settings: AppSettings
+  /** The answers the flow keeps for the step across Back and Open History. */
+  kept: { current: ModelAccessKept | null }
+  onBack: () => void
+  /** The whole flow is deliberately dismissed. */
+  onSkipOnboarding: () => void
+  /** The walk finishes, skipped or not: this is the last setup step. */
+  onOpenHistory: () => void
+}) {
+  // The flow's answers as this mount found them, captured once — the value
+  // this mount seeds from, and what Back and Continue show without re-reading
+  // the file mid-save. Captured into state rather than passed to the hook
+  // straight from the ref, so the hook never holds the flow's own ref.
+  const [mountAnswers] = useState(() => kept.current)
+  // Whether this mount resumes answers the flow already read: the only case
+  // the file and the Keychain are left alone. Read during render, before any
+  // effect leaves this mount's own answers behind.
+  const [resumed] = useState(() => kept.current?.seeded ?? false)
+  // Whether this mount's reads have settled. Kept as state rather than by
+  // writing the flow's ref directly from the hook's callback: the callback
+  // runs outside render, and the effect below writes the flow's ref — the
+  // same shape the other steps' kept refs live under.
+  const [readsSettled, setReadsSettled] = useState(false)
+  // The saved answers, read back when this is a fresh mount of the step.
+  // Entering or replaying the step never asks macOS for anything and never
+  // sends a model request.
+  const startStoredRead = useMemo(
+    () =>
+      resumed
+        ? null
+        : () =>
+            settings.load().then((stored) => ({
+              modelBaseUrl: stored.modelBaseUrl,
+              model: stored.model,
+            })),
+    [resumed, settings],
+  )
+  // The one Model Access behaviour the Settings group runs on, seeded from
+  // what the file and the Keychain hold — the same answers Settings reads —
+  // or from what the flow kept, when Back and Continue remount the step. The
+  // Key itself is never seeded back in: what the Keychain holds is not this
+  // window's to keep, and the step only ever says whether there is one.
+  const access = useModelAccessState({
+    desktop,
+    settings,
+    seed: mountAnswers,
+    askKeychainOnMount: !resumed,
+    startStoredRead,
+    // Read, whichever way each went: only once both have settled has the flow
+    // the answers a later mount may resume, so Back in the gap still re-reads
+    // rather than resuming nothing. The hook calls this only while this mount
+    // is still on screen, so a mount that leaves before its reads settle never
+    // marks its kept answers as read.
+    onInitialSettled: () => setReadsSettled(true),
+  })
+
+  // Leaves the answers behind on every render, for the next mount of this
+  // step: Back and Open History show what was just saved instead of re-reading
+  // the file while a save is still in flight. `seeded` is not owned here — the
+  // settling read above is the one that sets it — so it is carried over.
+  useEffect(() => {
+    // `kept` is the flow's own ref, written here exactly as the Meeting
+    // Import step writes its own; the immutability rule mistakes it for a
+    // plain prop because its value also seeds the shared hook below.
+    // eslint-disable-next-line react-hooks/immutability
+    kept.current = {
+      seeded: kept.current?.seeded || readsSettled,
+      modelBaseUrl: access.modelBaseUrl,
+      model: access.model,
+      keySet: access.keySet,
+      keychainProblem: access.keychainProblem,
+      keychainRefusal: access.keychainRefusal,
+      unsaved: access.unsaved,
+    }
+  })
+
+  // The step's standing, for the one status region below: off, configured,
+  // or waiting on a missing part — but never a promise the endpoint can keep.
+  // Saving configuration is not a connection test, so a configured line says
+  // the endpoint has not been tried — and a Base URL the Key may not travel
+  // to (the rule `src-tauri/src/standup.rs` enforces where the Key would be
+  // attached) is needs-attention, never configured. The alerts above announce
+  // themselves, so while one of them is up this stays quiet — and while the
+  // Keychain has not answered, there is nothing truthful to say about a key
+  // nobody can see.
+  const typedKey = access.typedKey
+  const { keychainProblem, keychainRefusal, keySet, model, modelBaseUrl, unsaved } =
+    access
+  let statusText = ''
+  if (
+    keychainProblem === null &&
+    !unsaved.modelBaseUrl &&
+    !unsaved.model &&
+    keySet !== null
+  ) {
+    const hasBaseUrl = modelBaseUrl.trim() !== ''
+    const hasModel = model.trim() !== ''
+    if (hasBaseUrl && !modelAccessTransportAllows(modelBaseUrl.trim())) {
+      statusText = `The API Key cannot travel to ${modelBaseUrl.trim()} — the Base URL must be https, unless the host is this Mac itself (localhost, 127.0.0.0/8, or ::1). Nothing has been sent.`
+    } else if (hasBaseUrl && hasModel && keySet) {
+      statusText = `Standup Post is set to ask ${model.trim()}. Nothing has been sent yet, so this endpoint has not been tried.`
+    } else if (!hasModel && !keySet) {
+      statusText = 'Model Access is off — everything else in the journal works without it.'
+    } else {
+      const missing: string[] = []
+      if (!hasBaseUrl) missing.push('a Base URL')
+      if (!hasModel) missing.push('a Model')
+      if (!keySet) missing.push('an API Key')
+      statusText = `A Standup Post needs all three together — add ${listMissing(missing)}.`
+    }
+  }
+
+  return (
+    <>
+      <header className="flex flex-col gap-1">
+        <h1 className="type-title">Write Standup Posts with a model?</h1>
+        <p className="type-body text-muted-foreground">
+          Optional — a model can write your Standup Post for you to read and
+          paste. Any OpenAI-compatible endpoint works, and you can change it
+          any time in Settings. Notes and Tasks work without it.
+        </p>
+      </header>
+
+      <div className="flex flex-col gap-2">
+        <h2 className="type-section">
+          <label htmlFor="onboarding-model-base-url">Base URL</label>
+        </h2>
+        <p className="type-meta text-muted-foreground">
+          Where the model is. Any OpenAI-compatible endpoint.
+        </p>
+        <Input
+          id="onboarding-model-base-url"
+          className="w-full"
+          value={modelBaseUrl}
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(event) => access.onBaseUrlChange(event.target.value)}
+        />
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <h2 className="type-section">
+          <label htmlFor="onboarding-model">Model</label>
+        </h2>
+        <p className="type-meta text-muted-foreground">
+          Which model to ask, in that endpoint&apos;s own words.
+        </p>
+        <Input
+          id="onboarding-model"
+          className="w-full"
+          value={model}
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(event) => access.onModelChange(event.target.value)}
+        />
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <h2 className="type-section">
+          <label htmlFor="onboarding-api-key">API Key</label>
+        </h2>
+        <p className="type-meta text-muted-foreground">
+          Kept in the macOS Keychain rather than in the settings file, and
+          never shown again.
+        </p>
+        <div className="flex items-center gap-2">
+          <Input
+            id="onboarding-api-key"
+            type="password"
+            className="w-full"
+            value={typedKey}
+            spellCheck={false}
+            autoComplete="off"
+            onChange={(event) => access.onTypeKey(event.target.value)}
+          />
+          <Button
+            size="sm"
+            disabled={typedKey.trim() === ''}
+            onClick={access.saveKey}
+          >
+            Save
+          </Button>
+        </div>
+      </div>
+
+      {unsaved.modelBaseUrl && (
+        <p role="alert" className="type-meta text-destructive">
+          {notStored('Base URL')}{' '}
+          <Button
+            variant="link"
+            size="xs"
+            aria-label="Try saving the Base URL again"
+            onClick={access.retryBaseUrl}
+          >
+            Try again
+          </Button>
+        </p>
+      )}
+
+      {unsaved.model && (
+        <p role="alert" className="type-meta text-destructive">
+          {notStored('Model')}{' '}
+          <Button
+            variant="link"
+            size="xs"
+            aria-label="Try saving the Model again"
+            onClick={access.retryModel}
+          >
+            Try again
+          </Button>
+        </p>
+      )}
+
+      {keychainProblem !== null && (
+        <p role="alert" className="type-meta text-destructive">
+          {keychainProblem}{' '}
+          {keychainRefusal === 'save' && typedKey.trim() === '' ? (
+            // The refusal survived a remount that did not keep the typed Key:
+            // a retry would save nothing, so the user is told what to do
+            // instead of being handed a no-op press.
+            <span className="text-destructive">{typeTheKeyAgainLine()}</span>
+          ) : (
+            keychainRefusal !== null && (
+              <Button
+                variant="link"
+                size="xs"
+                aria-label={keychainRetryLabel(keychainRefusal)}
+                onClick={access.retryKeychain}
+              >
+                Try again
+              </Button>
+            )
+          )}
+        </p>
+      )}
+
+      {/* Held back only until the Keychain has answered once: before that
+          there is nothing truthful to say about a key nobody can see, and the
+          line above says why. A call that fails after an answer is a different
+          thing — the key is still known to be there, and Clear is the only way
+          out of an entry that outlives an uninstall, so it stays put for the
+          user to unlock the Keychain and press again. */}
+      {keySet !== null && (
+        <div className="flex items-center justify-between gap-6">
+          <p className="type-meta text-muted-foreground">
+            {apiKeyStatus(keySet)}
+          </p>
+          {keySet === true && (
+            <Button variant="outline" size="sm" onClick={access.clearKey}>
+              Clear
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/*
+       * The one status the step keeps saying. It is here before there is
+       * anything to say, so that what it says next is announced rather than
+       * merely appearing. The alerts above announce themselves, so while one
+       * of them is up this stays quiet.
+       */}
       <p role="status" aria-live="polite" className="type-meta min-h-4 text-muted-foreground">
         {statusText}
       </p>
@@ -1041,7 +1384,7 @@ function MeetingImportStep({
           <Button variant="ghost" onClick={onBack}>
             Back
           </Button>
-          <Button variant="ghost" onClick={onSkipStep}>
+          <Button variant="ghost" onClick={onOpenHistory}>
             Skip this step
           </Button>
           <Button variant="ghost" onClick={onSkipOnboarding}>
@@ -1052,4 +1395,10 @@ function MeetingImportStep({
       </footer>
     </>
   )
+}
+
+/** The missing parts of Model Access, as one English list. */
+function listMissing(parts: string[]): string {
+  if (parts.length === 1) return parts[0]
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
 }

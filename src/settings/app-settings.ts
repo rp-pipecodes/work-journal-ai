@@ -22,6 +22,20 @@ import {
 } from './settings'
 import { readTheme, writeTheme, type Theme } from './theme'
 
+/**
+ * One part of Model Access, as the save that changed it says. A save speaks
+ * only the part it wrote: the two ordinary fields announce the value the save
+ * landed — never a re-read of the file, which could carry an older answer
+ * than the one the user is looking at — and a Key save announces whether the
+ * Keychain now holds a Key, which it knows without asking the Keychain again.
+ * A field save therefore never touches the Keychain, and a refused Keychain
+ * can never take a field save's announcement down with it.
+ */
+export type ModelAccessChange =
+  | { modelBaseUrl: string }
+  | { model: string }
+  | { keySet: boolean }
+
 export interface AppSettings {
   /** Every setting at once, with a default wherever the store is silent. */
   load(): Promise<Settings>
@@ -79,12 +93,32 @@ export interface AppSettings {
   /** Which calendars an Import reads. Announced for the same reason. */
   saveImportCalendars(importCalendars: string[]): Promise<void>
   /**
-   * Where the model is. Not announced: nothing but the window it was typed in
-   * is looking at it, and whatever reads it next reads it when it needs it.
+   * Whether Model Access has its three parts, remembered and announced — the
+   * two that are ordinary settings, and whether the Keychain holds the Key.
+   * Announced because the Settings group and the Onboarding flow's step share
+   * this very instance: a choice saved by the flow must reach the mounted
+   * section without its state being rebuilt. A settled save announces only
+   * the part it wrote — the two ordinary fields each announce the value the
+   * save just landed, and a Key save knows the Keychain now holds (or no
+   * longer holds) a Key without asking it again — so a Base URL keystroke
+   * never touches the Keychain, and only the newest save of a part speaks, so
+   * an older save settling late never puts an older value back. The Key
+   * itself never travels on the announcement — only whether the Keychain
+   * holds one.
    */
+  onModelAccessChanged(handle: (change: ModelAccessChange) => void): Unlisten
+  /** Where the model is. Stored, and announced for the reason above. */
   saveModelBaseUrl(modelBaseUrl: string): Promise<void>
   /** Which model to ask. Stored the same way, and for the same reason. */
   saveModel(model: string): Promise<void>
+  /**
+   * Hands the API Key to the Keychain — reached through Rust, and announced
+   * as held or not once it settles, for the reason above. What the Keychain
+   * holds is never read back into this window; only whether it holds one is.
+   */
+  saveApiKey(apiKey: string): Promise<void>
+  /** Takes the API Key out of the Keychain. Announced the same way. */
+  clearApiKey(): Promise<void>
   /**
    * The prompt a Standup Post is written under. Stored the same way, and for
    * the same reason: nothing but the window it was typed in is looking at it,
@@ -135,6 +169,39 @@ export function createAppSettings(desktop: Desktop): AppSettings {
   const importChanged = new Set<
     (imported: { importMeetings: boolean; importCalendars: string[] }) => void
   >()
+  // Who is listening for a Model Access save, in this window. In-window
+  // rather than a Desktop announcement, for the same reason as the Import
+  // one above: the two controls that read the answer — the Settings group
+  // and the Onboarding step — share this very instance.
+  const modelAccessChanged = new Set<(change: ModelAccessChange) => void>()
+  // How many saves of each part have been started in this window. A save
+  // that started before a newer one of the same part has been undone by it by
+  // the time it settles — announcing it would put the older value back over
+  // the newer one's — so only the save that is still the newest of its part
+  // when it settles speaks. One counter per part: a keystroke into one field
+  // never silences a save of the other, and a Key save never silences a
+  // field save.
+  let modelBaseUrlSaves = 0
+  let modelSaves = 0
+  let apiKeySaves = 0
+
+  /**
+   * Announces a settled Model Access save, as the caller's own landed value
+   * rather than a re-read of the file: a re-read resolves on its own, and an
+   * older re-read arriving after a newer keystroke has rendered would put the
+   * older text back under the cursor. Announced only while this is still the
+   * newest save of its part, for the same reason — see
+   * docs/adr/0028-the-initial-read-seeds-only-what-the-user-has-not-changed.md.
+   * Best-effort, like every other announcement: it is a synchronous call to
+   * the listeners in this window, so there is nothing to refuse with.
+   */
+  function announceModelAccess(
+    newest: boolean,
+    change: ModelAccessChange,
+  ): void {
+    if (!newest) return
+    for (const handle of modelAccessChanged) handle(change)
+  }
 
   /**
    * Announces a settled Import save, with both keys as the file holds them
@@ -232,12 +299,53 @@ export function createAppSettings(desktop: Desktop): AppSettings {
       announceImport()
     },
 
+    /**
+     * A Model Access save landed, in this window. Heard by the Settings
+     * group so a choice saved by the Onboarding flow reaches the mounted
+     * section without its state being rebuilt — the Base URL, the Model and
+     * the Key are one fact, however many controls write it, and rebuilding
+     * would throw away what else the user has unsaved in Settings. Announced
+     * after the save settles, so a departure before it settles still reaches
+     * the control that stayed.
+     */
+    onModelAccessChanged(handle) {
+      modelAccessChanged.add(handle)
+      return () => {
+        modelAccessChanged.delete(handle)
+      }
+    },
+
     async saveModelBaseUrl(modelBaseUrl) {
+      const save = ++modelBaseUrlSaves
       await writeModelBaseUrl(await store(), modelBaseUrl)
+      // After it took, and only if no newer Base URL save has been started
+      // since: a keystroke that settles after the next one has already been
+      // typed must not put its older value back over it. The value announced
+      // is this save's own, never a re-read of the file — the two could
+      // disagree, and the re-read could arrive last.
+      announceModelAccess(save === modelBaseUrlSaves, { modelBaseUrl })
     },
 
     async saveModel(model) {
+      const save = ++modelSaves
       await writeModel(await store(), model)
+      announceModelAccess(save === modelSaves, { model })
+    },
+
+    async saveApiKey(apiKey) {
+      const save = ++apiKeySaves
+      await desktop.saveApiKey(apiKey)
+      // The Keychain took the Key, so this save knows the answer without
+      // asking again — and a settled save that is no longer the newest Key
+      // change holds its tongue, as the newest one has already said what
+      // came to hold.
+      announceModelAccess(save === apiKeySaves, { keySet: true })
+    },
+
+    async clearApiKey() {
+      const save = ++apiKeySaves
+      await desktop.clearApiKey()
+      announceModelAccess(save === apiKeySaves, { keySet: false })
     },
 
     async saveStandupPrompt(standupPrompt) {
