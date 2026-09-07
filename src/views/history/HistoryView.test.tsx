@@ -411,8 +411,8 @@ describe('Copy notes + completed work', () => {
 
     const copy = (await screen.findByRole('menuitem', {
       name: 'Copy notes + completed work',
-    })) as HTMLButtonElement
-    expect(copy.disabled).toBe(true)
+    })) as HTMLElement
+    expect(copy.getAttribute('aria-disabled')).toBe('true')
     // The rule is readable rather than hidden: the disabled row carries it as
     // visible text…
     expect(copy.parentElement?.textContent).toContain(
@@ -438,8 +438,8 @@ describe('Copy notes + completed work', () => {
 
     const copy = (await screen.findByRole('menuitem', {
       name: 'Copy notes + completed work',
-    })) as HTMLButtonElement
-    expect(copy.disabled).toBe(true)
+    })) as HTMLElement
+    expect(copy.getAttribute('aria-disabled')).toBe('true')
     expect(copy.parentElement?.textContent).toContain(
       'Completed work has no Project, so this is only offered for Any Project.',
     )

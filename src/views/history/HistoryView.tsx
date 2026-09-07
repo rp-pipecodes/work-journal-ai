@@ -35,6 +35,13 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import {
+  Menu,
+  MenuContent,
+  MenuGroup,
+  MenuItem,
+  MenuTrigger,
+} from '@/components/ui/menu'
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -1118,37 +1125,35 @@ function Copies({
           <ClipboardCopyIcon data-icon="inline-start" />
           Copy notes ({noteCount})
         </Button>
-        <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger
+        {/*
+          A real menu rather than a popover with buttons: arrow keys,
+          typeahead and focus management come with it. The disabled row
+          carries the rule as a group hint beneath the item, so the item's
+          own name stays exactly what the action does.
+        */}
+        <Menu open={open} onOpenChange={(next) => setOpen(next)}>
+          <MenuTrigger
             render={
               <Button
                 variant="outline"
                 size="sm"
                 aria-label="More copy options"
-                aria-haspopup="menu"
                 className="rounded-l-none px-1.5"
               />
             }
           >
             <ChevronDownIcon data-icon="inline-start" />
-          </PopoverTrigger>
-          <PopoverContent align="end" className="w-80 p-1">
-            <div role="menu" className="flex flex-col gap-1">
-              <Button
-                role="menuitem"
-                size="sm"
-                variant="ghost"
-                className="w-full justify-start"
-                onClick={() => {
-                  setOpen(false)
-                  onCopyReviewMaterial()
-                }}
+          </MenuTrigger>
+          <MenuContent align="end" className="w-80">
+            <MenuGroup className="flex flex-col gap-1">
+              <MenuItem
+                onClick={() => onCopyReviewMaterial()}
                 disabled={!reviewAllowed}
                 aria-describedby={reviewAllowed ? undefined : reviewRuleId}
               >
                 <ClipboardCopyIcon data-icon="inline-start" />
                 Copy notes + completed work
-              </Button>
+              </MenuItem>
               {!reviewAllowed && (
                 <p
                   id={reviewRuleId}
@@ -1157,9 +1162,9 @@ function Copies({
                   {REVIEW_PROJECT_RULE}
                 </p>
               )}
-            </div>
-          </PopoverContent>
-        </Popover>
+            </MenuGroup>
+          </MenuContent>
+        </Menu>
       </div>
     </div>
   )

@@ -5,10 +5,12 @@ import { useOffScreen } from '@/components/on-screen-context'
 import { useOnScreenToast } from '@/components/on-screen-toast'
 import { Button } from '@/components/ui/button'
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
+  Menu,
+  MenuContent,
+  MenuGroup,
+  MenuItem,
+  MenuTrigger,
+} from '@/components/ui/menu'
 import { Toaster } from '@/components/ui/sonner'
 import { formatJournalDay, type Clock, type Journal } from '@/journal/journal'
 import {
@@ -60,46 +62,40 @@ export default function StandupPostView({
   // latter so a replacement post can say so. Nothing else about a call is
   // kept, and nothing here is persisted.
   const [post, setPost] = useState<{ markdown: string; model: string } | null>(null)
-  // The yesterday copy's claim, said twice — a toast for whoever is looking,
-  // and a live region for whoever is not — and naming its subject in the
-  // button's own words. Held as the selection it was made for, so it retires
-  // itself the moment the session pushes another: focus, wake, a journal or
-  // Task change, and the midnight rollover all re-read the selection, and a
-  // claim about yesterday that re-read may have replaced is not true anymore.
-  const [yesterdayClaim, setYesterdayClaim] = useState<{
-    selection: StandupPostSelection
+  // The last copy's claim, said twice — a toast for whoever is looking, and
+  // a live region for whoever is not — and naming its subject in the button's
+  // own words. One claim, not one per copy: each landed copy replaces the
+  // last, so there is never an older claim waiting behind it to be
+  // re-announced. A yesterday claim is held as the selection it was made
+  // for, so it retires itself the moment the session pushes another: focus,
+  // wake, a journal or Task change, and the midnight rollover all re-read
+  // the selection, and a claim about yesterday that re-read may have
+  // replaced is not true anymore. A post claim has no selection behind it —
+  // the prose lives here — so this view is its only retire path besides a
+  // failed copy: Generate replacing the prose.
+  const [copyClaim, setCopyClaim] = useState<{
+    subject: Subject
+    selection: StandupPostSelection | null
     count: number
   } | null>(null)
+  // What the one live region says, derived, never held: '' until a copy lands
+  // and gone the moment its claim is. Deriving is what retires a claim that
+  // a re-read has made untrue — there is no state to forget to clear.
+  const copyLive =
+    copyClaim !== null &&
+    (copyClaim.subject === 'post' ||
+      (state.state === 'ready' &&
+        copyClaim.selection === state.selection))
+      ? copyClaim
+      : null
+  const copySaid =
+    copyLive !== null ? said(copyLive.subject, copyLive.count) : ''
   // The model being asked, while a call is in flight. Naming it is the whole
   // point: ten silent seconds read as broken without it.
   const [pending, setPending] = useState<string | null>(null)
   // Why there is no post, when there is not — one of the few kinds the call
   // answers with, rendered as one line. A previous post stays on screen.
   const [failure, setFailure] = useState<StandupFailure | null>(null)
-  // The post copy's claim, the same two ways. It is view state with no
-  // session behind it — the prose lives here — so this view is its only
-  // retire path besides a failed copy: Generate replacing the prose.
-  const [postClaim, setPostClaim] = useState<{ count: number } | null>(null)
-  // What the one live region says, derived, never held: '' until a copy lands
-  // and gone the moment its claim is. Deriving is what retires a claim that
-  // a re-read has made untrue — there is no state to forget to clear. When
-  // both copies are live, the one copied last speaks.
-  const yesterdaySaid =
-    state.state === 'ready' &&
-    yesterdayClaim !== null &&
-    yesterdayClaim.selection === state.selection
-      ? said('yesterday', yesterdayClaim.count)
-      : ''
-  const postSaid = postClaim !== null ? said('post', postClaim.count) : ''
-  const [lastCopy, setLastCopy] = useState<Subject | null>(null)
-  const copySaid =
-    yesterdaySaid !== '' && postSaid !== ''
-      ? lastCopy === 'yesterday'
-        ? yesterdaySaid
-        : postSaid
-      : postSaid !== ''
-        ? postSaid
-        : yesterdaySaid
   // The chevron menu is portalled out of the section, so it leaves the screen
   // with this view rather than being hidden with it. Nothing is copied by
   // closing it.
@@ -163,8 +159,11 @@ export default function StandupPostView({
 
       if (response.state === 'generated') {
         setPost({ markdown: response.markdown, model: stored.model })
-        // A new post retires the copy claim with the prose it was about.
-        setPostClaim(null)
+        // A new post retires the copy claim with the prose it was about —
+        // and only that one: a yesterday claim outlives the prose.
+        setCopyClaim((claim) =>
+          claim !== null && claim.subject === 'post' ? null : claim,
+        )
       } else {
         setFailure(response.failure)
       }
@@ -194,13 +193,41 @@ export default function StandupPostView({
     try {
       await desktop.copyToClipboard(await read())
       says.success(landed(subject))
-      setLastCopy(subject)
       return true
     } catch (error) {
       console.error(`could not copy ${subject}`, error)
-      says.failure(`Could not copy ${subject}.`)
+      says.failure(failed(subject))
       return false
     }
+  }
+
+  /**
+   * Claims the landed copy, replacing whatever the last one said. A repeat
+   * of the same live copy counts up, so its region says something new — a
+   * region announces on change, and identical text is silence. Counted from
+   * the claim as it stands rather than as this click first saw it, so two
+   * copies that overlap still count as two. A copy that fails retires the
+   * earlier claim rather than saying the opposite.
+   */
+  function claimCopy(
+    subject: Subject,
+    selection: StandupPostSelection | null,
+    copied: boolean,
+  ): void {
+    setCopyClaim((claim) =>
+      copied
+        ? {
+            subject,
+            selection,
+            count:
+              claim !== null &&
+              claim.subject === subject &&
+              (subject === 'post' || claim.selection === selection)
+                ? claim.count + 1
+                : 1,
+          }
+        : null,
+    )
   }
 
   /** The post onto the clipboard, and a confirmation naming it once there. */
@@ -208,16 +235,7 @@ export default function StandupPostView({
     if (post === null) return
     const { markdown } = post
 
-    if (await putOnClipboard('post', async () => markdown)) {
-      // A repeat of the same live copy counts up, so its region says
-      // something new — a region announces on change, and identical text is
-      // silence. Counted from the claim as it stands rather than as this
-      // click first saw it, so two copies that overlap still count as two.
-      setPostClaim((claim) => ({ count: (claim?.count ?? 0) + 1 }))
-    } else {
-      // A copy that fails retires the earlier claim.
-      setPostClaim(null)
-    }
+    claimCopy('post', null, await putOnClipboard('post', async () => markdown))
   }
 
   /**
@@ -232,24 +250,14 @@ export default function StandupPostView({
     if (state.state !== 'ready') return
     const { selection } = state
 
-    const copied = await putOnClipboard('yesterday', async () =>
-      buildStandupMaterial({ journal: await journal, selection }),
-    )
-
     // Claimed for this very selection: any re-read retires it by
-    // construction, since a new one is a new object. A repeat of the same
-    // live copy counts up, counted from the claim as it stands rather than
-    // as this click first saw it, so two copies that overlap count as two.
-    setYesterdayClaim((claim) =>
-      copied
-        ? {
-            selection,
-            count:
-              claim !== null && claim.selection === selection
-                ? claim.count + 1
-                : 1,
-          }
-        : null,
+    // construction, since a new one is a new object.
+    claimCopy(
+      'yesterday',
+      selection,
+      await putOnClipboard('yesterday', async () =>
+        buildStandupMaterial({ journal: await journal, selection }),
+      ),
     )
   }
 
@@ -301,17 +309,16 @@ export default function StandupPostView({
               </Button>
 
               {/*
-                The one copy control: yesterday as Markdown — what the user
-                pastes when there is no Model Access, the endpoint is down,
-                or the prose came back wrong — and, once generated, the post
-                itself. A split button rather than two: copying is a default
-                with an escape hatch rather than a decision every time. The
-                primary is whichever copy the reader most likely wants: the
-                post once one exists, yesterday until then. The menu holds the
-                other, disabled with its reason while there is no post to copy
-                or nothing to say. Refused under the same gate as Generate,
-                which is a day with nothing in either half, not anything about
-                the model.
+                The one copy control: yesterday's notes and tasks as Markdown
+                — what the user pastes when there is no Model Access, the
+                endpoint is down, or the prose came back wrong — and, once
+                generated, the post itself in the menu. A split button rather
+                than two: copying is a default with an escape hatch rather
+                than a decision every time. The primary is always yesterday:
+                the copy that works with no key, no network and no waiting,
+                so the button never changes identity under the reader.
+                Refused under the same gate as Generate, which is a day with
+                nothing in either half, not anything about the model.
               */}
               <CopySplit
                 postExists={post !== null}
@@ -477,10 +484,11 @@ function count(value: number, noun: string): string {
 }
 
 /**
- * The section's one copy control: a split button whose primary is whichever
- * copy the reader most likely wants — the post once one exists, yesterday
- * until then — and whose chevron menu holds the other. One visible button
- * rather than two copy buttons on one screen.
+ * The section's one copy control: a split button whose primary is always
+ * yesterday's notes and tasks — the copy that works with no key, no network
+ * and no waiting — and whose chevron menu holds the post once one exists.
+ * One visible button rather than two copy buttons on one screen, and one
+ * whose identity never changes under the reader.
  */
 function CopySplit({
   postExists,
@@ -497,73 +505,58 @@ function CopySplit({
   onCopyYesterday: () => void
   onCopyPost: () => void
 }) {
-  const primary: Subject = postExists ? 'post' : 'yesterday'
-  const variant: Subject = postExists ? 'yesterday' : 'post'
-  const variantDisabled = variant === 'post' ? !postExists : yesterdayRefused
-  const variantRuleId = `${variant}-rule`
-  const variantHint =
-    variant === 'post' ? 'Generate a post first.' : 'Nothing to say yet.'
-
-  function copyVariant() {
-    onOpenChange(false)
-    if (variant === 'post') onCopyPost()
-    else onCopyYesterday()
-  }
-
   return (
     <div className="flex shrink-0 items-center">
       <Button
         variant="outline"
         size="sm"
         className="rounded-r-none border-r-0"
-        onClick={() => {
-          if (primary === 'post') onCopyPost()
-          else onCopyYesterday()
-        }}
-        disabled={primary === 'yesterday' && yesterdayRefused}
+        onClick={onCopyYesterday}
+        disabled={yesterdayRefused}
       >
         <ClipboardCopyIcon data-icon="inline-start" />
-        {primary === 'post' ? 'Copy post' : 'Copy yesterday'}
+        Copy yesterday
       </Button>
-      <Popover open={open} onOpenChange={onOpenChange}>
-        <PopoverTrigger
+      {/*
+        A real menu rather than a popover with buttons: arrow keys,
+        typeahead and focus management come with it. The post row carries
+        its reason as a group hint beneath the item while there is no post
+        to copy, so the item's own name stays exactly what it does.
+      */}
+      <Menu open={open} onOpenChange={onOpenChange}>
+        <MenuTrigger
           render={
             <Button
               variant="outline"
               size="sm"
               aria-label="More copy options"
-              aria-haspopup="menu"
               className="rounded-l-none px-1.5"
             />
           }
         >
           <ChevronDownIcon data-icon="inline-start" />
-        </PopoverTrigger>
-        <PopoverContent align="end" className="w-64 p-1">
-          <div role="menu" className="flex flex-col gap-1">
-            <Button
-              role="menuitem"
-              size="sm"
-              variant="ghost"
-              className="w-full justify-start"
-              onClick={copyVariant}
-              disabled={variantDisabled}
-              aria-describedby={variantDisabled ? variantRuleId : undefined}
+        </MenuTrigger>
+        <MenuContent align="end" className="w-64">
+          <MenuGroup className="flex flex-col gap-1">
+            <MenuItem
+              onClick={() => onCopyPost()}
+              disabled={!postExists}
+              aria-describedby={!postExists ? 'copy-post-rule' : undefined}
             >
               <ClipboardCopyIcon data-icon="inline-start" />
-              {variant === 'post' ? 'Copy post' : 'Copy yesterday'}
-            </Button>
-            {variantDisabled && (
+              Copy post
+            </MenuItem>
+            {!postExists && (
               <p
-                id={variantRuleId}
+                id="copy-post-rule"
                 className="px-2 pb-1 type-micro text-muted-foreground"
               >
-                {variantHint}
+                Generate a post first.
               </p>
             )}
-          </div>
-        </PopoverContent>
-      </Popover>
+          </MenuGroup>
+        </MenuContent>
+      </Menu>
     </div>
   )
 }
@@ -571,14 +564,30 @@ function CopySplit({
 /**
  * Which of the two artifacts a copy is about, in the buttons' own words.
  * There are exactly two, and every sentence either of them says is built
- * from this one word, so the toast and the live region beside the button
+ * from this one subject, so the toast and the live region beside the button
  * cannot drift apart.
  */
 type Subject = 'post' | 'yesterday'
 
+/**
+ * What yesterday's copy is: the button says "yesterday" for brevity, but the
+ * confirmation says what that word covers — "yesterday" alone reads as when
+ * the copy happened rather than what landed.
+ */
+const YESTERDAY = "yesterday's notes and tasks" as const
+
 /** The one sentence a landed copy says, wherever it says it. */
 function landed(subject: Subject): string {
-  return `Copied ${subject} to the clipboard.`
+  return subject === 'post'
+    ? 'Copied post to the clipboard.'
+    : `Copied ${YESTERDAY} to the clipboard.`
+}
+
+/** The one sentence a failed copy says, wherever it says it. */
+function failed(subject: Subject): string {
+  return subject === 'post'
+    ? 'Could not copy post.'
+    : `Could not copy ${YESTERDAY}.`
 }
 
 /**
