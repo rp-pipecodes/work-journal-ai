@@ -2066,6 +2066,35 @@ describe('Model Access', () => {
     expect(stored.modelBaseUrl).toBe('http://localhost:11434/v2')
   })
 
+  it('asks the Keychain once on mount, even as the coordinated read lands after it', async () => {
+    // The window's coordinated read is published from an effect, after this
+    // group is already on screen: the Keychain is asked by its own effect so
+    // that later arrival does not ask it a second time — macOS can put an
+    // authorization prompt in front of each read.
+    const stored: Record<string, unknown> = {
+      startAtLogin: false,
+      modelBaseUrl: 'https://stored.example/v1',
+    }
+    const desktop = fakeDesktop({ stored })
+    let keychainAsks = 0
+    const ask = desktop.apiKeySet.bind(desktop)
+    desktop.apiKeySet = async () => {
+      keychainAsks += 1
+      return ask()
+    }
+
+    showSettings(desktop)
+
+    const baseUrl = await screen.findByLabelText('Base URL')
+    // The coordinated read has landed by the time the stored Base URL is
+    // showing; only the one mount-time ask may have happened.
+    await expect.poll(() => (baseUrl as HTMLInputElement).value).toBe(
+      'https://stored.example/v1',
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(keychainAsks).toBe(1)
+  })
+
   it('keeps the newest keystroke when an older save settles after it', async () => {
     // The older write is still in flight when the newer one lands: were its
     // announcement to speak — or to re-read the file — it would put the older

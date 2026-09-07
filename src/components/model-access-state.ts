@@ -113,62 +113,86 @@ export function useModelAccessState({
     onInitialSettledRef.current = onInitialSettled
   }, [onInitialSettled])
 
+  // Whether each of this mount's reads has settled, and whether the settled
+  // word has already been said. A mount owns up to two reads — whether the
+  // Keychain holds a Key, and the fields' saved answers — and each tracks
+  // itself, because they can start apart: a Settings window publishes its
+  // coordinated read from an effect, so the stored read can arrive after the
+  // Keychain has already answered. Asking the Keychain lives in an effect of
+  // its own, keyed on nothing that arrives later, so it is asked once.
+  const keychainSettledRef = useRef(!askKeychainOnMount)
+  const storedSettledRef = useRef(startStoredRead === null)
+  const settleSaidRef = useRef(false)
+
+  /**
+   * Says this mount's reads have settled, once every read it owns has — a
+   * mount that leaves before its reads settle (Back in the gap) never marks
+   * its kept answers seeded, so the next mount re-reads rather than resuming
+   * answers that never came.
+   */
+  function maybeSaySettled(): void {
+    if (!keychainSettledRef.current || !storedSettledRef.current) return
+    if (settleSaidRef.current) return
+    settleSaidRef.current = true
+    onInitialSettledRef.current?.()
+  }
+
   useEffect(() => {
-    // The reads this mount owns: whether the Keychain holds a Key, and the
-    // fields' saved answers when there is a read to seed from. A locked
-    // Keychain is an ordinary answer and must not take the rest of the read
-    // down with it — each settles on its own. Seeding is gated per field on
-    // a keystroke not having touched it, and a mount that leaves before the
-    // reads settle (Back in the gap) must not mark its kept answers seeded —
-    // the next mount re-reads rather than resuming answers that never came.
+    if (!askKeychainOnMount) return
     let alive = true
-    const settling: Promise<unknown>[] = []
-
-    if (askKeychainOnMount) {
-      settling.push(
-        desktop.apiKeySet().then(
-          (set) => {
-            if (!alive) return
-            setKeySet(set)
-            setKeychainProblem(null)
-            setKeychainRefusal(null)
-          },
-          (error: unknown) => {
-            if (!alive) return
-            console.error('could not ask the Keychain about the API Key', error)
-            refuseKeychain('read', error)
-          },
-        ),
-      )
-    }
-
-    if (startStoredRead !== null) {
-      settling.push(
-        Promise.resolve(startStoredRead()).then(
-          (stored) => {
-            if (!alive || stored === null) return
-            if (!baseUrlTouched.current) setModelBaseUrl(stored.modelBaseUrl)
-            if (!modelTouched.current) setModel(stored.model)
-          },
-          (error: unknown) => {
-            console.error('could not read the saved Model Access', error)
-          },
-        ),
-      )
-    }
-
-    // Read, whichever way each went: only once every read has settled has this
-    // mount the answers a later mount may resume.
-    if (settling.length > 0) {
-      void Promise.allSettled(settling).then(() => {
-        if (alive) onInitialSettledRef.current?.()
-      })
-    }
-
+    // Asked on its own rather than with the settings the store holds: a
+    // locked Keychain is an ordinary answer here, and it must not take the
+    // rest of the read down with it.
+    keychainSettledRef.current = false
+    void desktop.apiKeySet().then(
+      (set) => {
+        if (!alive) return
+        setKeySet(set)
+        setKeychainProblem(null)
+        setKeychainRefusal(null)
+        keychainSettledRef.current = true
+        maybeSaySettled()
+      },
+      (error: unknown) => {
+        if (!alive) return
+        console.error('could not ask the Keychain about the API Key', error)
+        refuseKeychain('read', error)
+        keychainSettledRef.current = true
+        maybeSaySettled()
+      },
+    )
     return () => {
       alive = false
     }
-  }, [askKeychainOnMount, desktop, startStoredRead])
+  }, [askKeychainOnMount, desktop])
+
+  useEffect(() => {
+    if (startStoredRead === null) return
+    let alive = true
+    // The saved answers, read back and seeded per field only until a
+    // keystroke has touched that field — the same rule the seeded Settings
+    // controls live under. See
+    // docs/adr/0028-the-initial-read-seeds-only-what-the-user-has-not-changed.md.
+    storedSettledRef.current = false
+    void Promise.resolve(startStoredRead()).then(
+      (stored) => {
+        if (!alive || stored === null) return
+        if (!baseUrlTouched.current) setModelBaseUrl(stored.modelBaseUrl)
+        if (!modelTouched.current) setModel(stored.model)
+        storedSettledRef.current = true
+        maybeSaySettled()
+      },
+      (error: unknown) => {
+        if (!alive) return
+        console.error('could not read the saved Model Access', error)
+        storedSettledRef.current = true
+        maybeSaySettled()
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, [startStoredRead])
 
   useEffect(() => {
     // A Model Access save landed — this surface's own, or the other's. The
