@@ -2033,8 +2033,15 @@ fn dismiss_practice_capture(app: tauri::AppHandle, ended: PracticeEnded) -> Resu
 /// How a practice Capture ended: submitted with the Note's Journal Day, or
 /// cancelled with nothing created. Must match `PracticeEnded` in
 /// `src/platform/desktop.ts`, as `src/platform/desktop-rust.test.ts` checks.
+/// Both attributes matter: `rename_all` spells the variants, while
+/// `rename_all_fields` spells the fields inside them — without the latter a
+/// `submitted` outcome arrives as `journal_day` and never deserializes.
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase", tag = "outcome")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "outcome"
+)]
 pub enum PracticeEnded {
     Submitted { journal_day: String },
     Cancelled,
@@ -2296,6 +2303,31 @@ mod tests {
         assert_eq!(
             DATABASE_URL,
             format!("sqlite:{}", backup::DATABASE_FILE_NAME)
+        );
+    }
+
+    /// The practice outcome crosses the webview boundary as JSON, and a field
+    /// spelled wrong on either side refuses the call before any command body
+    /// runs — a Capture window left standing with no way to dismiss it. These
+    /// are the literals the TypeScript side sends and reads, so a drift in
+    /// either direction fails here instead of on a user's screen.
+    #[test]
+    fn the_practice_outcome_matches_the_literals_the_webview_sends() {
+        let submitted: PracticeEnded =
+            serde_json::from_str(r#"{"outcome":"submitted","journalDay":"2026-03-12"}"#)
+                .expect("a submitted practice outcome must deserialize");
+        assert!(matches!(submitted, PracticeEnded::Submitted { .. }));
+
+        let cancelled: PracticeEnded = serde_json::from_str(r#"{"outcome":"cancelled"}"#)
+            .expect("a cancelled practice outcome must deserialize");
+        assert!(matches!(cancelled, PracticeEnded::Cancelled));
+
+        // And the way back: what this side emits for the Main Window to read
+        // carries the day under the same spelling.
+        let rendered = serde_json::to_value(&submitted).expect("must serialize");
+        assert_eq!(
+            rendered,
+            serde_json::json!({"outcome": "submitted", "journalDay": "2026-03-12"})
         );
     }
 }

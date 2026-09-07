@@ -80,10 +80,14 @@ export default function CaptureView({
    * Ends this showing as a practice ending: goes away through the practice
    * dismiss, which returns focus to the Main Window and reports the outcome
    * for the attempt holding it. A showing reports exactly once, however it
-   * ends — the dismissal carries the outcome, so the two cannot split.
+   * ends — the dismissal carries the outcome, so the two cannot split. The
+   * marker is cleared here rather than left for the next showing to correct,
+   * so nothing read between the dismissal and that showing can mistake this
+   * ended attempt for an open one.
    */
   const dismissPractice = useCallback(
     async (ended: PracticeEnded) => {
+      practiceRaised.current = false
       reset()
       await desktop.dismissPracticeCapture(ended)
     },

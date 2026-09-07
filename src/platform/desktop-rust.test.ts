@@ -344,6 +344,46 @@ describe('the onboarding state and commands', () => {
     expect(tsOutcomes).toEqual(rustOutcomes)
   })
 
+  it('spells the submitted day field the same on both sides', () => {
+    // Variants alone are not the contract: the day travels inside
+    // `Submitted`, and a field spelled `journal_day` on one side and
+    // `journalDay` on the other refuses the dismiss call before its body
+    // runs — leaving the Capture window standing.
+    const enumBody =
+      rustSource.match(/pub enum PracticeEnded \{([\s\S]*?)\n\}/)?.[1] ?? ''
+    const rustFields = [...enumBody.matchAll(/Submitted\s*\{([^}]*)\}/g)]
+      .flatMap(([, fields]) => [
+        ...fields.matchAll(/([a-z_][a-z0-9_]*)\s*:/g),
+      ])
+      .map(([, field]) => camel(field))
+
+    const unionBody =
+      desktop.match(/export type PracticeEnded =\n([\s\S]*?)\n\n/)?.[1] ?? ''
+    const submittedMember =
+      [...unionBody.matchAll(/\{([^{}]*)\}/g)]
+        .map(([, member]) => member)
+        .find((member) => member.includes("'submitted'")) ?? ''
+    const tsFields = [...submittedMember.matchAll(/([a-zA-Z_$][\w$]*)\s*:/g)]
+      .map(([, field]) => field)
+      .filter((field) => field !== 'outcome')
+
+    expect(rustFields).toEqual(['journalDay'])
+    expect(tsFields).toEqual(rustFields)
+
+    // And the attribute that makes the spelling true on the wire: on an enum,
+    // `rename_all` renames the variants only, so the field inside `Submitted`
+    // needs `rename_all_fields` (or a per-variant attribute) — without it both
+    // name lists above agree and the call still refuses `journalDay`. Read
+    // from the attribute directly above the enum, so an unrelated `#[serde]`
+    // elsewhere cannot satisfy this by accident.
+    const enumAt = rustSource.indexOf('pub enum PracticeEnded')
+    const attribute =
+      rustSource
+        .slice(Math.max(0, enumAt - 500), enumAt)
+        .match(/#\[serde\(([\s\S]*?)\)\]\s*$/)?.[1] ?? ''
+    expect(attribute).toContain('rename_all_fields')
+  })
+
   it('dismisses practice with the outcome the command receives', () => {
     // The webview sends the outcome under the name the command receives it
     // under; a rename on either side refuses the call before its body runs.
