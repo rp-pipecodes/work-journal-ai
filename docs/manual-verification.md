@@ -41,11 +41,14 @@ Everything else is checked against the release build.
 - [ ] The app launches and stays running with no Dock icon.
 - [ ] `Cmd+Tab` does not list the app.
 - [ ] A tray icon appears in the menu bar.
-- [ ] Clicking the tray icon opens a menu holding **New Note**, **New Task**, **View Notes**, **View Tasks**, **Copy Yesterday's Digest**, **Settings** and **Quit**, and nothing else.
+- [ ] Clicking the tray icon opens a menu holding **New Note**, **New Task**, **View Notes**, **View Tasks**, **View Standup Post**, **Settings**, a separator, **Copy Yesterday's Notes**, a separator and **Quit** — in that order, and nothing else.
 - [ ] **New Note** opens a capture window, with the Note Hotkey spelled out beside the item.
 - [ ] **New Task** opens the Task Creation window, with the Task Hotkey spelled out beside the item.
 - [ ] **View Notes** opens the Main Window, showing History.
 - [ ] **View Tasks** opens the Main Window, showing Tasks View; it does not open a second reading window.
+- [ ] **View Standup Post** opens the Main Window on the Standup Post section without spending a model call — no post appears until **Generate** is clicked.
+- [ ] **Copy Yesterday's Notes** puts yesterday's Notes on the clipboard without opening any window, and with the Main Window already open it leaves History's range exactly where it was.
+- [ ] On a morning with no Notes filed under yesterday, **Copy Yesterday's Notes** leaves the clipboard as it was — paste to confirm the previous contents are still there.
 - [ ] **Settings** opens the Main Window, showing Settings.
 - [ ] **Quit** ends the process — the tray icon disappears and nothing is left running.
 - [ ] Launching the app a second time while it is running — from Spotlight, and again from the Finder — leaves exactly one tray icon and one process each time, and opens a capture window rather than a second app.
@@ -174,15 +177,35 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 - [ ] Deleting the last Note of the most recent Occupied Day makes **View Notes** open on the previous Occupied Day next time.
 - [ ] `Escape` while the confirmation is open closes the confirmation only, not the window.
 
-## The Digest
+## Copying from History
 
-- [ ] **Copy Digest** on a single day puts one bullet per Note on the clipboard, oldest first, with no day heading and no times.
+- [ ] The header holds one copy button, **Copy notes (N)**, with a chevron beside it — not two copy buttons side by side.
+- [ ] N matches the number of Notes on screen, and follows both ends of the range and the Project.
+- [ ] **Copy notes** on a single day puts one bullet per Note on the clipboard, oldest first, with no day heading and no times.
 - [ ] Pasting into a plain-text editor and into a Markdown one both read correctly, with nothing to clean up.
-- [ ] **Copy Digest** over a range of days puts a heading above each day that has Notes, and none above the days that have none.
-- [ ] The confirmation names the same number of Notes as there are bullets on the clipboard.
+- [ ] **Copy notes** over a range of days puts a heading above each day that has Notes, and none above the days that have none.
+- [ ] The confirmation names the same number of Notes as there are bullets on the clipboard, and as the button's own count.
 - [ ] Copying twice in a row copies the same thing both times — the clipboard write is not lost after the first click.
-- [ ] **Copy Digest** on a range holding no Notes says so and leaves the clipboard as it was.
+- [ ] **Copy notes** on a range holding no Notes says so and leaves the clipboard as it was.
 - [ ] Moving either end of the range clears the confirmation, and the next copy carries the new range.
+- [ ] The chevron opens a menu holding **Copy notes + completed work**; `Escape` closes it, copies nothing, and leaves the window open.
+- [ ] The menu is reachable without the mouse: arrow keys move into it from the chevron, and `Enter` copies.
+- [ ] **Copy notes + completed work** puts the same bullets on the clipboard, plus a **Completed** section naming the Tasks and occurrences completed in the range, oldest first.
+- [ ] Under a named Project or **Unfiled**, that row is disabled with its reason readable beneath it, and clicking it copies nothing and says nothing.
+- [ ] The copy button and its chevron are both gone while a Search is showing, and back once the Search is cleared.
+
+## The Standup Post copy control
+
+The copy control only — what the model writes is Settings' **Standup Prompt** items.
+
+- [ ] The section shows yesterday's date and a count for each half, one copy button reading **Copy yesterday**, and a chevron beside it.
+- [ ] **Copy yesterday** puts yesterday's Notes, the work completed yesterday and today's Open Tasks on the clipboard, with no model call and no waiting.
+- [ ] Its confirmation names yesterday's notes and tasks — not the bare word "yesterday", which would read as when the copy happened.
+- [ ] Before anything is generated, the chevron menu holds **Copy post**, disabled, with **Generate a post first.** readable beneath it.
+- [ ] After a post is generated, the button still reads **Copy yesterday** — it does not relabel itself — and **Copy post** in the menu is now enabled.
+- [ ] **Copy post** puts the prose on the clipboard, and its confirmation names the post rather than yesterday.
+- [ ] Copy the post, then copy yesterday, then switch to another application and back: the confirmation goes empty and the earlier post confirmation does not reappear.
+- [ ] On a day with nothing in either half, **Copy yesterday** and **Generate** are both disabled.
 
 ## Settings
 
