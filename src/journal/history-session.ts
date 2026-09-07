@@ -75,12 +75,19 @@ export interface HistorySnapshot {
    * Whether a Search has taken the screen over — true from the keystroke that
    * reaches two characters until the term is cleared or the Filter moves, and
    * true whether or not the term matched anything. What Escape belongs to, and
-   * why Copy Digest is not on screen: the Digest is bound to the Filter, so it
+   * why the copy control is not on screen: the Digest is bound to the Filter, so it
    * must not be offered beside something that is not one.
    */
   searching: boolean
   /** The day a Nudge is about; null when there is nothing to nudge about. */
   nudgedDay: string | null
+  /**
+   * How many Notes the held Digest holds — what `copy()` would write, so the
+   * copy control's preview never describes anything else. Null until the
+   * first read lands; a failed read leaves the held Digest, and its count,
+   * exactly as they were.
+   */
+  noteCount: number | null
   /**
    * What the last copy did, said back to the reader so they know it worked
    * before they paste. Nothing until they copy, and until they move the Filter.
@@ -102,6 +109,7 @@ export const openingSnapshot: HistorySnapshot = {
   term: '',
   searching: false,
   nudgedDay: null,
+  noteCount: null,
   confirmation: null,
   problem: null,
 }
@@ -269,6 +277,7 @@ export function createHistorySession({
       show({
         projects,
         history: { state: 'notes', days: groupByJournalDay(notes) },
+        noteCount: rendered.noteCount,
       })
     } catch (error) {
       giveUp(error, ticket)
@@ -553,7 +562,7 @@ export function createHistorySession({
         () => show({ confirmation: describeCopiedDigest(copied) }),
         (error: unknown) => {
           console.error('could not copy the Digest', error)
-          show({ confirmation: 'Could not copy.' })
+          show({ confirmation: 'Could not copy notes.' })
         },
       )
     },
@@ -582,7 +591,7 @@ export function createHistorySession({
       } catch (error) {
         console.error('could not read Review Material', error)
         if (latestRead === ticket && digest === held) {
-          show({ confirmation: 'Could not copy Review Material.' })
+          show({ confirmation: 'Could not copy notes + completed work.' })
         }
         return
       }
@@ -603,7 +612,7 @@ export function createHistorySession({
         show({ confirmation: describeCopiedReviewMaterial(material) })
       } catch (error) {
         console.error('could not copy Review Material', error)
-        show({ confirmation: 'Could not copy Review Material.' })
+        show({ confirmation: 'Could not copy notes + completed work.' })
       }
     },
   }

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import {
   CalendarIcon,
   CalendarRangeIcon,
+  ChevronDownIcon,
   ClipboardCopyIcon,
   HashIcon,
   NotebookPenIcon,
@@ -33,6 +34,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import {
+  Menu,
+  MenuContent,
+  MenuGroup,
+  MenuItem,
+  MenuTrigger,
+} from '@/components/ui/menu'
 import {
   Select,
   SelectContent,
@@ -129,6 +137,7 @@ export default function HistoryView({
     term,
     searching,
     nudgedDay,
+    noteCount,
     confirmation,
     problem,
   } = snapshot
@@ -348,6 +357,7 @@ export default function HistoryView({
               <Copies
                 filter={filter}
                 confirmation={confirmation}
+                noteCount={noteCount}
                 onCopyDigest={copyDigest}
                 onCopyReviewMaterial={copyReviewMaterial}
               />
@@ -1056,23 +1066,31 @@ function ProjectConstraintField({
 }
 
 /**
- * The header's two copies, side by side and labelled so they cannot be
- * confused: the Digest, and Review Material — the Filter's Notes and the work
- * completed in its days as one document. Each copy's confirmation names which
- * one landed, through the toast and the one live region below.
+ * The header's one copy control: a split button whose primary copies the
+ * Filter's Notes and whose chevron menu holds the variant that adds the work
+ * completed in the Filter's days. One visible button rather than a
+ * side-by-side pair, so copying is a default with an escape hatch rather than
+ * a decision every time. Each copy's confirmation names which one landed,
+ * through the toast and the one live region below.
  *
- * Review Material covers completed work, which has no Project, so under a
- * named Project or Unfiled its action is present but disabled, stating the
- * rule rather than disappearing.
+ * The count previews the held Digest itself — what a copy would write — so
+ * it stays honest whatever the list underneath is doing. Null while no read
+ * has landed yet, when the button reads plainly.
+ *
+ * Completed work has no Project, so under a
+ * named Project or Unfiled its menu row is present but disabled, carrying the
+ * rule as visible text rather than a tooltip no hover can reach.
  */
 function Copies({
   filter,
   confirmation,
+  noteCount,
   onCopyDigest,
   onCopyReviewMaterial,
 }: {
   filter: Filter
   confirmation: string | null
+  noteCount: number | null
   onCopyDigest: () => void
   onCopyReviewMaterial: () => void
 }) {
@@ -1080,6 +1098,11 @@ function Copies({
   // what was never filed under it.
   const reviewAllowed = constraintOf(filter).kind === 'any'
   const reviewRuleId = useId()
+  // The menu is portalled out of the header, so it leaves the screen with
+  // this view rather than being hidden with it. Nothing is copied by closing
+  // it.
+  const [open, setOpen] = useState(false)
+  useOffScreen(() => setOpen(false))
 
   return (
     <div className="ml-auto flex shrink-0 items-center gap-3">
@@ -1087,33 +1110,56 @@ function Copies({
       <span role="status" aria-live="polite" className="sr-only">
         {confirmation}
       </span>
-      <Button size="sm" onClick={onCopyDigest}>
-        <ClipboardCopyIcon data-icon="inline-start" />
-        Copy Digest
-      </Button>
-      {/*
-        The reason rides on the wrapper as a tooltip for whoever is looking —
-        a disabled button fires no hover, so it would be unreadable on the
-        button itself — and is described to the button for whoever is
-        listening: a title on a wrapper is announced to nobody.
-      */}
-      <span title={reviewAllowed ? undefined : REVIEW_PROJECT_RULE}>
+      <div className="flex shrink-0 items-center">
         <Button
           size="sm"
-          variant="outline"
-          onClick={onCopyReviewMaterial}
-          disabled={!reviewAllowed}
-          aria-describedby={reviewAllowed ? undefined : reviewRuleId}
+          onClick={onCopyDigest}
+          className="rounded-r-none border-r-0"
         >
           <ClipboardCopyIcon data-icon="inline-start" />
-          Copy Review Material
+          {noteCount === null ? 'Copy notes' : `Copy notes (${noteCount})`}
         </Button>
-        {!reviewAllowed && (
-          <span id={reviewRuleId} className="sr-only">
-            {REVIEW_PROJECT_RULE}
-          </span>
-        )}
-      </span>
+        {/*
+          A real menu rather than a popover with buttons: arrow keys,
+          typeahead and focus management come with it. The disabled row
+          carries the rule as a group hint beneath the item, so the item's
+          own name stays exactly what the action does.
+        */}
+        <Menu open={open} onOpenChange={(next) => setOpen(next)}>
+          <MenuTrigger
+            render={
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label="More copy options"
+                className="rounded-l-none px-1.5"
+              />
+            }
+          >
+            <ChevronDownIcon data-icon="inline-start" />
+          </MenuTrigger>
+          <MenuContent align="end" className="w-80">
+            <MenuGroup className="flex flex-col gap-1">
+              <MenuItem
+                onClick={() => onCopyReviewMaterial()}
+                disabled={!reviewAllowed}
+                aria-describedby={reviewAllowed ? undefined : reviewRuleId}
+              >
+                <ClipboardCopyIcon data-icon="inline-start" />
+                Copy notes + completed work
+              </MenuItem>
+              {!reviewAllowed && (
+                <p
+                  id={reviewRuleId}
+                  className="px-2 pb-1 type-micro text-muted-foreground"
+                >
+                  {REVIEW_PROJECT_RULE}
+                </p>
+              )}
+            </MenuGroup>
+          </MenuContent>
+        </Menu>
+      </div>
     </div>
   )
 }

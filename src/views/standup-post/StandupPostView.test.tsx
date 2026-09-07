@@ -7,7 +7,6 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
@@ -62,6 +61,17 @@ function renderStandupPost({
       onOpenSettings={onOpenSettings}
     />,
   )
+}
+
+/**
+ * The post lives one click past the chevron: the primary is always
+ * yesterday, so copying the post opens the menu first.
+ */
+async function copyPostFromMenu(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<void> {
+  await user.click(screen.getByRole('button', { name: 'More copy options' }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Copy post' }))
 }
 
 /** A yesterday holding both a Note and a completed Task, and a today holding open Tasks. */
@@ -204,23 +214,18 @@ describe('Standup Post section', () => {
     expect(request.userContent).toContain('## Completed yesterday')
     expect(request.userContent).toContain('## Still to do')
 
-    await user.click(screen.getByRole('button', { name: 'Copy post' }))
+    await copyPostFromMenu(user)
 
     await waitFor(() => {
       expect(desktop.clipboard).toBe('The standup post the model wrote.')
     })
-    // Said twice, and naming its subject in both: the live region beside the
-    // button — asserted scoped to the row, because a subject-less string
-    // would pass a document-wide search — and the toast, which is why the
-    // same words must be found exactly twice.
+    // Said twice, and naming its subject in both: the one live region — and
+    // the toast, which is why the same words must be found exactly twice.
+    expect(screen.getByRole('status').textContent).toBe(
+      'Copied post to the clipboard.',
+    )
     expect(
-      within(
-        screen.getByRole('button', { name: 'Copy post' })
-          .parentElement as HTMLElement,
-      ).getByRole('status').textContent,
-    ).toBe('Copied the standup post to the clipboard.')
-    expect(
-      await screen.findAllByText('Copied the standup post to the clipboard.'),
+      await screen.findAllByText('Copied post to the clipboard.'),
     ).toHaveLength(2)
   })
 
@@ -231,9 +236,9 @@ describe('Standup Post section', () => {
     await journalWithBothHalves(journal, clock)
 
     renderStandupPost({ journal, clock, desktop, settings })
-    await screen.findByRole('button', { name: 'Copy material' })
+    await screen.findByRole('button', { name: 'Copy yesterday' })
 
-    await user.click(screen.getByRole('button', { name: 'Copy material' }))
+    await user.click(screen.getByRole('button', { name: 'Copy yesterday' }))
 
     const expected = await buildStandupMaterial({
       journal,
@@ -246,24 +251,21 @@ describe('Standup Post section', () => {
     expect(desktop.clipboard).toContain('- #ops shipped the migration')
     expect(desktop.clipboard).toContain('## Completed yesterday')
     expect(desktop.clipboard).toContain('## Still to do')
-    // Naming its subject beside its own button — scoped to the row, the way
-    // the post's region is held to it — and said twice with the toast.
-    expect(
-      within(
-        screen.getByRole('button', { name: 'Copy material' })
-          .parentElement as HTMLElement,
-      ).getByRole('status').textContent,
-    ).toBe('Copied the standup material to the clipboard.')
+    // Naming its subject in the one live region — and said twice with the
+    // toast.
+    expect(screen.getByRole('status').textContent).toBe(
+      "Copied yesterday's notes and tasks to the clipboard.",
+    )
     expect(
       await screen.findAllByText(
-        'Copied the standup material to the clipboard.',
+        "Copied yesterday's notes and tasks to the clipboard.",
       ),
     ).toHaveLength(2)
     // No Model Access was read and no call was spent.
     expect(desktop.standupRequests).toEqual([])
   })
 
-  it('keeps Copy material enabled and correct after a post exists', async () => {
+  it('keeps Copy yesterday enabled and correct after a post exists', async () => {
     const user = userEvent.setup()
     const { journal, clock, desktop, settings } = await standupPostAt()
     await journalWithBothHalves(journal, clock)
@@ -274,12 +276,14 @@ describe('Standup Post section', () => {
     await user.click(screen.getByRole('button', { name: 'Generate' }))
     await screen.findByText('The standup post the model wrote.')
 
-    // Prose has arrived; the lossless rendering is still there, still live —
-    // that is the point of a second rendering.
-    const copyMaterial = screen.getByRole('button', {
-      name: 'Copy material',
+    // Prose has arrived; the lossless rendering is still there on the
+    // primary, still live — that is the point of a second rendering. The
+    // primary never changes identity: the post stays one click past the
+    // chevron.
+    const copyYesterday = screen.getByRole('button', {
+      name: 'Copy yesterday',
     }) as HTMLButtonElement
-    expect(copyMaterial.disabled).toBe(false)
+    expect(copyYesterday.disabled).toBe(false)
 
     // Built before the click: the fixture's clock is shared with the section,
     // and what the selection describes must not move while the copy lands.
@@ -287,24 +291,44 @@ describe('Standup Post section', () => {
       journal,
       selection: await selectStandupPost({ journal, clock }),
     })
-    await user.click(copyMaterial)
+    await user.click(copyYesterday)
     await waitFor(() => {
       expect(desktop.clipboard).toBe(expected)
     })
-    // Each confirmation is beside its own button and names its own subject:
-    // a shared flag would let a material copy light up beside the post.
-    // Scoped to the rows, because the toasts of earlier tests outlive them
-    // in the document.
-    expect(
-      within(copyMaterial.parentElement as HTMLElement).getByRole('status')
-        .textContent,
-    ).toBe('Copied the standup material to the clipboard.')
-    expect(
-      within(
-        screen.getByRole('button', { name: 'Copy post' })
-          .parentElement as HTMLElement,
-      ).getByRole('status').textContent,
-    ).toBe('')
+    // The one live region names whichever subject landed last.
+    expect(screen.getByRole('status').textContent).toBe(
+      "Copied yesterday's notes and tasks to the clipboard.",
+    )
+  })
+
+  it('never resurrects an older copy when a re-read retires the latest', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await standupPostAt()
+    await journalWithBothHalves(journal, clock)
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    await screen.findByRole('button', { name: 'Generate' })
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    await screen.findByText('The standup post the model wrote.')
+
+    await copyPostFromMenu(user)
+    await waitFor(() => {
+      expect(desktop.clipboard).toBe('The standup post the model wrote.')
+    })
+    await user.click(screen.getByRole('button', { name: 'Copy yesterday' }))
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toBe(
+        "Copied yesterday's notes and tasks to the clipboard.",
+      )
+    })
+
+    // Focus re-reads the selection and retires the yesterday claim. The
+    // post's older claim must not come back: one claim replaces the last,
+    // so nothing is waiting behind it.
+    desktop.focus()
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toBe('')
+    })
   })
 
   it('stops claiming a material copy the moment the section re-reads the selection', async () => {
@@ -313,17 +337,16 @@ describe('Standup Post section', () => {
     await journalWithBothHalves(journal, clock)
 
     renderStandupPost({ journal, clock, desktop, settings })
-    const copyMaterial = await screen.findByRole('button', {
-      name: 'Copy material',
+    const copyYesterday = await screen.findByRole('button', {
+      name: 'Copy yesterday',
     })
-    await user.click(copyMaterial)
+    await user.click(copyYesterday)
     await waitFor(() => {
       expect(desktop.clipboard).not.toBeNull()
     })
-    expect(
-      within(copyMaterial.parentElement as HTMLElement).getByRole('status')
-        .textContent,
-    ).toBe('Copied the standup material to the clipboard.')
+    expect(screen.getByRole('status').textContent).toBe(
+      "Copied yesterday's notes and tasks to the clipboard.",
+    )
 
     // Focus is the routine case: alt-tab away and back re-reads the
     // selection, and a claim about material that re-read may have replaced
@@ -331,12 +354,7 @@ describe('Standup Post section', () => {
     // the same listener.
     desktop.focus()
     await waitFor(() => {
-      expect(
-        within(
-          screen.getByRole('button', { name: 'Copy material' })
-            .parentElement as HTMLElement,
-        ).getByRole('status').textContent,
-      ).toBe('')
+      expect(screen.getByRole('status').textContent).toBe('')
     })
   })
 
@@ -346,10 +364,10 @@ describe('Standup Post section', () => {
     await journalWithBothHalves(journal, clock)
 
     renderStandupPost({ journal, clock, desktop, settings })
-    const copyMaterial = await screen.findByRole('button', {
-      name: 'Copy material',
+    const copyYesterday = await screen.findByRole('button', {
+      name: 'Copy yesterday',
     })
-    await user.click(copyMaterial)
+    await user.click(copyYesterday)
     await waitFor(() => {
       expect(desktop.clipboard).not.toBeNull()
     })
@@ -358,26 +376,21 @@ describe('Standup Post section', () => {
     }
 
     await user.click(
-      screen.getByRole('button', { name: 'Copy material' }),
+      screen.getByRole('button', { name: 'Copy yesterday' }),
     )
 
-    // The toast says the copy failed; the line beside the button may not go
-    // on saying the opposite.
+    // The toast says the copy failed; the live region may not go on saying
+    // the opposite.
     await waitFor(() => {
       if (
         !document.body.textContent?.includes(
-          'Could not copy the standup material.',
+          "Could not copy yesterday's notes and tasks.",
         )
       ) {
         throw new Error('the failed copy was not said')
       }
     })
-    expect(
-      within(
-        screen.getByRole('button', { name: 'Copy material' })
-          .parentElement as HTMLElement,
-      ).getByRole('status').textContent,
-    ).toBe('')
+    expect(screen.getByRole('status').textContent).toBe('')
   })
 
   it('stops claiming a post copy when the next one fails', async () => {
@@ -389,7 +402,7 @@ describe('Standup Post section', () => {
     await screen.findByRole('button', { name: 'Generate' })
     await user.click(screen.getByRole('button', { name: 'Generate' }))
     await screen.findByText('The standup post the model wrote.')
-    await user.click(screen.getByRole('button', { name: 'Copy post' }))
+    await copyPostFromMenu(user)
     await waitFor(() => {
       expect(desktop.clipboard).toBe('The standup post the model wrote.')
     })
@@ -397,26 +410,21 @@ describe('Standup Post section', () => {
       throw new Error('the clipboard refused')
     }
 
-    await user.click(screen.getByRole('button', { name: 'Copy post' }))
+    await copyPostFromMenu(user)
 
     await waitFor(() => {
       if (
         !document.body.textContent?.includes(
-          'Could not copy the standup post.',
+          'Could not copy post.',
         )
       ) {
         throw new Error('the failed copy was not said')
       }
     })
-    expect(
-      within(
-        screen.getByRole('button', { name: 'Copy post' })
-          .parentElement as HTMLElement,
-      ).getByRole('status').textContent,
-    ).toBe('')
+    expect(screen.getByRole('status').textContent).toBe('')
   })
 
-  it('keeps Copy material working after a generation failure', async () => {
+  it('keeps Copy yesterday working after a generation failure', async () => {
     const user = userEvent.setup()
     const { journal, clock, desktop, settings } = await standupPostAt()
     await journalWithBothHalves(journal, clock)
@@ -432,7 +440,7 @@ describe('Standup Post section', () => {
     await screen.findByRole('alert')
 
     // No post ever arrived; the material is still one click away.
-    await user.click(screen.getByRole('button', { name: 'Copy material' }))
+    await user.click(screen.getByRole('button', { name: 'Copy yesterday' }))
     const expected = await buildStandupMaterial({
       journal,
       selection: await selectStandupPost({ journal, clock }),
@@ -442,16 +450,70 @@ describe('Standup Post section', () => {
     })
   })
 
-  it('disables Copy material under the same refusal as Generate', async () => {
+  it('disables Copy yesterday under the same refusal as Generate', async () => {
     const { clock, desktop, settings, journal } = await standupPostAt()
 
     renderStandupPost({ journal, clock, desktop, settings })
 
     expect(await screen.findByText('Nothing to say yet.')).toBeTruthy()
     expect(
-      (screen.getByRole('button', { name: 'Copy material' }) as HTMLButtonElement)
+      (screen.getByRole('button', { name: 'Copy yesterday' }) as HTMLButtonElement)
         .disabled,
     ).toBe(true)
+  })
+
+  it('offers one copy control, with the post waiting in its menu', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await standupPostAt()
+    await journalWithBothHalves(journal, clock)
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    await screen.findByRole('button', { name: 'Copy yesterday' })
+
+    // One visible copy button rather than two: the post is behind the
+    // chevron until one exists.
+    expect(
+      screen.getAllByRole('button', { name: /copy (yesterday|post)/i }),
+    ).toHaveLength(1)
+
+    await user.click(
+      screen.getByRole('button', { name: 'More copy options' }),
+    )
+    const copyPost = (await screen.findByRole('menuitem', {
+      name: 'Copy post',
+    })) as HTMLElement
+    expect(copyPost.getAttribute('aria-disabled')).toBe('true')
+    expect(copyPost.parentElement?.textContent).toContain(
+      'Generate a post first.',
+    )
+  })
+
+  it('keeps the primary on yesterday once a post exists', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await standupPostAt()
+    await journalWithBothHalves(journal, clock)
+
+    renderStandupPost({ journal, clock, desktop, settings })
+    await screen.findByRole('button', { name: 'Generate' })
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    await screen.findByText('The standup post the model wrote.')
+
+    // Still one visible copy button, and it never changes identity: the
+    // post joins the menu rather than relabelling the primary.
+    expect(
+      screen.getAllByRole('button', { name: /copy (yesterday|post)/i }),
+    ).toHaveLength(1)
+    expect(
+      screen.getByRole('button', { name: 'Copy yesterday' }),
+    ).toBeTruthy()
+
+    await user.click(
+      screen.getByRole('button', { name: 'More copy options' }),
+    )
+    const copyPost = (await screen.findByRole('menuitem', {
+      name: 'Copy post',
+    })) as HTMLElement
+    expect(copyPost.getAttribute('aria-disabled')).not.toBe('true')
   })
 
   it('says when copying the material could not be written', async () => {
@@ -468,14 +530,14 @@ describe('Standup Post section', () => {
     }
 
     renderStandupPost({ journal, clock, desktop, settings })
-    await screen.findByRole('button', { name: 'Copy material' })
+    await screen.findByRole('button', { name: 'Copy yesterday' })
 
-    await user.click(screen.getByRole('button', { name: 'Copy material' }))
+    await user.click(screen.getByRole('button', { name: 'Copy yesterday' }))
 
     await waitFor(() => {
       if (
         !document.body.textContent?.includes(
-          'Could not copy the standup material.',
+          "Could not copy yesterday's notes and tasks.",
         )
       ) {
         throw new Error('the failed material copy was not said')
@@ -493,16 +555,13 @@ describe('Standup Post section', () => {
     await screen.findByRole('button', { name: 'Generate' })
     await user.click(screen.getByRole('button', { name: 'Generate' }))
     await screen.findByText('The standup post the model wrote.')
-    await user.click(screen.getByRole('button', { name: 'Copy post' }))
+    await copyPostFromMenu(user)
     await waitFor(() => {
       expect(desktop.clipboard).toBe('The standup post the model wrote.')
     })
-    expect(
-      within(
-        screen.getByRole('button', { name: 'Copy post' })
-          .parentElement as HTMLElement,
-      ).getByRole('status').textContent,
-    ).toBe('Copied the standup post to the clipboard.')
+    expect(screen.getByRole('status').textContent).toBe(
+      'Copied post to the clipboard.',
+    )
 
     // A replacement post retires the claim with the prose it was about: the
     // third retire path, beside a failed copy and the material's re-read.
@@ -513,12 +572,7 @@ describe('Standup Post section', () => {
     await user.click(screen.getByRole('button', { name: 'Generate' }))
     await screen.findByText('The second post, replacing the first.')
 
-    expect(
-      within(
-        screen.getByRole('button', { name: 'Copy post' })
-          .parentElement as HTMLElement,
-      ).getByRole('status').textContent,
-    ).toBe('')
+    expect(screen.getByRole('status').textContent).toBe('')
   })
 
   it('announces a repeat copy that lands while the first is still live', async () => {
@@ -527,41 +581,33 @@ describe('Standup Post section', () => {
     await journalWithBothHalves(journal, clock)
 
     renderStandupPost({ journal, clock, desktop, settings })
-    const copyMaterial = await screen.findByRole('button', {
-      name: 'Copy material',
+    const copyYesterday = await screen.findByRole('button', {
+      name: 'Copy yesterday',
     })
-    await user.click(copyMaterial)
+    await user.click(copyYesterday)
     await waitFor(() => {
       expect(desktop.clipboard).not.toBeNull()
     })
-    const row = () =>
-      within(
-        screen.getByRole('button', { name: 'Copy material' })
-          .parentElement as HTMLElement,
-      ).getByRole('status')
-    expect(row().textContent).toBe(
-      'Copied the standup material to the clipboard.',
+    const said = () => screen.getByRole('status')
+    expect(said().textContent).toBe(
+      "Copied yesterday's notes and tasks to the clipboard.",
     )
 
     // A region announces on change: identical text is silence, exactly when
     // the reader most needs telling. A repeat still live says it is a
     // repeat — no re-read gets in between these two clicks.
-    await user.click(screen.getByRole('button', { name: 'Copy material' }))
+    await user.click(screen.getByRole('button', { name: 'Copy yesterday' }))
     await waitFor(() => {
-      expect(row().textContent).toBe(
-        'Copied the standup material to the clipboard. (2)',
+      expect(said().textContent).toBe(
+        "Copied yesterday's notes and tasks to the clipboard. (2)",
+
       )
     })
 
     // And the retire paths still retire the counted claim whole.
     desktop.focus()
     await waitFor(() => {
-      expect(
-        within(
-          screen.getByRole('button', { name: 'Copy material' })
-            .parentElement as HTMLElement,
-        ).getByRole('status').textContent,
-      ).toBe('')
+      expect(screen.getByRole('status').textContent).toBe('')
     })
   })
 
@@ -570,8 +616,8 @@ describe('Standup Post section', () => {
     await journalWithBothHalves(journal, clock)
 
     renderStandupPost({ journal, clock, desktop, settings })
-    const copyMaterial = await screen.findByRole('button', {
-      name: 'Copy material',
+    const copyYesterday = await screen.findByRole('button', {
+      name: 'Copy yesterday',
     })
 
     // Both clicks dispatched before either copy's write has resolved, so
@@ -579,16 +625,14 @@ describe('Standup Post section', () => {
     // claim as this click first saw it would leave the second copy saying
     // exactly what the first did — silence, which is the failure the count
     // exists to prevent.
-    fireEvent.click(copyMaterial)
-    fireEvent.click(copyMaterial)
+    fireEvent.click(copyYesterday)
+    fireEvent.click(copyYesterday)
 
     await waitFor(() => {
-      expect(
-        within(
-          screen.getByRole('button', { name: 'Copy material' })
-            .parentElement as HTMLElement,
-        ).getByRole('status').textContent,
-      ).toBe('Copied the standup material to the clipboard. (2)')
+      expect(screen.getByRole('status').textContent).toBe(
+        "Copied yesterday's notes and tasks to the clipboard. (2)",
+
+      )
     })
   })
 
@@ -597,22 +641,37 @@ describe('Standup Post section', () => {
     const { journal, clock, desktop, settings } = await standupPostAt()
     await journalWithBothHalves(journal, clock)
 
+    // Held writes so both copies are in flight at once: the menu closes
+    // after each pick, so the second pick reopens it while the first copy
+    // has yet to land. Counting from the claim as it stands rather than as
+    // this click first saw it leaves the second copy saying exactly what
+    // the first did — silence, which is the failure the count exists to
+    // prevent.
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const write = desktop.copyToClipboard.bind(desktop)
+    desktop.copyToClipboard = async (text) => {
+      await held
+      return write(text)
+    }
+
     renderStandupPost({ journal, clock, desktop, settings })
     await screen.findByRole('button', { name: 'Generate' })
     await user.click(screen.getByRole('button', { name: 'Generate' }))
     await screen.findByText('The standup post the model wrote.')
 
-    const copyPost = screen.getByRole('button', { name: 'Copy post' })
-    fireEvent.click(copyPost)
-    fireEvent.click(copyPost)
+    await user.click(screen.getByRole('button', { name: 'More copy options' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy post' }))
+    await user.click(screen.getByRole('button', { name: 'More copy options' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy post' }))
+    release()
 
     await waitFor(() => {
-      expect(
-        within(
-          screen.getByRole('button', { name: 'Copy post' })
-            .parentElement as HTMLElement,
-        ).getByRole('status').textContent,
-      ).toBe('Copied the standup post to the clipboard. (2)')
+      expect(screen.getByRole('status').textContent).toBe(
+        'Copied post to the clipboard. (2)',
+      )
     })
   })
 
@@ -881,7 +940,7 @@ describe('Standup Post section', () => {
 
     await user.click(screen.getByRole('button', { name: 'Generate' }))
     await screen.findByText('The standup post the model wrote.')
-    await user.click(screen.getByRole('button', { name: 'Copy post' }))
+    await copyPostFromMenu(user)
     await waitFor(() => {
       expect(desktop.clipboard).toBe('The standup post the model wrote.')
     })
@@ -911,10 +970,10 @@ describe('Standup Post section', () => {
 
     await user.click(screen.getByRole('button', { name: 'Generate' }))
     await screen.findByText('The standup post the model wrote.')
-    await user.click(screen.getByRole('button', { name: 'Copy post' }))
+    await copyPostFromMenu(user)
 
     await waitFor(() => {
-      if (!document.body.textContent?.includes('Could not copy the standup post.')) {
+      if (!document.body.textContent?.includes('Could not copy post.')) {
         throw new Error('the failed copy was not said')
       }
     })

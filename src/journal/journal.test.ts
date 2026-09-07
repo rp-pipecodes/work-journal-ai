@@ -1640,18 +1640,18 @@ describe('describeCopiedDigest', () => {
       .split('\n')
       .filter((line) => line.startsWith('- '))
 
-    expect(describeCopiedDigest(digest)).toBe(`Copied ${bullets.length} Notes.`)
+    expect(describeCopiedDigest(digest)).toBe(`Copied ${bullets.length} notes.`)
   })
 
-  it('says Note rather than Notes for a single one', () => {
+  it('says note rather than notes for a single one', () => {
     expect(describeCopiedDigest({ markdown: '- alone', noteCount: 1 })).toBe(
-      'Copied 1 Note.',
+      'Copied 1 note.',
     )
   })
 
   it('claims no copy at all when the Filter held nothing', () => {
     expect(describeCopiedDigest({ markdown: '', noteCount: 0 })).toBe(
-      'No Notes to copy.',
+      'No notes to copy.',
     )
   })
 })

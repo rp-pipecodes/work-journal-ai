@@ -37,7 +37,7 @@ const NEW_TASK_MENU_ITEM: &str = "new-task";
 
 const VIEW_NOTES_MENU_ITEM: &str = "view-notes";
 const VIEW_TASKS_MENU_ITEM: &str = "view-tasks";
-const WRITE_STANDUP_POST_MENU_ITEM: &str = "write-standup-post";
+const VIEW_STANDUP_POST_MENU_ITEM: &str = "view-standup-post";
 const COPY_YESTERDAY_DIGEST_MENU_ITEM: &str = "copy-yesterday-digest";
 const SETTINGS_MENU_ITEM: &str = "settings";
 const MAIN_SETTINGS_MENU_ITEM: &str = "main-settings";
@@ -2194,10 +2194,10 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         MenuItem::with_id(app, VIEW_NOTES_MENU_ITEM, "View Notes", true, None::<&str>)?;
     let view_tasks =
         MenuItem::with_id(app, VIEW_TASKS_MENU_ITEM, "View Tasks", true, None::<&str>)?;
-    let write_standup_post = MenuItem::with_id(
+    let view_standup_post = MenuItem::with_id(
         app,
-        WRITE_STANDUP_POST_MENU_ITEM,
-        "Write Standup Post…",
+        VIEW_STANDUP_POST_MENU_ITEM,
+        "View Standup Post",
         true,
         None::<&str>,
     )?;
@@ -2206,13 +2206,17 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let copy_yesterday = MenuItem::with_id(
         app,
         COPY_YESTERDAY_DIGEST_MENU_ITEM,
-        "Copy Yesterday's Digest",
+        "Copy Yesterday's Notes",
         true,
         None::<&str>,
     )?;
     let settings = MenuItem::with_id(app, SETTINGS_MENU_ITEM, "Settings", true, None::<&str>)?;
+    let readback_separator = PredefinedMenuItem::separator(app)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, QUIT_MENU_ITEM, "Quit", true, None::<&str>)?;
+    // Entry Points first, then everything that opens the Main Window on a
+    // section, then the one action that reads back without opening a window,
+    // alone in its group, then out.
     let menu = Menu::with_items(
         app,
         &[
@@ -2220,9 +2224,10 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             &new_task,
             &view_notes,
             &view_tasks,
-            &write_standup_post,
-            &copy_yesterday,
+            &view_standup_post,
             &settings,
+            &readback_separator,
+            &copy_yesterday,
             &separator,
             &quit,
         ],
@@ -2254,7 +2259,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             NEW_TASK_MENU_ITEM => start_task_creation_window(app),
             VIEW_NOTES_MENU_ITEM => open_main_window(app, Some(HISTORY_SECTION)),
             VIEW_TASKS_MENU_ITEM => open_main_window(app, Some(TASKS_SECTION)),
-            WRITE_STANDUP_POST_MENU_ITEM => open_main_window(app, Some(STANDUP_POST_SECTION)),
+            VIEW_STANDUP_POST_MENU_ITEM => open_main_window(app, Some(STANDUP_POST_SECTION)),
             COPY_YESTERDAY_DIGEST_MENU_ITEM => copy_yesterday_digest(app),
             SETTINGS_MENU_ITEM => open_settings(app),
             QUIT_MENU_ITEM => app.exit(0),

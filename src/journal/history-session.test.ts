@@ -242,7 +242,7 @@ describe('narrowing the Filter by Project', () => {
     await settle()
 
     expect(clipboard.written).toEqual(['- rate limits'])
-    expect(session.snapshot().confirmation).toBe('Copied 1 Note.')
+    expect(session.snapshot().confirmation).toBe('Copied 1 note.')
   })
 
   it('holds the constraint while the day axis moves', async () => {
@@ -980,7 +980,7 @@ describe('copying the Digest', () => {
     await settle()
 
     expect(clipboard.written).toEqual(['- Friday\n- Also Friday'])
-    expect(session.snapshot().confirmation).toBe('Copied 2 Notes.')
+    expect(session.snapshot().confirmation).toBe('Copied 2 notes.')
   })
 
   it('copies the Digest as it was read, not the list on screen', async () => {
@@ -1007,7 +1007,7 @@ describe('copying the Digest', () => {
     await settle()
 
     expect(clipboard.written).toEqual([])
-    expect(session.snapshot().confirmation).toBe('No Notes to copy.')
+    expect(session.snapshot().confirmation).toBe('No notes to copy.')
   })
 
   it('says so when the clipboard write fails', async () => {
@@ -1021,7 +1021,46 @@ describe('copying the Digest', () => {
     session.copy()
     await settle()
 
-    expect(session.snapshot().confirmation).toBe('Could not copy.')
+    expect(session.snapshot().confirmation).toBe('Could not copy notes.')
+  })
+
+  it('holds the held Digest count for the copy control to preview', async () => {
+    const { session } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'Friday' },
+      { at: '2026-03-13T11:00:00', body: 'Also Friday' },
+    ])
+
+    expect(session.snapshot().noteCount).toBeNull()
+
+    await session.open()
+    expect(session.snapshot().noteCount).toBe(2)
+
+    await session.moveTo(rangeForJournalDay('2026-03-09'))
+    expect(session.snapshot().noteCount).toBe(0)
+  })
+
+  it('keeps the held count when a read fails, as the held Digest does', async () => {
+    silenceErrors()
+    const { session } = await sessionOver(
+      [{ at: '2026-03-13T10:00:00', body: 'Friday' }],
+      {
+        journal: (core) => ({
+          ...core,
+          notesForFilter: (filter) =>
+            filter.from === '2026-03-09'
+              ? Promise.reject(new Error('no database'))
+              : core.notesForFilter(filter),
+        }),
+      },
+    )
+
+    await session.open()
+    expect(session.snapshot().noteCount).toBe(1)
+
+    await session.moveTo(rangeForJournalDay('2026-03-09'))
+    expect(session.snapshot().history).toEqual({ state: 'unreadable' })
+    // The copy still carries the stale Digest, so the preview says so too.
+    expect(session.snapshot().noteCount).toBe(1)
   })
 })
 
@@ -1042,7 +1081,7 @@ describe('copying Review Material', () => {
     expect(clipboard.written[0]).toContain('- Friday')
     expect(clipboard.written[0]).toContain('## Completed')
     expect(clipboard.written[0]).toContain('- [x] kept Friday')
-    expect(session.snapshot().confirmation).toContain('Review Material')
+    expect(session.snapshot().confirmation).toContain('notes + completed work')
   })
 
   it('embeds the Digest as it was read, so the two copies cannot disagree', async () => {
@@ -1095,7 +1134,7 @@ describe('copying Review Material', () => {
 
     expect(clipboard.written).toEqual([])
     expect(session.snapshot().confirmation).toBe(
-      'Review Material covers completed work, which has no Project.',
+      'Completed work has no Project, so this is only offered for Any Project.',
     )
   })
 
@@ -1110,7 +1149,7 @@ describe('copying Review Material', () => {
 
     expect(clipboard.written).toEqual([])
     expect(session.snapshot().confirmation).toBe(
-      'Review Material covers completed work, which has no Project.',
+      'Completed work has no Project, so this is only offered for Any Project.',
     )
   })
 
@@ -1125,7 +1164,7 @@ describe('copying Review Material', () => {
 
     expect(clipboard.written).toEqual([])
     expect(session.snapshot().confirmation).toBe(
-      'No Notes or completed work to copy.',
+      'No notes or completed work to copy.',
     )
   })
 
@@ -1141,7 +1180,7 @@ describe('copying Review Material', () => {
 
     expect(clipboard.written).toEqual([])
     expect(session.snapshot().confirmation).toBe(
-      'Could not copy Review Material.',
+      'Could not copy notes + completed work.',
     )
   })
 

@@ -126,10 +126,10 @@ export function reviewRefuses(selection: ReviewSelection): boolean {
  * by the disabled action as well as by the session that refuses the copy.
  */
 export const REVIEW_PROJECT_RULE =
-  'Review Material covers completed work, which has no Project.'
+  'Completed work has no Project, so this is only offered for Any Project.'
 
 /** What an empty range says back: nothing was written to the clipboard. */
-export const NOTHING_TO_REVIEW = 'No Notes or completed work to copy.'
+export const NOTHING_TO_REVIEW = 'No notes or completed work to copy.'
 
 /**
  * What a landed Review Material copy says back, naming which of the two
@@ -140,13 +140,13 @@ export function describeCopiedReviewMaterial(
   material: ReviewMaterial,
 ): string {
   const counted = [
-    material.noteCount > 0 ? plural(material.noteCount, 'Note') : null,
+    material.noteCount > 0 ? plural(material.noteCount, 'note') : null,
     material.completionCount > 0
       ? plural(material.completionCount, 'completion')
       : null,
   ].filter((part) => part !== null)
 
-  return `Copied Review Material (${counted.join(', ')}).`
+  return `Copied notes + completed work (${counted.join(', ')}).`
 }
 
 /**
