@@ -1395,12 +1395,10 @@ function ModelAccessStep({
       </footer>
     </>
   )
-}/** The missing parts of Model Access, as one English list. */
+}
+
+/** The missing parts of Model Access, as one English list. */
 function listMissing(parts: string[]): string {
   if (parts.length === 1) return parts[0]
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
 }
-
-
-
-
