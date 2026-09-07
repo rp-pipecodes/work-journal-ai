@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { START_AT_LOGIN_KEY } from '../platform/desktop'
 import { fakeDesktop } from '../platform/testing/desktop'
-import { DEFAULT_STANDUP_PROMPT, OPENAI_BASE_URL } from './settings'
-import { createAppSettings } from './app-settings'
+import { DEFAULT_STANDUP_PROMPT } from './settings'
+import { createAppSettings, type ModelAccessChange } from './app-settings'
 
 // The settings as a running window has them: the core's rules over the
 // desktop's store, plus the announcements that keep the other windows honest.
@@ -220,49 +220,49 @@ describe('importing meetings', () => {
 })
 
 describe('Model Access', () => {
-  it('announces where the model is and which model, with the Key as it stands', async () => {
+  it('announces a settled Base URL or Model save as the part it wrote', async () => {
     const desktop = fakeDesktop({ apiKey: 'sk-a-key' })
+    let keychainAsks = 0
+    const ask = desktop.apiKeySet.bind(desktop)
+    desktop.apiKeySet = async () => {
+      keychainAsks += 1
+      return ask()
+    }
     const settings = createAppSettings(desktop)
-    const heard: Array<{
-      modelBaseUrl: string
-      model: string
-      keySet: boolean
-    }> = []
-    settings.onModelAccessChanged((access) => heard.push(access))
+    const heard: ModelAccessChange[] = []
+    settings.onModelAccessChanged((change) => heard.push(change))
 
     await settings.saveModelBaseUrl('http://localhost:11434/v1')
     await settings.saveModel('llama3.1')
 
-    // Every settled save speaks, with the answers as they stand then: the
-    // file re-read and the Keychain asked afresh, so the Key is never a
-    // payload that could go stale.
-    await expect.poll(() => heard).toEqual([
-      {
-        modelBaseUrl: 'http://localhost:11434/v1',
-        model: '',
-        keySet: true,
-      },
-      {
-        modelBaseUrl: 'http://localhost:11434/v1',
-        model: 'llama3.1',
-        keySet: true,
-      },
+    // Each save says only the part it wrote, so the other surface can apply
+    // exactly what changed — and a field save never asks the Keychain, so a
+    // keystroke cannot put a Keychain prompt in front of the user.
+    expect(heard).toEqual([
+      { modelBaseUrl: 'http://localhost:11434/v1' },
+      { model: 'llama3.1' },
     ])
+    expect(keychainAsks).toBe(0)
+    // The file holds both fields, whichever order they settled in.
+    const stored = await settings.load()
+    expect(stored.modelBaseUrl).toBe('http://localhost:11434/v1')
+    expect(stored.model).toBe('llama3.1')
   })
 
   it('announces a Key handed to the Keychain, and one taken out of it', async () => {
     const desktop = fakeDesktop()
     const settings = createAppSettings(desktop)
-    const heard: Array<{ modelBaseUrl: string; model: string; keySet: boolean }> =
-      []
-    settings.onModelAccessChanged((access) => heard.push(access))
+    const heard: ModelAccessChange[] = []
+    settings.onModelAccessChanged((change) => heard.push(change))
 
     await settings.saveApiKey('sk-a-key')
     await settings.clearApiKey()
 
+    // A Key save knows the Keychain now holds — or no longer holds — a Key
+    // without asking it again, and announces that answer alone.
     await expect.poll(() => heard).toEqual([
-      { modelBaseUrl: OPENAI_BASE_URL, model: '', keySet: true },
-      { modelBaseUrl: OPENAI_BASE_URL, model: '', keySet: false },
+      { keySet: true },
+      { keySet: false },
     ])
     // The Key is a Keychain matter, never a settings-file one.
     expect(desktop.apiKey).toBe(null)
@@ -272,9 +272,8 @@ describe('Model Access', () => {
   it('records a Key the Keychain refused to take, announcing nothing', async () => {
     const desktop = fakeDesktop({ keychainRefuses: true })
     const settings = createAppSettings(desktop)
-    const heard: Array<{ modelBaseUrl: string; model: string; keySet: boolean }> =
-      []
-    settings.onModelAccessChanged((access) => heard.push(access))
+    const heard: ModelAccessChange[] = []
+    settings.onModelAccessChanged((change) => heard.push(change))
     vi.spyOn(console, 'error').mockImplementation(() => {})
 
     await expect(settings.saveApiKey('sk-a-key')).rejects.toThrow()
@@ -282,19 +281,65 @@ describe('Model Access', () => {
     expect(heard).toEqual([])
   })
 
-  it('says a Base URL save took even when the announcement could not be sent', async () => {
-    // The mounted group catches up at its next read; the user who pressed is
-    // told what the file holds, not that an emit hiccuped.
-    const desktop = fakeDesktop()
-    desktop.apiKeySet = () => Promise.reject(new Error('the Keychain is shut'))
+  it('announces a field save even while the Keychain is shut', async () => {
+    // The announcement never asks the Keychain, so a Keychain that refuses
+    // to answer cannot take a field save's announcement down with it — the
+    // mounted group is not left on a stale field until its next mount.
+    const desktop = fakeDesktop({ keychainRefuses: true })
     const settings = createAppSettings(desktop)
+    const heard: ModelAccessChange[] = []
+    settings.onModelAccessChanged((change) => heard.push(change))
     vi.spyOn(console, 'error').mockImplementation(() => {})
 
     await settings.saveModelBaseUrl('http://localhost:11434/v1')
 
+    expect(heard).toEqual([{ modelBaseUrl: 'http://localhost:11434/v1' }])
     expect((await settings.load()).modelBaseUrl).toBe(
       'http://localhost:11434/v1',
     )
+  })
+
+  it('discards an older overlapping field save once a newer one has been started', async () => {
+    // The older save settles after the newer one has been typed: were it to
+    // speak, its older value would go back under the cursor after the newer
+    // keystroke rendered. Only the save that is still the newest of its part
+    // announces.
+    const stored: Record<string, unknown> = {}
+    let releaseOldWrite = () => {}
+    const oldWriteHeld = new Promise<void>((resolve) => {
+      releaseOldWrite = resolve
+    })
+    let writes = 0
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          writes += 1
+          // The first keystroke's write stays in flight while the second
+          // settles.
+          if (writes === 1) await oldWriteHeld
+          stored[key] = value
+        },
+      }),
+    })
+    const settings = createAppSettings(desktop)
+    const heard: ModelAccessChange[] = []
+    settings.onModelAccessChanged((change) => heard.push(change))
+
+    const first = settings.saveModelBaseUrl('http://stale.example/v1')
+    await settings.saveModelBaseUrl('http://localhost:11434/v1')
+    releaseOldWrite()
+    await first
+
+    // Only the newer save spoke: the older one settling late held its tongue
+    // rather than putting the stale value back.
+    expect(heard).toEqual([{ modelBaseUrl: 'http://localhost:11434/v1' }])
   })
 })
 

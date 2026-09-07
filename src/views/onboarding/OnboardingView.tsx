@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Kbd, KbdGroup } from '@/components/ui/kbd'
 import { Switch } from '@/components/ui/switch'
@@ -11,10 +11,18 @@ import {
   HOTKEY_ACTIONS,
   type HotkeyStatuses,
 } from '@/settings/hotkey'
-import { apiKeyStatus, keychainRefusedLine } from '@/settings/model-access'
+import { useModelAccessState } from '@/components/model-access-state'
+import {
+  apiKeyStatus,
+  keychainRetryLabel,
+  modelAccessTransportAllows,
+  type KeychainRefusal,
+  typeTheKeyAgainLine,
+} from '@/settings/model-access'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 import { CalendarTicks } from '@/components/CalendarTicks'
 import { describeCalendarAccess } from '@/settings/calendar-access'
+import { notStored } from '@/views/settings/SettingsGroup'
 
 /**
  * The guided Onboarding flow, shown inside the Main Window — see
@@ -1082,23 +1090,23 @@ function MeetingImportStep({
   )
 }
 
-/** Which Keychain action a refusal refused, so its retry can be the press again. */
-type KeychainRefusal = 'read' | 'save' | 'clear'
-
 /**
  * The optional Model Access step. It offers the same Model Access the Settings
- * section offers — a Base URL, a Model name and an API Key, saved through the
- * same writes and the same Keychain — so a choice made here is the choice
- * Settings reads, and replaying the flow later reads back whatever was saved.
+ * section offers — a Base URL, a Model name and an API Key — through the same
+ * shared `useModelAccessState` the Settings group runs on, so a choice made
+ * here is the choice Settings reads, and replaying the flow later reads back
+ * whatever was saved. The step owns only its own frame: the words around the
+ * facts, and the walk's Back-and-Continue memory.
  *
  * The three parts are saved the moment they are made, exactly as in Settings:
  * the Base URL and the Model on every keystroke, the Key when Save is pressed.
  * Nothing here sends a model request, and nothing claims the endpoint was
  * tried: saving configuration is not a connection test, the step says the
  * configuration is unverified, and the first explicitly requested Standup Post
- * is what exercises it. A refusal is said plainly with a retry, and never
- * blocks the way on. This is the last setup step, so continuing finishes
- * directly in History.
+ * is what exercises it — and a Base URL the Key may not travel to is
+ * needs-attention, never configured. A refusal is said plainly with a retry,
+ * and never blocks the way on. This is the last setup step, so continuing
+ * finishes directly in History.
  */
 function ModelAccessStep({
   desktop,
@@ -1118,237 +1126,85 @@ function ModelAccessStep({
   /** The walk finishes, skipped or not: this is the last setup step. */
   onOpenHistory: () => void
 }) {
-  // The three parts, seeded from what the file and the Keychain hold — the
-  // same answers Settings reads — or from what the flow kept, when Back and
-  // Continue remount the step. The Key itself is never seeded back in: what
-  // the Keychain holds is not this window's to keep, and the step only ever
-  // says whether there is one.
-  const [modelBaseUrl, setModelBaseUrl] = useState(
-    () => kept.current?.modelBaseUrl ?? DEFAULT_SETTINGS.modelBaseUrl,
-  )
-  const [model, setModel] = useState(
-    () => kept.current?.model ?? DEFAULT_SETTINGS.model,
-  )
-  // Whether the Keychain holds a key — never which key. Null until it has
-  // answered, or while it is refusing to.
-  const [keySet, setKeySet] = useState<boolean | null>(
-    () => kept.current?.keySet ?? null,
-  )
-  // Why the Keychain is not answering, when it is not — in its own words, so
-  // a locked keychain and a denied prompt do not read the same.
-  const [keychainProblem, setKeychainProblem] = useState<string | null>(
-    () => kept.current?.keychainProblem ?? null,
-  )
-  // Which action the refusal refused, so its Try again behaves like the
-  // press again: a fresh read, a fresh save, or a fresh clear.
-  const [keychainRefusal, setKeychainRefusal] = useState<KeychainRefusal | null>(
-    () => kept.current?.keychainRefusal ?? null,
-  )
-  // Which fields the store would not take, one flag each: a write that
-  // succeeded says nothing about the other field, and a line about Base URL
-  // must not be answered by a keystroke in Model. Said rather than rolled
-  // back: the field is text the user is still typing, and putting an older
-  // value back under the cursor would throw away the keystrokes since.
-  const [unsaved, setUnsaved] = useState(
-    () => kept.current?.unsaved ?? { modelBaseUrl: false, model: false },
-  )
-  // The key being typed, on its way out of the window. Cleared the moment it
-  // is saved: what the Keychain took is not this step's to keep.
-  const [typedKey, setTypedKey] = useState('')
-  // What the arriving read may still seed, per value rather than per step: a
-  // keystroke into one field silences only that field's seed — the same rule
-  // the seeded Settings controls live under. See
-  // docs/adr/0028-the-initial-read-seeds-only-what-the-user-has-not-changed.md.
-  const baseUrlTouched = useRef(false)
-  const modelTouched = useRef(false)
+  // The flow's answers as this mount found them, captured once — the value
+  // this mount seeds from, and what Back and Continue show without re-reading
+  // the file mid-save. Captured into state rather than passed to the hook
+  // straight from the ref, so the hook never holds the flow's own ref.
+  const [mountAnswers] = useState(() => kept.current)
   // Whether this mount resumes answers the flow already read: the only case
   // the file and the Keychain are left alone. Read during render, before any
   // effect leaves this mount's own answers behind.
   const [resumed] = useState(() => kept.current?.seeded ?? false)
+  // Whether this mount's reads have settled. Kept as state rather than by
+  // writing the flow's ref directly from the hook's callback: the callback
+  // runs outside render, and the effect below writes the flow's ref — the
+  // same shape the other steps' kept refs live under.
+  const [readsSettled, setReadsSettled] = useState(false)
+  // The saved answers, read back when this is a fresh mount of the step.
+  // Entering or replaying the step never asks macOS for anything and never
+  // sends a model request.
+  const startStoredRead = useMemo(
+    () =>
+      resumed
+        ? null
+        : () =>
+            settings.load().then((stored) => ({
+              modelBaseUrl: stored.modelBaseUrl,
+              model: stored.model,
+            })),
+    [resumed, settings],
+  )
+  // The one Model Access behaviour the Settings group runs on, seeded from
+  // what the file and the Keychain hold — the same answers Settings reads —
+  // or from what the flow kept, when Back and Continue remount the step. The
+  // Key itself is never seeded back in: what the Keychain holds is not this
+  // window's to keep, and the step only ever says whether there is one.
+  const access = useModelAccessState({
+    desktop,
+    settings,
+    seed: mountAnswers,
+    askKeychainOnMount: !resumed,
+    startStoredRead,
+    // Read, whichever way each went: only once both have settled has the flow
+    // the answers a later mount may resume, so Back in the gap still re-reads
+    // rather than resuming nothing. The hook calls this only while this mount
+    // is still on screen, so a mount that leaves before its reads settle never
+    // marks its kept answers as read.
+    onInitialSettled: () => setReadsSettled(true),
+  })
 
   // Leaves the answers behind on every render, for the next mount of this
   // step: Back and Open History show what was just saved instead of re-reading
-  // the file while a save is still in flight. `seeded` is not owned here —
-  // the seeding read below is the one that sets it — so it is carried over.
+  // the file while a save is still in flight. `seeded` is not owned here — the
+  // settling read above is the one that sets it — so it is carried over.
   useEffect(() => {
+    // `kept` is the flow's own ref, written here exactly as the Meeting
+    // Import step writes its own; the immutability rule mistakes it for a
+    // plain prop because its value also seeds the shared hook below.
+    // eslint-disable-next-line react-hooks/immutability
     kept.current = {
-      seeded: kept.current?.seeded ?? false,
-      modelBaseUrl,
-      model,
-      keySet,
-      keychainProblem,
-      keychainRefusal,
-      unsaved,
+      seeded: kept.current?.seeded || readsSettled,
+      modelBaseUrl: access.modelBaseUrl,
+      model: access.model,
+      keySet: access.keySet,
+      keychainProblem: access.keychainProblem,
+      keychainRefusal: access.keychainRefusal,
+      unsaved: access.unsaved,
     }
   })
-
-  useEffect(() => {
-    // Already answered once this window: the kept answers stand, and the
-    // file — and the Keychain — are left alone.
-    if (resumed) return
-    // The saved answers, read back. Entering or replaying the step never asks
-    // macOS for anything and never sends a model request.
-    const readFile = settings.load().then(
-      (stored) => {
-        if (!baseUrlTouched.current) setModelBaseUrl(stored.modelBaseUrl)
-        if (!modelTouched.current) setModel(stored.model)
-      },
-      (error: unknown) => {
-        console.error('could not read the saved Model Access', error)
-      },
-    )
-    // Asked on its own rather than with the settings the store holds: a
-    // locked Keychain is an ordinary answer here, and it must not take the
-    // rest of the read down with it.
-    const readKeychain = desktop.apiKeySet().then(
-      (set) => {
-        setKeySet(set)
-        setKeychainProblem(null)
-        setKeychainRefusal(null)
-      },
-      (error: unknown) => {
-        console.error('could not ask the Keychain about the API Key', error)
-        refuseKeychain('read', error)
-      },
-    )
-    // Read, whichever way each went: only once both have settled has the flow
-    // the answers a later mount may resume, so Back in the gap still re-reads
-    // rather than resuming nothing.
-    void Promise.allSettled([readFile, readKeychain]).then(() => {
-      if (kept.current) kept.current.seeded = true
-    })
-    // `kept` is the flow's own ref: written, never replaced.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [desktop, settings])
-
-  /** The Keychain would not answer, and the step says which one of it did. */
-  function refuseKeychain(what: KeychainRefusal, error: unknown): void {
-    setKeychainRefusal(what)
-    setKeychainProblem(keychainRefusedLine(error))
-  }
-
-  /** Asking the Keychain afresh, as the retry of a refused read does. */
-  function askTheKeychain() {
-    void desktop.apiKeySet().then(
-      (set) => {
-        setKeySet(set)
-        setKeychainProblem(null)
-        setKeychainRefusal(null)
-      },
-      (error: unknown) => {
-        console.error('could not ask the Keychain about the API Key', error)
-        refuseKeychain('read', error)
-      },
-    )
-  }
-
-  /** Saving one of the two ordinary fields, and saying whether it took. */
-  function saveField(field: 'modelBaseUrl' | 'model', next: string): void {
-    const saving =
-      field === 'modelBaseUrl'
-        ? settings.saveModelBaseUrl(next)
-        : settings.saveModel(next)
-    void saving.then(
-      () => {
-        setUnsaved((before) =>
-          before[field] ? { ...before, [field]: false } : before,
-        )
-      },
-      (error: unknown) => {
-        console.error(
-          field === 'modelBaseUrl'
-            ? 'could not change where the model is'
-            : 'could not change which model is asked',
-          error,
-        )
-        setUnsaved((before) =>
-          before[field] ? before : { ...before, [field]: true },
-        )
-      },
-    )
-  }
-
-  /** A field saves on every keystroke into it, as the Settings field does. */
-  function changeBaseUrl(next: string) {
-    baseUrlTouched.current = true
-    setModelBaseUrl(next)
-    saveField('modelBaseUrl', next)
-  }
-
-  function changeModel(next: string) {
-    modelTouched.current = true
-    setModel(next)
-    saveField('model', next)
-  }
-
-  /** The retry of a refused field save: its current text, saved afresh. */
-  function retryField(field: 'modelBaseUrl' | 'model') {
-    saveField(field, field === 'modelBaseUrl' ? modelBaseUrl : model)
-  }
-
-  /** The retry of a refused Keychain call, behaving like the press again. */
-  function retryKeychain() {
-    if (keychainRefusal === 'save') {
-      saveKey()
-      return
-    }
-    if (keychainRefusal === 'clear') {
-      clearKey()
-      return
-    }
-    askTheKeychain()
-  }
-
-  /** The retry's name, for the button that says it. */
-  function keychainRetryLabel(): string {
-    if (keychainRefusal === 'save') return 'Try saving the API Key again'
-    if (keychainRefusal === 'clear') return 'Try removing the API Key again'
-    return 'Try reading the API Key status again'
-  }
-
-  /** Hands the key to the Keychain, and forgets it here the moment it lands. */
-  function saveKey() {
-    const key = typedKey.trim()
-    if (key === '') return
-
-    void settings.saveApiKey(key).then(
-      () => {
-        setTypedKey('')
-        setKeySet(true)
-        setKeychainProblem(null)
-        setKeychainRefusal(null)
-      },
-      (error: unknown) => {
-        console.error('could not put the API Key in the Keychain', error)
-        refuseKeychain('save', error)
-      },
-    )
-  }
-
-  /**
-   * Takes the key out of the Keychain. A Keychain entry outlives an uninstall,
-   * so this is the only way out of one.
-   */
-  function clearKey() {
-    void settings.clearApiKey().then(
-      () => {
-        setKeySet(false)
-        setKeychainProblem(null)
-        setKeychainRefusal(null)
-      },
-      (error: unknown) => {
-        console.error('could not take the API Key out of the Keychain', error)
-        refuseKeychain('clear', error)
-      },
-    )
-  }
 
   // The step's standing, for the one status region below: off, configured,
   // or waiting on a missing part — but never a promise the endpoint can keep.
   // Saving configuration is not a connection test, so a configured line says
-  // the endpoint has not been tried. The alerts above announce themselves, so
-  // while one of them is up this stays quiet — and while the Keychain has not
-  // answered, there is nothing truthful to say about a key nobody can see.
+  // the endpoint has not been tried — and a Base URL the Key may not travel
+  // to (the rule `src-tauri/src/standup.rs` enforces where the Key would be
+  // attached) is needs-attention, never configured. The alerts above announce
+  // themselves, so while one of them is up this stays quiet — and while the
+  // Keychain has not answered, there is nothing truthful to say about a key
+  // nobody can see.
+  const typedKey = access.typedKey
+  const { keychainProblem, keychainRefusal, keySet, model, modelBaseUrl, unsaved } =
+    access
   let statusText = ''
   if (
     keychainProblem === null &&
@@ -1358,7 +1214,9 @@ function ModelAccessStep({
   ) {
     const hasBaseUrl = modelBaseUrl.trim() !== ''
     const hasModel = model.trim() !== ''
-    if (hasBaseUrl && hasModel && keySet) {
+    if (hasBaseUrl && !modelAccessTransportAllows(modelBaseUrl.trim())) {
+      statusText = `The API Key cannot travel to ${modelBaseUrl.trim()} — the Base URL must be https, unless the host is this Mac itself (localhost, 127.0.0.0/8, or ::1). Nothing has been sent.`
+    } else if (hasBaseUrl && hasModel && keySet) {
       statusText = `Standup Post is set to ask ${model.trim()}. Nothing has been sent yet, so this endpoint has not been tried.`
     } else if (!hasModel && !keySet) {
       statusText = 'Model Access is off — everything else in the journal works without it.'
@@ -1395,7 +1253,7 @@ function ModelAccessStep({
           value={modelBaseUrl}
           spellCheck={false}
           autoComplete="off"
-          onChange={(event) => changeBaseUrl(event.target.value)}
+          onChange={(event) => access.onBaseUrlChange(event.target.value)}
         />
       </div>
 
@@ -1412,7 +1270,7 @@ function ModelAccessStep({
           value={model}
           spellCheck={false}
           autoComplete="off"
-          onChange={(event) => changeModel(event.target.value)}
+          onChange={(event) => access.onModelChange(event.target.value)}
         />
       </div>
 
@@ -1432,9 +1290,13 @@ function ModelAccessStep({
             value={typedKey}
             spellCheck={false}
             autoComplete="off"
-            onChange={(event) => setTypedKey(event.target.value)}
+            onChange={(event) => access.onTypeKey(event.target.value)}
           />
-          <Button size="sm" disabled={typedKey.trim() === ''} onClick={saveKey}>
+          <Button
+            size="sm"
+            disabled={typedKey.trim() === ''}
+            onClick={access.saveKey}
+          >
             Save
           </Button>
         </div>
@@ -1442,13 +1304,12 @@ function ModelAccessStep({
 
       {unsaved.modelBaseUrl && (
         <p role="alert" className="type-meta text-destructive">
-          Base URL could not be saved to the settings file, so it will be gone
-          at the next launch.{' '}
+          {notStored('Base URL')}{' '}
           <Button
             variant="link"
             size="xs"
             aria-label="Try saving the Base URL again"
-            onClick={() => retryField('modelBaseUrl')}
+            onClick={access.retryBaseUrl}
           >
             Try again
           </Button>
@@ -1457,13 +1318,12 @@ function ModelAccessStep({
 
       {unsaved.model && (
         <p role="alert" className="type-meta text-destructive">
-          Model could not be saved to the settings file, so it will be gone at
-          the next launch.{' '}
+          {notStored('Model')}{' '}
           <Button
             variant="link"
             size="xs"
             aria-label="Try saving the Model again"
-            onClick={() => retryField('model')}
+            onClick={access.retryModel}
           >
             Try again
           </Button>
@@ -1473,14 +1333,23 @@ function ModelAccessStep({
       {keychainProblem !== null && (
         <p role="alert" className="type-meta text-destructive">
           {keychainProblem}{' '}
-          <Button
-            variant="link"
-            size="xs"
-            aria-label={keychainRetryLabel()}
-            onClick={retryKeychain}
-          >
-            Try again
-          </Button>
+          {keychainRefusal === 'save' && typedKey.trim() === '' ? (
+            // The refusal survived a remount that did not keep the typed Key:
+            // a retry would save nothing, so the user is told what to do
+            // instead of being handed a no-op press.
+            <span className="text-destructive">{typeTheKeyAgainLine()}</span>
+          ) : (
+            keychainRefusal !== null && (
+              <Button
+                variant="link"
+                size="xs"
+                aria-label={keychainRetryLabel(keychainRefusal)}
+                onClick={access.retryKeychain}
+              >
+                Try again
+              </Button>
+            )
+          )}
         </p>
       )}
 
@@ -1496,7 +1365,7 @@ function ModelAccessStep({
             {apiKeyStatus(keySet)}
           </p>
           {keySet === true && (
-            <Button variant="outline" size="sm" onClick={clearKey}>
+            <Button variant="outline" size="sm" onClick={access.clearKey}>
               Clear
             </Button>
           )}

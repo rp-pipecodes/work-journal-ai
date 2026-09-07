@@ -48,9 +48,14 @@ writes immediate, and the control and the file agreeing.
 ## Consequences
 
 - Every group that seeds from the initial read does so through
-  `useSeededState`, never by hand: Model Access, Meeting Import, Start at
-  Login and the Hotkeys all seed through it. Task Alerts only displays the
-  read and has no control that changes it.
+  `useSeededState`, never by hand: Meeting Import, Start at Login and the
+  Hotkeys all seed through it. Task Alerts only displays the read and has no
+  control that changes it. Model Access is the one group with a second
+  surface — the Onboarding flow's step mounts beside the section — so its
+  seeding and its shared behaviour live once in `useModelAccessState`, which
+  applies the same rule: each of its two fields seeds from the arriving read
+  only until a keystroke has touched it, exactly as a `useSeededState` value
+  does.
 - The "touched" ref is per value, and is read (never written) by a group's
   own effects to gate the non-seed parts of the read. The load-bearing case
   is the read's access snapshot taken before a permission was granted in the
@@ -66,3 +71,8 @@ writes immediate, and the control and the file agreeing.
 - A new group that copies the old shape — a bare `.then` on the initial read
   writing state — reintroduces the bug, which is what the settings-race
   regression tests in `SettingsView.test.tsx` exist to catch.
+- The read is not the only thing that must not race a newer change. A settled
+  Model Access save announces the value it wrote — never a re-read of the
+  file, which resolves on its own and could carry an older answer than the
+  one the user is looking at — and only the newest save of a part speaks, so
+  an older save settling late never puts its value back over a newer one.

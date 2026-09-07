@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useOnScreenToast } from '@/components/on-screen-toast'
 import type { Desktop } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
-import { apiKeyStatus, keychainRefusedLine } from '@/settings/model-access'
-import { DEFAULT_SETTINGS } from '@/settings/settings'
+import {
+  apiKeyStatus,
+  keychainRetryLabel,
+  typeTheKeyAgainLine,
+} from '@/settings/model-access'
 import type { SettingsInitialState } from './SettingsInitialState'
-import { useSeededState } from './useSeededState'
-import { saySettled } from './saySettled'
+import { useModelAccessState } from '@/components/model-access-state'
 import {
   SettingsAside,
   SettingsGroup,
@@ -27,6 +29,11 @@ import {
  * A field rather than a list of vendors, and free text rather than a fetched
  * list of models: any OpenAI-compatible endpoint is a Base URL, and a model
  * name baked into the app is a name that outlives the model.
+ *
+ * Everything this section does — the per-keystroke field saves, the Key's
+ * trip to the Keychain, hearing the Onboarding flow's saves while it hides
+ * under the flow — is the shared `useModelAccessState`; this group owns only
+ * its own frame around it.
  */
 export default function ModelAccessSettings({
   desktop,
@@ -37,158 +44,35 @@ export default function ModelAccessSettings({
   settings: AppSettings
   initialSettings: Promise<SettingsInitialState | null> | null
 }) {
-  // A field the user typed in before the read landed is already in the file
-  // by the time it does, and seeding it would put the older value back under
-  // the cursor. Each field seeds independently: typing in one never silences
-  // the other.
-  const [modelBaseUrl, setModelBaseUrl] = useSeededState(
-    initialSettings,
-    (initial) => initial.stored.modelBaseUrl,
-    DEFAULT_SETTINGS.modelBaseUrl,
+  // The window's coordinated read seeds the fields once it lands, exactly as
+  // it seeds every other group; a field the user typed into before it landed
+  // keeps the keystrokes — the read may only seed what has not been touched.
+  // See docs/adr/0028-the-initial-read-seeds-only-what-the-user-has-not-changed.md.
+  const startStoredRead = useMemo(
+    () =>
+      initialSettings === null
+        ? null
+        : () =>
+            initialSettings.then(
+              (initial) =>
+                initial === null
+                  ? null
+                  : {
+                      modelBaseUrl: initial.stored.modelBaseUrl,
+                      model: initial.stored.model,
+                    },
+            ),
+    [initialSettings],
   )
-  const [model, setModel] = useSeededState(
-    initialSettings,
-    (initial) => initial.stored.model,
-    DEFAULT_SETTINGS.model,
-  )
-  // Whether the Keychain holds a key — never which key. Null until it has
-  // answered, or while it is refusing to.
-  const [keySet, setKeySet] = useState<boolean | null>(null)
-  // The key being typed, on its way out of the window. Cleared the moment it
-  // is saved: what the Keychain took is not this window's to keep.
-  const [typedKey, setTypedKey] = useState('')
-  // Why the Keychain is not answering, when it is not — in its own words, so
-  // a locked keychain and a denied prompt do not read the same. Nothing until
-  // there is something to say.
-  const [keychainProblem, setKeychainProblem] = useState<string | null>(null)
-  // Which fields the store would not take, one flag each: a write that
-  // succeeded says nothing about the other field, and a line about Base URL
-  // must not be answered by a keystroke in Model. Said rather than rolled
-  // back: the field is text the user is still typing, and putting an older
-  // value back under the cursor would throw away the keystrokes since.
-  const [unsaved, setUnsaved] = useState({ modelBaseUrl: false, model: false })
-  // A field saves on every keystroke into it, and the write is otherwise
-  // silent; the toast with the field's name is where each save is heard. The
-  // toast replaces itself rather than stacking — one per field, not one per
-  // keystroke.
+  // The toasts this section raises for settled saves, replaced per field.
   const says = useOnScreenToast()
-  // The refs the arriving announcement reads: a field the store refused must
-  // not be overwritten by an older file value the announcement carries — the
-  // refusal is what says the field is still the user's, not the file's.
-  const unsavedRef = useRef(unsaved)
-  useEffect(() => {
-    unsavedRef.current = unsaved
-  }, [unsaved])
-
-  // Asked on its own rather than with the settings the store holds: a locked
-  // Keychain is an ordinary answer here, and it must not take the rest of the
-  // window's reading down with it.
-  useEffect(() => {
-    void desktop.apiKeySet().then(
-      (set) => {
-        setKeySet(set)
-        setKeychainProblem(null)
-      },
-      (error: unknown) => {
-        console.error('could not ask the Keychain about the API Key', error)
-        refuseKeychain(error)
-      },
-    )
-  }, [desktop])
-
-  useEffect(() => {
-    // A Model Access save landed — this group's own, or the Onboarding flow's.
-    // The three answers are one fact, however many controls write it: the
-    // flow may change them while this section is mounted but hidden, and the
-    // section must hear of it without being rebuilt — that would throw away
-    // what else the user has unsaved in Settings. The announcement is newer
-    // than anything this group seeded, so it is applied as a change of its
-    // own; a rollback still in flight from an earlier press is discarded by
-    // the attempt that this starts. A field the store refused keeps its
-    // refusal: the field is still the user's text, and the older value the
-    // announcement would carry must not be put back under it.
-    return settings.onModelAccessChanged(
-      ({ modelBaseUrl: announcedBaseUrl, model: announcedModel, keySet: announcedKeySet }) => {
-        if (!unsavedRef.current.modelBaseUrl) setModelBaseUrl(announcedBaseUrl)
-        if (!unsavedRef.current.model) setModel(announcedModel)
-        setKeySet(announcedKeySet)
-        setKeychainProblem(null)
-      },
-    )
-  }, [settings, setModel, setModelBaseUrl])
-
-  /** The Keychain would not answer, and Settings says which one of it did. */
-  function refuseKeychain(error: unknown): void {
-    setKeychainProblem(keychainRefusedLine(error))
-  }
-
-  /** How the last write to one field went, and only that field. */
-  function record(field: 'modelBaseUrl' | 'model', failed: boolean): void {
-    setUnsaved((before) =>
-      before[field] === failed ? before : { ...before, [field]: failed },
-    )
-  }
-
-  function changeBaseUrl(next: string) {
-    setModelBaseUrl(next)
-    saySettled(says, settings.saveModelBaseUrl(next), {
-      id: 'model-base-url',
-      saved: 'Base URL saved.',
-      couldNot: 'Could not save the Base URL.',
-      what: 'could not change where the model is',
-      onSaved: () => record('modelBaseUrl', false),
-      onRefused: () => record('modelBaseUrl', true),
-    })
-  }
-
-  function changeModel(next: string) {
-    setModel(next)
-    saySettled(says, settings.saveModel(next), {
-      id: 'model',
-      saved: 'Model saved.',
-      couldNot: 'Could not save the Model.',
-      what: 'could not change which model is asked',
-      onSaved: () => record('model', false),
-      onRefused: () => record('model', true),
-    })
-  }
-
-  /** Hands the key to the Keychain, and forgets it here the moment it lands. */
-  function saveKey() {
-    const key = typedKey.trim()
-    if (key === '') return
-
-    saySettled(says, settings.saveApiKey(key), {
-      id: 'api-key',
-      saved: 'API Key saved.',
-      couldNot: 'Could not save the API Key.',
-      what: 'could not put the API Key in the Keychain',
-      onSaved: () => {
-        setTypedKey('')
-        setKeySet(true)
-        setKeychainProblem(null)
-      },
-      onRefused: refuseKeychain,
-    })
-  }
-
-  /**
-   * Takes the key out of the Keychain. A Keychain entry outlives an uninstall,
-   * so this is the only way out of one.
-   */
-  function clearKey() {
-    saySettled(says, settings.clearApiKey(), {
-      id: 'api-key',
-      saved: 'API Key removed.',
-      couldNot: 'Could not remove the API Key.',
-      what: 'could not take the API Key out of the Keychain',
-      onSaved: () => {
-        setKeySet(false)
-        setKeychainProblem(null)
-      },
-      onRefused: refuseKeychain,
-    })
-  }
+  const access = useModelAccessState({
+    desktop,
+    settings,
+    askKeychainOnMount: true,
+    startStoredRead,
+    notify: says,
+  })
 
   return (
     <SettingsGroup>
@@ -201,10 +85,10 @@ export default function ModelAccessSettings({
         <Input
           id="model-base-url"
           className="w-full"
-          value={modelBaseUrl}
+          value={access.modelBaseUrl}
           spellCheck={false}
           autoComplete="off"
-          onChange={(event) => changeBaseUrl(event.target.value)}
+          onChange={(event) => access.onBaseUrlChange(event.target.value)}
         />
       </SettingsRow>
 
@@ -217,10 +101,10 @@ export default function ModelAccessSettings({
         <Input
           id="model"
           className="w-full"
-          value={model}
+          value={access.model}
           spellCheck={false}
           autoComplete="off"
-          onChange={(event) => changeModel(event.target.value)}
+          onChange={(event) => access.onModelChange(event.target.value)}
         />
       </SettingsRow>
 
@@ -234,22 +118,52 @@ export default function ModelAccessSettings({
           id="api-key"
           type="password"
           className="w-full"
-          value={typedKey}
+          value={access.typedKey}
           spellCheck={false}
           autoComplete="off"
-          onChange={(event) => setTypedKey(event.target.value)}
+          onChange={(event) => access.onTypeKey(event.target.value)}
         />
-        <Button size="sm" disabled={typedKey.trim() === ''} onClick={saveKey}>
+        <Button
+          size="sm"
+          disabled={access.typedKey.trim() === ''}
+          onClick={access.saveKey}
+        >
           Save
         </Button>
       </SettingsRow>
 
-      {unsaved.modelBaseUrl && <SettingsProblem>{notStored('Base URL')}</SettingsProblem>}
+      {access.unsaved.modelBaseUrl && (
+        <SettingsProblem>{notStored('Base URL')}</SettingsProblem>
+      )}
 
-      {unsaved.model && <SettingsProblem>{notStored('Model')}</SettingsProblem>}
+      {access.unsaved.model && (
+        <SettingsProblem>{notStored('Model')}</SettingsProblem>
+      )}
 
-      {keychainProblem !== null && (
-        <SettingsProblem>{keychainProblem}</SettingsProblem>
+      {access.keychainProblem !== null && (
+        <SettingsProblem>
+          {access.keychainProblem}{' '}
+          {access.keychainRefusal === 'save' &&
+          access.typedKey.trim() === '' ? (
+            // The refusal survived a remount that did not keep the Key: a
+            // retry would save nothing, so the user is told what to do
+            // instead of being handed a no-op press.
+            <span className="text-destructive">
+              {typeTheKeyAgainLine()}
+            </span>
+          ) : (
+            access.keychainRefusal !== null && (
+              <Button
+                variant="link"
+                size="xs"
+                aria-label={keychainRetryLabel(access.keychainRefusal)}
+                onClick={access.retryKeychain}
+              >
+                Try again
+              </Button>
+            )
+          )}
+        </SettingsProblem>
       )}
 
       {/* Held back only until the Keychain has answered once: before that
@@ -258,11 +172,11 @@ export default function ModelAccessSettings({
           thing — the key is still known to be there, and Clear is the only way
           out of an entry that outlives an uninstall, so it stays put for the
           user to unlock the Keychain and press again. */}
-      {keySet !== null && (
+      {access.keySet !== null && (
         <div className="flex items-center justify-between gap-6">
-          <SettingsAside>{apiKeyStatus(keySet)}</SettingsAside>
-          {keySet === true && (
-            <Button variant="outline" size="sm" onClick={clearKey}>
+          <SettingsAside>{apiKeyStatus(access.keySet)}</SettingsAside>
+          {access.keySet === true && (
+            <Button variant="outline" size="sm" onClick={access.clearKey}>
               Clear
             </Button>
           )}

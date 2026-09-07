@@ -1022,6 +1022,105 @@ describe('the Model Access step', () => {
     await screen.findByText(/No key is saved/)
   })
 
+  it('tells a returned user to type the Key again, instead of a retry that saves nothing', async () => {
+    // The refusal is kept across Back and Continue, but the typed Key is not:
+    // a Try again on the way back would save an empty field forever, so the
+    // step says what to do instead.
+    const desktop = fakeDesktop({ stored: {} })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    showFlow(desktop)
+    const user = await atTheModelAccessStep()
+
+    await screen.findByText(/No key is saved/)
+    desktop.keychainRefuses = true
+    fireEvent.change(apiKeyField(), { target: { value: 'sk-a-real-key' } })
+    await user.click(saveKeyButton())
+    expect(
+      await screen.findByText(/the keychain could not be reached/),
+    ).toBeTruthy()
+    desktop.keychainRefuses = false
+
+    // Back drops the typed Key, and Continue brings the refusal back.
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    await screen.findByRole('heading', {
+      name: "Add today's meetings to the journal?",
+    })
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await screen.findByRole('heading', { name: 'Write Standup Posts with a model?' })
+
+    expect(
+      await screen.findByText(/the keychain could not be reached/),
+    ).toBeTruthy()
+    expect(
+      screen.queryByRole('button', { name: 'Try saving the API Key again' }),
+    ).toBeNull()
+    expect(await screen.findByText(/type it again/)).toBeTruthy()
+
+    // Typing the Key again and pressing Save is what retries it.
+    fireEvent.change(apiKeyField(), { target: { value: 'sk-a-real-key' } })
+    await user.click(saveKeyButton())
+    await expect.poll(() => desktop.apiKey).toBe('sk-a-real-key')
+    await expect.poll(() => apiKeyField().value).toBe('')
+  })
+
+  it('re-reads the file when the step was left before its first read landed', async () => {
+    // Back in the gap between the step opening and the file answering must
+    // not let the earlier mount mark its unread answers as read: returning
+    // reads the saved values rather than resuming nothing.
+    const stored: Record<string, unknown> = {
+      modelBaseUrl: 'https://example.test/v1',
+      model: 'gpt-test',
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: deferred.openSettingsStore,
+    })
+    showFlow(desktop)
+    await atTheModelAccessStep()
+
+    // The file is still answering: leave before it does.
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    await screen.findByRole('heading', {
+      name: "Add today's meetings to the journal?",
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+    await screen.findByRole('heading', { name: 'Write Standup Posts with a model?' })
+
+    // The returning mount re-reads, so the saved answers arrive — they are
+    // not skipped as if this mount had already read them.
+    deferred.openTheStore()
+    await expect.poll(() => baseUrlField().value).toBe('https://example.test/v1')
+    expect(modelField().value).toBe('gpt-test')
+  })
+
+  it('says a Base URL the Key may not travel over is needs-attention, not configured', async () => {
+    // A plaintext non-loopback Base URL is refused where the Key would be
+    // attached, so a step that claimed it was configured would promise a call
+    // the app refuses. The status line applies the same rule.
+    const desktop = fakeDesktop({
+      stored: {
+        modelBaseUrl: 'http://api.example.com/v1',
+        model: 'gpt-test',
+      },
+      apiKey: 'sk-from-an-earlier-run',
+    })
+    showFlow(desktop)
+    await atTheModelAccessStep()
+
+    expect(
+      await screen.findByText(/cannot travel to http:\/\/api\.example\.com/),
+    ).toBeTruthy()
+    expect(screen.queryByText(/set to ask/)).toBeNull()
+
+    // Plaintext to this Mac's own loopback is allowed, so the same three
+    // parts read as configured once the Base URL points there.
+    fireEvent.change(baseUrlField(), {
+      target: { value: 'http://localhost:11434/v1' },
+    })
+    expect(await screen.findByText(/set to ask gpt-test/)).toBeTruthy()
+  })
+
   it('finishes with per-step Skip, and dismisses the whole flow on Skip onboarding', async () => {
     const desktop = fakeDesktop({ stored: {} })
     const { done } = showFlow(desktop)

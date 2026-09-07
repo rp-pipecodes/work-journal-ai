@@ -2066,6 +2066,102 @@ describe('Model Access', () => {
     expect(stored.modelBaseUrl).toBe('http://localhost:11434/v2')
   })
 
+  it('keeps the newest keystroke when an older save settles after it', async () => {
+    // The older write is still in flight when the newer one lands: were its
+    // announcement to speak — or to re-read the file — it would put the older
+    // text back under the cursor after the newer keystroke rendered.
+    const stored: Record<string, unknown> = { startAtLogin: false }
+    let releaseOldWrite = () => {}
+    const oldWriteHeld = new Promise<void>((resolve) => {
+      releaseOldWrite = resolve
+    })
+    let writes = 0
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          if (key === 'modelBaseUrl') {
+            writes += 1
+            if (writes === 1) await oldWriteHeld
+          }
+          stored[key] = value
+        },
+      }),
+    })
+
+    showSettings(desktop)
+
+    const baseUrl = (await screen.findByLabelText(
+      'Base URL',
+    )) as HTMLInputElement
+    fireEvent.change(baseUrl, { target: { value: 'http://stale.example/v1' } })
+    fireEvent.change(baseUrl, { target: { value: 'http://localhost:11434/v1' } })
+
+    releaseOldWrite()
+
+    await expect.poll(() => baseUrl.value).toBe('http://localhost:11434/v1')
+  })
+
+  it('does not wipe a live Keychain refusal with an unrelated field keystroke', async () => {
+    // Clear is refused and says why; a keystroke into an ordinary field saves
+    // that field and must not take the refusal's explanation with it — the
+    // refusal is only over when the Keychain itself answers.
+    const desktop = fakeDesktop({
+      stored: { startAtLogin: false },
+      apiKey: 'sk-from-an-earlier-run',
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    showSettings(desktop)
+
+    const clear = await screen.findByRole('button', { name: 'Clear' })
+    desktop.keychainRefuses = true
+    clear.click()
+    await screen.findByText(/the keychain could not be reached/)
+
+    fireEvent.change(await screen.findByLabelText('Model'), {
+      target: { value: 'gpt-test' },
+    })
+
+    // The Model write landed, and the Keychain refusal still stands.
+    await expect.poll(() => desktop.stored.model).toBe('gpt-test')
+    expect(screen.getByText(/the keychain could not be reached/)).toBeTruthy()
+  })
+
+  it('offers a retry when the Keychain refuses, and recovers when it answers', async () => {
+    // The refusal's words end in "try again", so there is a press that asks
+    // again rather than a sentence with nothing to press.
+    const desktop = fakeDesktop({
+      stored: { startAtLogin: false },
+      keychainRefuses: true,
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    showSettings(desktop)
+
+    expect(
+      await screen.findByText(/the keychain could not be reached/),
+    ).toBeTruthy()
+
+    desktop.keychainRefuses = false
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Try reading the API Key status again',
+      }),
+    )
+
+    await screen.findByText(/No key is saved/)
+    await expect
+      .poll(() => screen.queryByText(/the keychain could not be reached/))
+      .toBeNull()
+  })
+
   it('keeps Clear after a Keychain call that failed on its own', async () => {
     // The key is known to be there: the mount read succeeded. A later call
     // failing says the Keychain is busy or locked right now, not that the key
