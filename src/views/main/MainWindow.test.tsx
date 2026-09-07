@@ -1203,6 +1203,70 @@ describe('Meeting Import during Onboarding', () => {
     ).toBe('true')
   })
 
+  it('hears the last-landing save in Settings, however the saves overlapped', async () => {
+    // The calendars write is held while the wish is switched off and back
+    // on over it: every settled save announces the file as it stands, so
+    // the mounted section ends agreeing with the file rather than pinned to
+    // a snapshot taken before the held write landed.
+    const user = userEvent.setup()
+    const stored: Record<string, unknown> = { startAtLogin: false }
+    let releaseCalendars = () => {}
+    const calendarsHeld = new Promise<void>((resolve) => {
+      releaseCalendars = resolve
+    })
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+      stored,
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          // A write in flight has not landed: what the file holds is what
+          // settled before it.
+          if (key === 'importCalendars') {
+            await calendarsHeld
+          }
+          stored[key] = value
+        },
+      }),
+    })
+    await atTheMeetingImportStep()
+
+    await user.click(importSwitch())
+    await user.click(await screen.findByRole('checkbox', { name: /Work/ }))
+    // Off and back on over the held tick: the wish writes land around it.
+    await user.click(importSwitch())
+    await user.click(importSwitch())
+    releaseCalendars()
+    await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
+
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await showsHistory()
+    await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
+    await showsSettings()
+
+    // The file says on with Work ticked, and so does the section — the
+    // held write's announcement was heard last, as it landed last.
+    const control = await screen.findByRole('switch', {
+      name: "Add today's meetings to the journal",
+    })
+    await expect
+      .poll(() => control.getAttribute('aria-checked'))
+      .toBe('true')
+    expect(
+      screen
+        .getByRole('checkbox', { name: /Work/ })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
+  })
+
   it('replays with the saved Import and without prompting', async () => {    const user = userEvent.setup()
     const { desktop } = await showMainWindow({
       captured: [MONDAY],

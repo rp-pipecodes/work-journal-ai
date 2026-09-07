@@ -57,11 +57,9 @@ export interface AppSettings {
    * announced. Announced because the window that sweeps is not the window
    * this is changed in — and because the Settings group and the Onboarding
    * flow's step share this very instance: a choice saved by the flow must
-   * reach the mounted section without its state being rebuilt. Only the
-   * newest save announces: the file takes each wish as it is made, so a save
-   * that started before a newer one has been undone by it by the time it
-   * settles — announcing it would put a superseded answer back over the
-   * newer save's.
+   * reach the mounted section without its state being rebuilt. Every settled
+   * save announces the file as it stands then, so overlapping saves resolve
+   * to the last write to have landed rather than to whoever started last.
    */
   onImportChanged(
     handle: (imported: {
@@ -130,11 +128,6 @@ export function createAppSettings(desktop: Desktop): AppSettings {
   // that is still the newest when it settles speaks for the answer that came
   // to hold.
   let startAtLoginSaves = 0
-  // How many Import saves have been started in this window, over either key.
-  // The file takes each wish and each tick as it is made, so the same
-  // newest-only rule applies: only the save that is still the newest when it
-  // settles speaks, and it speaks both keys together, as one fact.
-  let importSaves = 0
   // Who is listening for an Import save, in this window. In-window rather
   // than a Desktop announcement, for the same reason as above: the two
   // controls that read the answer — the Settings group and the Onboarding
@@ -144,17 +137,19 @@ export function createAppSettings(desktop: Desktop): AppSettings {
   >()
 
   /**
-   * Announces an Import save that is still the newest one, with both keys as
-   * the file holds them now. Best-effort, like every other announcement: a
-   * refusal is logged rather than allowed to name a saved setting as
-   * refused.
+   * Announces a settled Import save, with both keys as the file holds them
+   * now. Every settled save speaks — unlike the Start at Login announcement,
+   * which carries the caller's value and must stay silent once superseded,
+   * this one re-reads the file, so its payload can never be a superseded
+   * answer: it is the file as it stands, and the last one to be heard is
+   * always the last write to have landed. Best-effort, like every other
+   * announcement: a refusal is logged rather than allowed to name a saved
+   * setting as refused.
    */
-  function announceImport(save: number): void {
-    if (save !== importSaves) return
+  function announceImport(): void {
     void (async () => {
       try {
         const stored = await readSettings(await store())
-        if (save !== importSaves) return
         for (const handle of importChanged) {
           handle({
             importMeetings: stored.importMeetings,
@@ -200,45 +195,41 @@ export function createAppSettings(desktop: Desktop): AppSettings {
       }
     },
 
-  onStartAtLoginChanged(handle) {
-    startAtLoginChanged.add(handle)
-    return () => {
-      startAtLoginChanged.delete(handle)
-    }
-  },
-  /**
-   * An Import save landed, in this window — and is still the newest one.
-   * Heard by the Settings group so a choice saved by the Onboarding flow
-   * reaches the mounted section without its state being rebuilt — the wish
-   * and the ticks are one fact the file holds, however many controls write
-   * it, and rebuilding would throw away what else the user has unsaved in
-   * Settings. Announced after the save settles, so a departure before it
-   * settles still reaches the control that stayed — and never for a change
-   * a newer save has already undone, which is what makes an older save that
-   * settles later hold its tongue.
-   */
-  onImportChanged(handle) {
-    importChanged.add(handle)
-    return () => {
-      importChanged.delete(handle)
-    }
-  },
+    onStartAtLoginChanged(handle) {
+      startAtLoginChanged.add(handle)
+      return () => {
+        startAtLoginChanged.delete(handle)
+      }
+    },
+    /**
+     * An Import save landed, in this window. Heard by the Settings group so
+     * a choice saved by the Onboarding flow reaches the mounted section
+     * without its state being rebuilt — the wish and the ticks are one fact
+     * the file holds, however many controls write it, and rebuilding would
+     * throw away what else the user has unsaved in Settings. Announced after
+     * the save settles, so a departure before it settles still reaches the
+     * control that stayed.
+     */
+    onImportChanged(handle) {
+      importChanged.add(handle)
+      return () => {
+        importChanged.delete(handle)
+      }
+    },
 
     async saveImportMeetings(importMeetings) {
-      const save = ++importSaves
       await writeImportMeetings(await store(), importMeetings)
       emitChange(desktop.announceImportChanged())
       // After it took: a save still in flight when a window departs must
-      // still reach the control that stayed mounted — and a control must
-      // never be told about a change a newer save has already undone.
-      announceImport(save)
+      // still reach the control that stayed mounted — and every settled save
+      // speaks, because each speaks the file as it stands.
+      announceImport()
     },
 
     async saveImportCalendars(importCalendars) {
-      const save = ++importSaves
       await writeImportCalendars(await store(), importCalendars)
       emitChange(desktop.announceImportChanged())
-      announceImport(save)
+      announceImport()
     },
 
     async saveModelBaseUrl(modelBaseUrl) {

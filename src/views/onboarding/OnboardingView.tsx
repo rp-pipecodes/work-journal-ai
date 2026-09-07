@@ -196,10 +196,11 @@ interface Practice {
 
 /**
  * The Meeting Import answers a step left behind: the wish, the ticks, the
- * calendars macOS held, why Import is not on, and whether the calendars are
- * known yet or their read failed. Kept in the flow rather than the step, so
- * Back and Continue show what was just saved instead of re-reading the file
- * while a save is still in flight.
+ * calendars macOS held, why Import is not on, whether the calendars are
+ * known yet or their read failed — and whether the saved answers were ever
+ * read at all. Kept in the flow rather than the step, so Back and Continue
+ * show what was just saved instead of re-reading the file while a save is
+ * still in flight.
  */
 interface MeetingKept {
   wish: boolean
@@ -208,6 +209,7 @@ interface MeetingKept {
   problem: string | null
   known: boolean
   failed: boolean
+  seeded: boolean
 }
 
 /**
@@ -590,13 +592,21 @@ function MeetingImportStep({
   // twice and land wherever the slower answer says.
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
-  // Whether this mount resumes answers the flow kept: read during render,
-  // before any effect leaves this mount's own answers behind.
-  const [resumed] = useState(() => kept.current !== null)
+  // Whether this mount resumes answers the flow already read: the only case
+  // the file is left alone. Read during render, before any effect leaves
+  // this mount's own answers behind.
+  const [resumed] = useState(() => kept.current?.seeded ?? false)
+  // Whether the saved ticks are known yet: seeded from the file, or authored
+  // by a tick of their own. The ticks render only once known, so a tick
+  // always builds on the saved selection rather than on an unseeded empty
+  // list. Remounts resume it from whether the flow ever read the file.
+  const [tickedKnown, setTickedKnown] = useState(
+    () => kept.current?.seeded ?? false,
+  )
   // What the arriving read may still seed, per value rather than per step:
-  // a press on the switch silences only the switch's seed, so a tick made
-  // before the read lands still builds on the saved selection — the same
-  // rule the seeded Settings controls live under. See
+  // a press on the switch silences only the switch's seed, while the ticks
+  // stay hidden until the saved selection is known — the same rule the
+  // seeded Settings controls live under. See
   // docs/adr/0028-the-initial-read-seeds-only-what-the-user-has-not-changed.md.
   const wishTouched = useRef(false)
   const tickedTouched = useRef(false)
@@ -609,7 +619,8 @@ function MeetingImportStep({
 
   // Leaves the answers behind on every render, for the next mount of this
   // step: Back and Continue show what was just saved instead of re-reading
-  // the file while a save is still in flight.
+  // the file while a save is still in flight. `seeded` is not owned here —
+  // the seeding read below is the one that sets it — so it is carried over.
   useEffect(() => {
     kept.current = {
       wish,
@@ -618,6 +629,7 @@ function MeetingImportStep({
       problem: calendarProblem,
       known: calendarsKnown,
       failed: calendarsFailed,
+      seeded: kept.current?.seeded ?? false,
     }
   })
 
@@ -633,6 +645,10 @@ function MeetingImportStep({
       (stored) => {
         if (!wishTouched.current) setWish(stored.importMeetings)
         if (!tickedTouched.current) setTicked(stored.importCalendars)
+        // Read, whichever way it went: the ticks are known now — seeded from
+        // the file, or authored by a press of their own.
+        setTickedKnown(true)
+        if (kept.current) kept.current.seeded = true
         void desktop.calendarAccess().then(
           (access) => {
             if (wishTouched.current) return
@@ -689,7 +705,7 @@ function MeetingImportStep({
   ) {
     if (!importing) {
       statusText = 'Meeting Import is off — Notes and Tasks work without it.'
-    } else if (calendarsKnown && calendars.length > 0) {
+    } else if (tickedKnown && calendarsKnown && calendars.length > 0) {
       if (chosen.length > 0) {
         statusText = `Today's meetings from ${chosen.join(', ')} will be imported.`
       } else if (ticked.length === 0) {
@@ -873,6 +889,7 @@ function MeetingImportStep({
       ? [...ticked, id]
       : ticked.filter((each) => each !== id)
     setTicked(updated)
+    setTickedKnown(true)
     setSaveProblem(null)
     saveCalendars(updated, attempt)
   }
@@ -882,6 +899,7 @@ function MeetingImportStep({
     tickedTouched.current = true
     const attempt = ++calendarAttempts.current
     setTicked(wanted)
+    setTickedKnown(true)
     setSaveProblem(null)
     saveCalendars(wanted, attempt)
   }
@@ -977,7 +995,7 @@ function MeetingImportStep({
         </p>
       )}
 
-      {importing && !calendarsFailed && (
+      {importing && !calendarsFailed && tickedKnown && (
         <CalendarTicks
           calendars={calendars}
           ticked={ticked}
@@ -987,6 +1005,7 @@ function MeetingImportStep({
 
       {importing &&
         !calendarsFailed &&
+        tickedKnown &&
         calendarsKnown &&
         calendars.length === 0 && (
           <div className="flex flex-col gap-1">

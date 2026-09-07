@@ -147,14 +147,12 @@ describe('importing meetings', () => {
     expect(stored.importCalendars).toEqual([])
   })
 
-  it('announces an Import save in this window, newest only', async () => {
+  it('announces every settled Import save with the file as it stands', async () => {
     // Save A turns Import on and starts writing the file; save B ticks a
     // calendar while that write is still held, and B's write lands first.
-    // When A finally settles it must not announce the wish it was asked
-    // for: B superseded it, and a control hearing A would read back over
-    // the newer save's. The newer save speaks both keys together, as one
-    // fact — which is what lets a mounted Settings group hear a choice the
-    // Onboarding flow just saved.
+    // Both speak when they settle — each announcement re-reads the file, so
+    // no payload can be a superseded answer — and the last one heard is the
+    // last write to have landed, whatever order the saves started in.
     const stored: Record<string, unknown> = {}
     let release = () => {}
     const firstWriteHeld = new Promise<void>((resolve) => {
@@ -189,6 +187,7 @@ describe('importing meetings', () => {
     await expect.poll(() => writes).toBe(1)
     await settings.saveImportCalendars(['work'])
 
+    // The newer save settled first and spoke the file as it stood then.
     await expect
       .poll(() => heard)
       .toEqual([{ importMeetings: false, importCalendars: ['work'] }])
@@ -196,8 +195,14 @@ describe('importing meetings', () => {
     release()
     await older
 
-    // The older save settled after the newer one: its wish stays unannounced.
-    expect(heard).toEqual([{ importMeetings: false, importCalendars: ['work'] }])
+    // The older save settles after it — and speaks too, with the file as it
+    // stands now: listeners end agreeing with the file on both keys.
+    await expect.poll(() => heard).toEqual([
+      { importMeetings: false, importCalendars: ['work'] },
+      { importMeetings: true, importCalendars: ['work'] },
+    ])
+    expect(stored.importMeetings).toBe(true)
+    expect(stored.importCalendars).toEqual(['work'])
   })
   it('says a save took even when the announcement could not be sent', async () => {
     // The window that sweeps catches up at its next read; the user who

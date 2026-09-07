@@ -496,8 +496,10 @@ describe('the Meeting Import step', () => {
   it('builds a tick on the saved selection when the switch was pressed first', async () => {
     // Replay: the file holds Import on with Work ticked, but the read is
     // still landing when the switch is pressed. The press silences only the
-    // switch's seed — the saved ticks still land, so ticking Personal keeps
-    // Work instead of dropping it with nothing said.
+    // switch's seed — and the ticks stay hidden until the saved selection is
+    // known, so there is no checkbox to build a tick from nothing with. The
+    // saved ticks land with the read, and ticking Personal keeps Work
+    // instead of dropping it with nothing said.
     const stored: Record<string, unknown> = {
       importMeetings: true,
       importCalendars: ['work'],
@@ -516,9 +518,47 @@ describe('the Meeting Import step', () => {
     const user = await atTheMeetingImportStep()
 
     await user.click(importSwitch())
+    // The enablement went through over the granted answer, but the saved
+    // selection is not known yet: nothing to tick.
+    await expect.poll(() => readsOn(importSwitch())).toBe(true)
+    expect(screen.queryByRole('checkbox')).toBeNull()
+
     deferred.openTheStore()
 
     // The saved ticks landed despite the earlier press.
+    await screen.findByRole('checkbox', { name: /Work/ })
+    await user.click(await screen.findByRole('checkbox', { name: /Personal/ }))
+
+    await expect.poll(() => desktop.stored.importCalendars).toEqual([
+      'work',
+      'personal',
+    ])
+  })
+
+  it('shows no ticks until the saved selection is known', async () => {
+    // Replay with Import on, but the read still landing: there is nothing
+    // to tick yet, so no checkbox to build a tick from nothing with. The
+    // saved ticks arrive with the read, and ticking builds on them.
+    const stored: Record<string, unknown> = {
+      importMeetings: true,
+      importCalendars: ['work'],
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      access: 'granted',
+      calendars: [
+        { id: 'work', title: 'Work', source: 'iCloud' },
+        { id: 'personal', title: 'Personal', source: 'iCloud' },
+      ],
+      openSettingsStore: deferred.openSettingsStore,
+    })
+    showFlow(desktop)
+    const user = await atTheMeetingImportStep()
+
+    expect(screen.queryByRole('checkbox')).toBeNull()
+
+    deferred.openTheStore()
     await screen.findByRole('checkbox', { name: /Work/ })
     await user.click(await screen.findByRole('checkbox', { name: /Personal/ }))
 
