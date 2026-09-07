@@ -1,17 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Switch } from '@/components/ui/switch'
 import { useOnScreenToast } from '@/components/on-screen-toast'
-import type {
-  CalendarAccess,
-  CalendarInfo,
-  Desktop,
-} from '@/platform/desktop'
+import type { CalendarInfo, Desktop } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 import type { SettingsInitialState } from './SettingsInitialState'
 import { useSeededState } from './useSeededState'
 import { saySettled } from './saySettled'
+import {
+  CalendarTicks,
+} from './meeting-import-shared'
+import { describeCalendarAccess } from './calendar-access'
 import {
   SettingsAside,
   SettingsGroup,
@@ -219,56 +218,5 @@ export default function MeetingImportSettings({
         added in the first place.
       </SettingsAside>
     </SettingsGroup>
-  )
-}
-
-/**
- * Why Import is not on, when the reason is macOS rather than the user. Both
- * answers are routine: a grant is keyed to the binary, so every rebuilt release
- * starts as one macOS has no record of.
- */
-function describeCalendarAccess(access: Exclude<CalendarAccess, 'granted'>): string {
-  return access === 'denied'
-    ? 'macOS is not allowing Work Journal to read your calendars. Turn Calendars on for Work Journal in System Settings › Privacy & Security, then switch this back on.'
-    : 'macOS has not been asked about your calendars — a rebuilt Work Journal is a new app as far as it is concerned. Meetings are not being imported; everything else in the journal is unaffected.'
-}
-
-/**
- * Which calendars an Import reads. None are ticked to begin with, because the
- * app cannot tell which of them mean work — a calendar nobody ticked is ignored
- * entirely rather than swept quietly.
- */
-function CalendarTicks({
-  calendars,
-  ticked,
-  onToggle,
-}: {
-  calendars: CalendarInfo[]
-  ticked: string[]
-  onToggle: (id: string, ticked: boolean) => void
-}) {
-  if (calendars.length === 0) {
-    return <SettingsAside>No calendars to read.</SettingsAside>
-  }
-
-  return (
-    <fieldset className="flex flex-col gap-2 pl-1">
-      <legend className="sr-only">Calendars to import from</legend>
-      {calendars.map((calendar) => (
-        <div key={calendar.id} className="flex items-center gap-2">
-          <Checkbox
-            id={`calendar-${calendar.id}`}
-            checked={ticked.includes(calendar.id)}
-            onCheckedChange={(next: boolean) => onToggle(calendar.id, next)}
-          />
-          <label htmlFor={`calendar-${calendar.id}`} className="type-meta">
-            {calendar.title}
-          </label>
-          <span className="type-micro text-muted-foreground">
-            {calendar.source}
-          </span>
-        </div>
-      ))}
-    </fieldset>
   )
 }

@@ -6,8 +6,9 @@ import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import ThemeProvider from '@/components/ThemeProvider'
 import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
-import type { MainSection } from '@/platform/desktop'
+import type { CalendarAccess, CalendarInfo, MainSection } from '@/platform/desktop'
 import type { Task } from '@/journal/journal'
+import type { SettingsStore } from '@/settings/settings'
 import { formatDayRange } from '@/views/history/range-label'
 import { createAppSettings } from '@/settings/app-settings'
 import {
@@ -708,6 +709,11 @@ describe('automatic Onboarding', () => {
     await user.click(
       await screen.findByRole('button', { name: 'Continue' }),
     )
+    // Through Start at Login to Meeting Import, the last setup step, where
+    // the flow finishes.
+    await user.click(
+      await screen.findByRole('button', { name: 'Continue' }),
+    )
     await user.click(
       await screen.findByRole('button', { name: 'Open History' }),
     )
@@ -810,6 +816,7 @@ describe('automatic Onboarding', () => {
     // Finish into History, then open Settings: its switch is the same login
     // item the flow just changed, so it must read the new answer back rather
     // than the snapshot it took when the window opened.
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: 'Open History' }))
     await showsHistory()
     await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
@@ -848,7 +855,8 @@ describe('automatic Onboarding', () => {
       await screen.findByRole('switch', { name: 'Start at login' }),
     )
 
-    // Open History while the save is still settling.
+    // Continue to Meeting Import while the save is still settling.
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: 'Open History' }))
     await showsHistory()
 
@@ -898,6 +906,8 @@ describe('automatic Onboarding', () => {
     ).toBeTruthy()
     expect(desktop.loginItem).toBe(false)
 
+    // The refusal never blocks the way on: through Meeting Import to History.
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: 'Open History' }))
 
     await showsHistory()
@@ -974,11 +984,215 @@ describe('replaying Onboarding from Settings', () => {
     )
     await screen.findByRole('heading', { name: 'Welcome to Work Journal' })
     await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: 'Open History' }))
 
     await showsHistory()
     // Replaying by hand is a replay: it never puts the automatic offer back.
     expect(desktop.onboarding).toBe('suppressed')
+  })
+})
+
+describe('Meeting Import during Onboarding', () => {
+  /** Walks automatic Onboarding through Start at Login to Meeting Import. */
+  async function atTheMeetingImportStep() {
+    const user = userEvent.setup()
+    await user.click(
+      await screen.findByRole('button', { name: 'Continue' }),
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Continue' }),
+    )
+    await screen.findByRole('heading', {
+      name: "Add today's meetings to the journal?",
+    })
+    return user
+  }
+
+  function importSwitch(): HTMLElement {
+    return screen.getByRole('switch', {
+      name: "Add today's meetings to the journal",
+    })
+  }
+
+  function readsOn(control: HTMLElement): boolean {
+    return control.getAttribute('aria-checked') === 'true'
+  }
+
+  it('enables Import and ticks work calendars through the existing settings', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+    })
+    await atTheMeetingImportStep()
+
+    // Explicit enablement walks the existing calendar-permission path.
+    await user.click(importSwitch())
+
+    await expect.poll(() => desktop.prompted).toBe(true)
+    await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+    await user.click(await screen.findByRole('checkbox', { name: /Work/ }))
+    // The tick lands in the very list the Import sweep reads — no second
+    // import service, and Task Alert permission is untouched by all of it.
+    await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
+    expect(desktop.alertPermission).toBe('undetermined')
+    expect(desktop.alertPrompted).toBe(false)
+
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await showsHistory()
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+  })
+
+  it('explains a refused permission and still finishes', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+      answersPrompt: 'denied',
+    })
+    await atTheMeetingImportStep()
+
+    await user.click(importSwitch())
+
+    // The refusal is said in the step, the retry stays available, and the
+    // wish is kept for a grant given later in System Settings.
+    expect(
+      await screen.findByText(/macOS is not allowing Work Journal/),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'Try allowing calendar access again' }),
+    ).toBeTruthy()
+    await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await showsHistory()
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+  })
+
+  it('says no selection imports nothing and still finishes', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+    })
+    await atTheMeetingImportStep()
+
+    await user.click(importSwitch())
+    await screen.findByRole('checkbox', { name: /Work/ })
+
+    // Granted and on, but nothing ticked: nothing is swept, and the step
+    // says so rather than claiming Import is running.
+    expect(
+      await screen.findByText(/permission alone imports nothing/),
+    ).toBeTruthy()
+    // Already granted, so enabling asked macOS for nothing new.
+    expect(desktop.prompted).toBe(false)
+
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await showsHistory()
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+  })
+
+  it('says a failed save, with retry and continuation', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const stored: Record<string, unknown> = { startAtLogin: false }
+    let writes = 0
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+      stored,
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          if (key === 'importMeetings') {
+            writes += 1
+            if (writes === 1) throw new Error('the file is read-only')
+          }
+          stored[key] = value
+        },
+      }),
+    })
+    await atTheMeetingImportStep()
+
+    await user.click(importSwitch())
+
+    expect(
+      await screen.findByText('Could not change how meetings are imported.'),
+    ).toBeTruthy()
+
+    await user.click(
+      screen.getByRole('button', { name: 'Try saving Import again' }),
+    )
+    await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await showsHistory()
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+  })
+
+  it('skips the step without rolling back saves', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+    })
+    await atTheMeetingImportStep()
+
+    await user.click(importSwitch())
+    await user.click(await screen.findByRole('checkbox', { name: /Work/ }))
+    await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
+
+    // Per-step Skip is the walk finishing, not the flow dismissed early:
+    // the saves stand.
+    await user.click(screen.getByRole('button', { name: 'Skip this step' }))
+    await showsHistory()
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+    expect(desktop.stored.importMeetings).toBe(true)
+    expect(desktop.stored.importCalendars).toEqual(['work'])
+  })
+
+  it('replays with the saved Import and without prompting', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      section: 'settings',
+      stored: { importMeetings: true, importCalendars: ['work'] },
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+    })
+    await showsSettings()
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Replay introduction' }),
+    )
+    await screen.findByRole('heading', { name: 'Welcome to Work Journal' })
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await screen.findByRole('heading', {
+      name: "Add today's meetings to the journal?",
+    })
+
+    // The step reads the saved Import back — and asks macOS for nothing.
+    await expect.poll(() => readsOn(importSwitch())).toBe(true)
+    expect(
+      screen
+        .getByRole('checkbox', { name: /Work/ })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
+    expect(desktop.prompted).toBe(false)
   })
 })
 
@@ -1494,6 +1708,10 @@ async function showMainWindow({
   alertFor,
   stored = { startAtLogin: false },
   onboarding,
+  access,
+  answersPrompt,
+  calendars,
+  openSettingsStore,
 }: {
   captured: Array<{ at: string; body: string }>
   /** The Tasks the journal already holds, in the order they were created. */
@@ -1514,6 +1732,14 @@ async function showMainWindow({
    * `unfinished` is a fresh installation still due the introduction.
    */
   onboarding?: 'unfinished' | 'suppressed'
+  /** What the OS allows of the calendars before anybody asks. */
+  access?: CalendarAccess
+  /** What answering the calendar prompt comes to. */
+  answersPrompt?: CalendarAccess
+  /** What the calendars hold, for the Meeting Import step to tick. */
+  calendars?: CalendarInfo[]
+  /** Overridden by the tests about a settings file that cannot be written. */
+  openSettingsStore?: () => Promise<SettingsStore>
 }) {
   const { driver, core, clock } = await journalHolding(captured)
 
@@ -1522,7 +1748,14 @@ async function showMainWindow({
     created.push(await core.createTask(description))
   }
 
-  const desktop = fakeDesktop({ driver, stored })
+  const desktop = fakeDesktop({
+    driver,
+    stored,
+    ...(access !== undefined ? { access } : {}),
+    ...(answersPrompt !== undefined ? { answersPrompt } : {}),
+    ...(calendars !== undefined ? { calendars } : {}),
+    ...(openSettingsStore !== undefined ? { openSettingsStore } : {}),
+  })
   if (onboarding !== undefined) desktop.onboarding = onboarding
   const settings = createAppSettings(desktop)
   if (section !== undefined) desktop.requestSection(section)

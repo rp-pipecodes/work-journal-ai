@@ -60,6 +60,23 @@ async function atTheStartAtLoginStep() {
   return user
 }
 
+/** Walks the flow to the Meeting Import step and returns a clicker. */
+async function atTheMeetingImportStep() {
+  const user = await atTheStartAtLoginStep()
+  await user.click(screen.getByRole('button', { name: 'Continue' }))
+  await screen.findByRole('heading', {
+    name: "Add today's meetings to the journal?",
+  })
+  return user
+}
+
+/** The Import switch at its step, found the way the user finds it. */
+function importSwitch(): HTMLElement {
+  return screen.getByRole('switch', {
+    name: "Add today's meetings to the journal",
+  })
+}
+
 describe('the Start at Login step', () => {
   it('discards an older rollback still in flight when a newer press lands', async () => {
     // Press A turns the switch on: the OS accepts, then the file write
@@ -167,5 +184,307 @@ describe('the Start at Login step', () => {
     await expect.poll(() => desktop.loginItem).toBe(true)
     await expect.poll(() => desktop.stored.startAtLogin).toBe(true)
     await expect.poll(() => readsOn(startAtLoginSwitch())).toBe(true)
+  })
+})
+
+describe('the Meeting Import step', () => {
+  it('appears after Start at Login and finishes in History as the last setup step', async () => {
+    const desktop = fakeDesktop({ stored: {} })
+    const { done } = showFlow(desktop)
+
+    const user = await atTheMeetingImportStep()
+
+    // The last available optional setup step finishes the flow directly.
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    expect(done).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks macOS for nothing on entering or replaying the step', async () => {
+    // Entering: never asked, and the step must not ask on the user's behalf.
+    const desktop = fakeDesktop({ stored: {} })
+    showFlow(desktop)
+    await atTheMeetingImportStep()
+    expect(desktop.prompted).toBe(false)
+
+    // Replaying with a saved wish: reads the saved values back without
+    // asking again, even though permission is still undetermined.
+    cleanup()
+    const replayed = fakeDesktop({
+      stored: { importMeetings: true, importCalendars: [] },
+      access: 'undetermined',
+    })
+    showFlow(replayed)
+    await atTheMeetingImportStep()
+    expect(replayed.prompted).toBe(false)
+    expect(readsOn(importSwitch())).toBe(false)
+  })
+
+  it('enables Import over the existing permission path and ticks a work calendar', async () => {
+    const desktop = fakeDesktop({
+      stored: {},
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+    })
+    showFlow(desktop)
+    const user = await atTheMeetingImportStep()
+
+    // Explicit enablement is the one moment the calendar is asked for.
+    await user.click(importSwitch())
+
+    await expect.poll(() => desktop.prompted).toBe(true)
+    await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+    const work = await screen.findByRole('checkbox', { name: /Work/ })
+    expect(readsOn(importSwitch())).toBe(true)
+
+    await user.click(work)
+
+    // The tick is saved the moment it is made — the existing Import
+    // behavior reads this very list, so no second service is involved.
+    await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
+    expect(
+      await screen.findByText(/meetings from Work will be imported/),
+    ).toBeTruthy()
+  })
+
+  it('explains a refused permission, offers a retry, and always allows continuation', async () => {
+    const desktop = fakeDesktop({
+      stored: {},
+      answersPrompt: 'denied',
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { done } = showFlow(desktop)
+    const user = await atTheMeetingImportStep()
+
+    await user.click(importSwitch())
+
+    // The refusal is said plainly, with the way back through System Settings.
+    expect(
+      await screen.findByText(/macOS is not allowing Work Journal/),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'Try allowing calendar access again' }),
+    ).toBeTruthy()
+    // The wish is kept, not discarded: a grant given in System Settings
+    // later resumes Import without being asked for a second time.
+    await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+    expect(readsOn(importSwitch())).toBe(false)
+
+    // A refusal never blocks the journal: continuation finishes the flow.
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    expect(done).toHaveBeenCalledTimes(1)
+  })
+
+  it('explains no selected calendars: permission alone imports nothing', async () => {
+    const desktop = fakeDesktop({
+      stored: {},
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+    })
+    const { done } = showFlow(desktop)
+    const user = await atTheMeetingImportStep()
+
+    await user.click(importSwitch())
+    await screen.findByRole('checkbox', { name: /Work/ })
+
+    // Granted and on, but nothing ticked: nothing is swept, and the step
+    // says so rather than claiming Import is running.
+    expect(
+      await screen.findByText(/permission alone imports nothing/),
+    ).toBeTruthy()
+    expect(desktop.stored.importCalendars ?? []).toEqual([])
+
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    expect(done).toHaveBeenCalledTimes(1)
+  })
+
+  it('says a failed Import save, with a retry that behaves like a fresh press', async () => {
+    const stored: Record<string, unknown> = {}
+    let writes = 0
+    const desktop = fakeDesktop({
+      stored,
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          if (key === 'importMeetings') {
+            writes += 1
+            if (writes === 1) throw new Error('the file is read-only')
+          }
+          stored[key] = value
+        },
+      }),
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    showFlow(desktop)
+    const user = await atTheMeetingImportStep()
+
+    await user.click(importSwitch())
+
+    expect(
+      await screen.findByText('Could not change how meetings are imported.'),
+    ).toBeTruthy()
+
+    await user.click(
+      screen.getByRole('button', { name: 'Try saving Import again' }),
+    )
+
+    await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+    await expect.poll(() => readsOn(importSwitch())).toBe(true)
+  })
+
+  it('says a refused calendar tick, with a retry that behaves like a fresh tick', async () => {
+    const stored: Record<string, unknown> = {
+      importMeetings: true,
+      importCalendars: ['work'],
+    }
+    // The file takes the first calendars write and refuses it.
+    let calendarWrites = 0
+    const desktop = fakeDesktop({
+      stored,
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          if (key === 'importCalendars') {
+            calendarWrites += 1
+            if (calendarWrites === 1) {
+              throw new Error('the file is read-only')
+            }
+          }
+          stored[key] = value
+        },
+      }),
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    showFlow(desktop)
+    const user = await atTheMeetingImportStep()
+
+    const work = await screen.findByRole('checkbox', { name: /Work/ })
+    await user.click(work)
+
+    // The refused untick is said, with a retry — and the rollback re-read
+    // what the file holds, so the ticks agree with it.
+    expect(
+      await screen.findByText('Could not save which calendars to import.'),
+    ).toBeTruthy()
+    expect(
+      screen.getByRole('button', { name: 'Try saving the calendars again' }),
+    ).toBeTruthy()
+    expect(desktop.stored.importCalendars).toEqual(['work'])
+
+    // The retry is a fresh tick of the refused selection: it takes, and the
+    // ticks say so.
+    await user.click(
+      screen.getByRole('button', { name: 'Try saving the calendars again' }),
+    )
+    await expect.poll(() => desktop.stored.importCalendars).toEqual([])
+    await expect.poll(() => work.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('says so when the calendars cannot be read on enable, with retry', async () => {
+    // The store is unreadable once, then recovers: the mount reads nothing
+    // (permission is still undetermined), so the first read is the enable's.
+    const desktop = fakeDesktop({
+      stored: {},
+      answersPrompt: 'granted',
+    })
+    let reads = 0
+    desktop.calendars = async () => {
+      reads += 1
+      if (reads === 1) throw new Error('the calendar store is unavailable')
+      return [{ id: 'work', title: 'Work', source: 'iCloud' }]
+    }
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    showFlow(desktop)
+    const user = await atTheMeetingImportStep()
+
+    await user.click(importSwitch())
+
+    // An unreadable calendar store refuses the change the way a refused file
+    // write does — Import is not left on with nothing to select.
+    expect(
+      await screen.findByText('Could not change how meetings are imported.'),
+    ).toBeTruthy()
+    expect(readsOn(importSwitch())).toBe(false)
+
+    await user.click(
+      screen.getByRole('button', { name: 'Try saving Import again' }),
+    )
+    await screen.findByRole('checkbox', { name: /Work/ })
+    await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+    await expect.poll(() => readsOn(importSwitch())).toBe(true)
+  })
+
+  it('shows saved values on Back navigation without resets or re-prompts', async () => {
+    const desktop = fakeDesktop({
+      stored: {},
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+    })
+    showFlow(desktop)
+    const user = await atTheMeetingImportStep()
+
+    await user.click(importSwitch())
+    const work = await screen.findByRole('checkbox', { name: /Work/ })
+    await user.click(work)
+    await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
+    expect(desktop.prompted).toBe(true)
+
+    // Back is a step of the walk, not a departure: the Start at Login step
+    // returns, and coming forward again reads the saved Import back.
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    await screen.findByRole('heading', { name: 'Start Work Journal at login?' })
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await screen.findByRole('heading', {
+      name: "Add today's meetings to the journal?",
+    })
+
+    await expect.poll(() => readsOn(importSwitch())).toBe(true)
+    expect(
+      screen
+        .getByRole('checkbox', { name: /Work/ })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
+    // Revisiting the step never asks macOS again.
+    expect(desktop.prompted).toBe(true)
+  })
+
+  it('advances per-step Skip to the finish without rolling back saves', async () => {
+    const desktop = fakeDesktop({
+      stored: {},
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+    })
+    const { done } = showFlow(desktop)
+    const user = await atTheMeetingImportStep()
+
+    await user.click(importSwitch())
+    await user.click(await screen.findByRole('checkbox', { name: /Work/ }))
+    await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
+
+    // Skip this step is the walk advancing, not the flow dismissed early:
+    // the finish runs and the saves stand.
+    await user.click(screen.getByRole('button', { name: 'Skip this step' }))
+    expect(done).toHaveBeenCalledTimes(1)
+    expect(desktop.stored.importMeetings).toBe(true)
+    expect(desktop.stored.importCalendars).toEqual(['work'])
+  })
+
+  it('dismisses the whole flow on Skip onboarding', async () => {
+    const desktop = fakeDesktop({ stored: {} })
+    const { done } = showFlow(desktop)
+    const user = await atTheMeetingImportStep()
+
+    await user.click(screen.getByRole('button', { name: 'Skip onboarding' }))
+    expect(done).toHaveBeenCalledTimes(1)
   })
 })
