@@ -5,6 +5,7 @@ import type { AppSettings } from '@/settings/app-settings'
 import {
   keychainRefusedLine,
   type KeychainRefusal,
+  type ModelAccessAnswers,
 } from '@/settings/model-access'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 
@@ -398,19 +399,12 @@ export function useModelAccessState({
 }
 
 /**
- * How a mount of a Model Access surface starts: what the flow kept from an
- * earlier mount of its step, or nothing at all. The typed Key is never part
- * of it — what the Keychain holds is not a surface's to keep, and the Key
- * being typed stays only under the cursor it was typed into.
+ * How a mount of a Model Access surface starts: the answers the flow kept
+ * from an earlier mount of its step, or none at all — every answer optional
+ * until a read or a keystroke fills it in. The typed Key is never part of
+ * it, for the reason `ModelAccessAnswers` gives.
  */
-export interface ModelAccessSeed {
-  modelBaseUrl?: string
-  model?: string
-  keySet?: boolean | null
-  keychainProblem?: string | null
-  keychainRefusal?: KeychainRefusal | null
-  unsaved?: { modelBaseUrl: boolean; model: boolean }
-}
+export type ModelAccessSeed = Partial<ModelAccessAnswers>
 
 /** The fields a stored read may seed a mount with. */
 export interface ModelAccessSeeded {

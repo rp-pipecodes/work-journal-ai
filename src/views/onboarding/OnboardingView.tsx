@@ -16,7 +16,7 @@ import {
   apiKeyStatus,
   keychainRetryLabel,
   modelAccessTransportAllows,
-  type KeychainRefusal,
+  type ModelAccessAnswers,
   typeTheKeyAgainLine,
 } from '@/settings/model-access'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
@@ -34,11 +34,10 @@ import { notStored } from '@/views/settings/SettingsGroup'
  * second owner of any setting: the controls reach the same `AppSettings` the
  * Settings section does.
  *
- * The steps themselves come and go: the sibling tickets add optional practice
- * and the remaining setup steps around these, so the flow is a short walk
- * over an ordered list rather than a fixed screen. The order is introduction
- * and optional practice → Start at Login → Meeting Import → Model Access →
- * Finish in History.
+ * The flow is a short walk over an ordered list rather than a fixed screen:
+ * the introduction and optional practice → Start at Login → Meeting Import →
+ * Model Access → Finish in History, each step skippable on its own without
+ * the flow growing or the walk getting stuck.
  */
 export default function OnboardingView({
   desktop,
@@ -234,22 +233,15 @@ interface MeetingKept {
 }
 
 /**
- * The Model Access answers a step left behind: the Base URL and the Model as
- * they read or were typed, whether the Keychain holds a Key (and why it is
- * not answering when it is not), which fields the store refused — and whether
- * the saved answers were ever read at all. Kept in the flow rather than the
- * step, so Back and Continue show what was just saved instead of re-reading
- * the file while a save is still in flight. What the Keychain holds is never
- * kept here: only whether it holds one.
+ * The Model Access answers a step left behind, in the shared shape the step
+ * and the hook both speak — plus whether the saved answers were ever read at
+ * all. Kept in the flow rather than the step, so Back and Continue show what
+ * was just saved instead of re-reading the file while a save is still in
+ * flight. What the Keychain holds is never kept here: only whether it holds
+ * one.
  */
-interface ModelAccessKept {
+interface ModelAccessKept extends ModelAccessAnswers {
   seeded: boolean
-  modelBaseUrl: string
-  model: string
-  keySet: boolean | null
-  keychainProblem: string | null
-  keychainRefusal: KeychainRefusal | null
-  unsaved: { modelBaseUrl: boolean; model: boolean }
 }
 
 /**
@@ -1068,7 +1060,12 @@ function MeetingImportStep({
        * anything to say, so that what it says next is announced rather than
        * merely appearing. The alerts above announce themselves, so while one
        * of them is up this stays quiet.
-       */}      <p role="status" aria-live="polite" className="type-meta min-h-4 text-muted-foreground">
+       */}
+      <p
+        role="status"
+        aria-live="polite"
+        className="type-meta min-h-4 text-muted-foreground"
+      >
         {statusText}
       </p>
 
@@ -1398,13 +1395,12 @@ function ModelAccessStep({
       </footer>
     </>
   )
-}
-
-/** The missing parts of Model Access, as one English list. */
+}/** The missing parts of Model Access, as one English list. */
 function listMissing(parts: string[]): string {
   if (parts.length === 1) return parts[0]
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
 }
+
 
 
 

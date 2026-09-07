@@ -34,6 +34,25 @@ export function keychainRefusedLine(error: unknown): string {
  */
 export type KeychainRefusal = 'read' | 'save' | 'clear'
 
+/**
+ * The Model Access answers a surface holds, in the one shape they travel in:
+ * where the model is, which model, whether the Keychain holds a Key, why the
+ * Keychain is not answering when it is not, which Keychain action a refusal
+ * refused, and which ordinary fields the store would not take. The Key itself
+ * is never one of them — what the Keychain holds is not a surface's to keep,
+ * and only whether it holds one is. A mount of a surface seeds from this
+ * (every answer optional until a read or a keystroke has filled it in), and
+ * the flow keeps it so Back shows what was just saved.
+ */
+export interface ModelAccessAnswers {
+  modelBaseUrl: string
+  model: string
+  keySet: boolean | null
+  keychainProblem: string | null
+  keychainRefusal: KeychainRefusal | null
+  unsaved: { modelBaseUrl: boolean; model: boolean }
+}
+
 /** The retry's name, for the button that says it. */
 export function keychainRetryLabel(refusal: KeychainRefusal): string {
   if (refusal === 'save') return 'Try saving the API Key again'
