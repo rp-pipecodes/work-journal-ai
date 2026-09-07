@@ -108,6 +108,27 @@ describe('the Import switch', () => {
     expect(isOn(importSwitch())).toBe(false)
   })
 
+  it('takes the reason with it when the wish is withdrawn', async () => {
+    // Withdrawing is the press the permission-gone switch offers, and the
+    // reason underneath goes with it: it explained a wish that is no longer
+    // wished for.
+    const desktop = fakeDesktop({
+      stored: { importMeetings: true, startAtLogin: false },
+      access: 'denied',
+    })
+
+    showSettings(desktop)
+
+    await screen.findByText(/macOS is not allowing Work Journal/)
+    importSwitch().click()
+
+    await expect.poll(() => desktop.stored.importMeetings).toBe(false)
+    // Said by the save's own announcement, moments after it took.
+    await expect
+      .poll(() => screen.queryByText(/macOS is not allowing Work Journal/))
+      .toBeNull()
+  })
+
   it('survives a press made before the settings file opens', async () => {
     // The settings file opens while this window is already on screen, and the
     // switch is writable in that gap. A press made there is already in the

@@ -1,16 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Switch } from '@/components/ui/switch'
 import { useOnScreenToast } from '@/components/on-screen-toast'
+import { CalendarTicks } from '@/components/CalendarTicks'
 import type { CalendarInfo, Desktop } from '@/platform/desktop'
+import { describeCalendarAccess } from '@/settings/calendar-access'
 import type { AppSettings } from '@/settings/app-settings'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 import type { SettingsInitialState } from './SettingsInitialState'
 import { useSeededState } from './useSeededState'
 import { saySettled } from './saySettled'
-import {
-  CalendarTicks,
-} from './meeting-import-shared'
-import { describeCalendarAccess } from './calendar-access'
 import {
   SettingsAside,
   SettingsGroup,
@@ -49,6 +47,11 @@ export default function MeetingImportSettings({
   // Why Import is not on, when the reason is the OS rather than the user.
   // Nothing until there is something to say.
   const [calendarProblem, setCalendarProblem] = useState<string | null>(null)
+  // How many Import changes have been started since this group mounted —
+  // presses here and announcements of saves made anywhere. A slow
+  // permission re-read belongs to the change that started it, and is
+  // discarded if a newer one has begun by then.
+  const order = useRef(0)
   // A save here ends in a login item, a permission, or a file write the user
   // cannot see; the toast is where each of those is confirmed.
   const says = useOnScreenToast()
@@ -88,6 +91,49 @@ export default function MeetingImportSettings({
     })
   }, [desktop, initialSettings, importTouched])
 
+  useEffect(() => {
+    // An Import save landed — this group's own, or the Onboarding flow's.
+    // The wish and the ticks are one fact the file holds, however many
+    // controls write it: the flow may change them while this section is
+    // mounted but hidden, and the section must hear of it without being
+    // rebuilt — that would throw away what else the user has unsaved in
+    // Settings. The announcement is newer than anything this group seeded,
+    // so it is applied as a change of its own; a rollback still in flight
+    // from an earlier press is discarded by the attempt that this starts.
+    // The reason underneath is re-derived from what macOS allows now, so a
+    // withdrawal made elsewhere takes its reason with it and a grant won
+    // elsewhere clears a stale one — and the calendars are fetched over a
+    // granted answer, so ticks chosen elsewhere arrive visible.
+    return settings.onImportChanged(({ importMeetings, importCalendars }) => {
+      const seen = ++order.current
+      setImportMeetings(importMeetings)
+      setImportCalendars(importCalendars)
+      void desktop.calendarAccess().then(
+        (access) => {
+          if (order.current !== seen) return
+          if (access === 'granted') {
+            setCalendarProblem(null)
+            if (importMeetings) {
+              void desktop.calendars().then(
+                setCalendars,
+                (error: unknown) => {
+                  console.error('could not read the calendars', error)
+                },
+              )
+            }
+            return
+          }
+          setCalendarProblem(
+            importMeetings ? describeCalendarAccess(access) : null,
+          )
+        },
+        (error: unknown) => {
+          console.error('could not read the calendar permission', error)
+        },
+      )
+    })
+  }, [desktop, settings, setImportCalendars, setImportMeetings])
+
   // Import as the window shows it: the user's wish, less whatever macOS is
   // withholding. The stored wish outlives a lost permission — that is what
   // makes the reason sayable — so the toggle is off whenever there is a reason
@@ -100,6 +146,9 @@ export default function MeetingImportSettings({
    * says why — the app asks once here and never again on its own.
    */
   function toggleImport(next: boolean) {
+    // A press supersedes any announcement still resolving: what it says
+    // about the reason underneath belongs to the newer word.
+    ++order.current
     void (async () => {
       // The rollback for whatever this press moved, if it moved anything.
       let rollback: ((value: boolean) => void) | undefined
@@ -107,6 +156,11 @@ export default function MeetingImportSettings({
         if (!next) {
           rollback = setImportMeetings(false)
           await settings.saveImportMeetings(false)
+          // Withdrawing takes the reason underneath with it — said by the
+          // save's own announcement, which re-derives the reason from what
+          // macOS allows now: the switch read off while the wish was on
+          // only because the reason said so. A refusal keeps the reason the
+          // rollback restores, because a refused save announces nothing.
           says.success('Meetings will no longer be imported.', 'import-meetings')
           return
         }

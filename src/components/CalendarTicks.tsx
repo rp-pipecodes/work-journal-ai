@@ -1,6 +1,5 @@
 import { Checkbox } from '@/components/ui/checkbox'
 import type { CalendarInfo } from '@/platform/desktop'
-import { SettingsAside } from './SettingsGroup'
 
 /**
  * Which calendars an Import reads. None are ticked to begin with, because the
@@ -21,7 +20,7 @@ export function CalendarTicks({
   onToggle: (id: string, ticked: boolean) => void
 }) {
   if (calendars.length === 0) {
-    return <SettingsAside>No calendars to read.</SettingsAside>
+    return <p className="type-meta text-muted-foreground">No calendars to read.</p>
   }
 
   return (

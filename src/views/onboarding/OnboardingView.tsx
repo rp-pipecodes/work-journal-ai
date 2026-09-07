@@ -11,10 +11,8 @@ import {
   type HotkeyStatuses,
 } from '@/settings/hotkey'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
-import {
-  CalendarTicks,
-} from '@/views/settings/meeting-import-shared'
-import { describeCalendarAccess } from '@/views/settings/calendar-access'
+import { CalendarTicks } from '@/components/CalendarTicks'
+import { describeCalendarAccess } from '@/settings/calendar-access'
 
 /**
  * The guided Onboarding flow, shown inside the Main Window — see
@@ -65,6 +63,15 @@ export default function OnboardingView({
     practiceRef.current = next
     setPractice(next)
   }
+
+  // The Meeting Import answers kept for the life of the window, so Back
+  // shows what was just chosen without re-reading the file mid-save — the
+  // same reason the practice attempt lives here rather than in the step. A
+  // remount re-reading the file while the previous mount's write is still in
+  // flight would seed itself stale, with nothing left to discard it. A fresh
+  // mount of this view — a replay — starts with nothing kept and reads the
+  // file again.
+  const meetingKept = useRef<MeetingKept | null>(null)
 
   useEffect(() => {
     void desktop.hotkeyStatus().then(setHotkeys, (error: unknown) => {
@@ -158,6 +165,7 @@ export default function OnboardingView({
       <MeetingImportStep
         desktop={desktop}
         settings={settings}
+        kept={meetingKept}
         onBack={() => setStep('start-at-login')}
         onSkipStep={onDone}
         onSkipOnboarding={onDone}
@@ -184,6 +192,22 @@ interface Practice {
   attempt: number
   open: boolean
   day: string | null
+}
+
+/**
+ * The Meeting Import answers a step left behind: the wish, the ticks, the
+ * calendars macOS held, why Import is not on, and whether the calendars are
+ * known yet or their read failed. Kept in the flow rather than the step, so
+ * Back and Continue show what was just saved instead of re-reading the file
+ * while a save is still in flight.
+ */
+interface MeetingKept {
+  wish: boolean
+  ticked: string[]
+  calendars: CalendarInfo[]
+  problem: string | null
+  known: boolean
+  failed: boolean
 }
 
 /**
@@ -507,6 +531,7 @@ function StartAtLoginStep({
 function MeetingImportStep({
   desktop,
   settings,
+  kept,
   onBack,
   onSkipStep,
   onSkipOnboarding,
@@ -514,6 +539,8 @@ function MeetingImportStep({
 }: {
   desktop: Desktop
   settings: AppSettings
+  /** The answers the flow keeps for the step across Back and Continue. */
+  kept: { current: MeetingKept | null }
   onBack: () => void
   /** The walk finishes, skipped or not: this is the last setup step. */
   onSkipStep: () => void
@@ -522,18 +549,34 @@ function MeetingImportStep({
   onOpenHistory: () => void
 }) {
   // The wish for Import and the ticked calendars, seeded from what the file
-  // holds — the same answers Settings reads. A refusal rolls back to a fresh
+  // holds — the same answers Settings reads — or from what the flow kept,
+  // when Back and Continue remount the step. A refusal rolls back to a fresh
   // read of the same file, so the ticks always agree with it.
-  const [wish, setWish] = useState(DEFAULT_SETTINGS.importMeetings)
+  const [wish, setWish] = useState(
+    () => kept.current?.wish ?? DEFAULT_SETTINGS.importMeetings,
+  )
   const [ticked, setTicked] = useState<string[]>(
-    DEFAULT_SETTINGS.importCalendars,
+    () => kept.current?.ticked ?? DEFAULT_SETTINGS.importCalendars,
   )
   // The calendars macOS holds today, fetched once permission is known to be
   // granted — never as part of asking for it.
-  const [calendars, setCalendars] = useState<CalendarInfo[]>([])
+  const [calendars, setCalendars] = useState<CalendarInfo[]>(
+    () => kept.current?.calendars ?? [],
+  )
   // Why Import is not on, when the reason is the OS rather than the user.
   // Nothing until there is something to say.
-  const [calendarProblem, setCalendarProblem] = useState<string | null>(null)
+  const [calendarProblem, setCalendarProblem] = useState<string | null>(
+    () => kept.current?.problem ?? null,
+  )
+  // Whether the calendars are known yet, and whether reading them failed.
+  // A failed read is needs-attention of its own: the switch may read on
+  // while there is nothing to tick, and nothing would import.
+  const [calendarsKnown, setCalendarsKnown] = useState(
+    () => kept.current?.known ?? false,
+  )
+  const [calendarsFailed, setCalendarsFailed] = useState(
+    () => kept.current?.failed ?? false,
+  )
   // What a save refused, when the reason is the file rather than the OS: the
   // toggle's wish and what it wanted, or the ticks and what they wanted.
   // Nothing until a save says otherwise.
@@ -542,40 +585,65 @@ function MeetingImportStep({
     | { kind: 'calendars'; wanted: string[] }
     | null
   >(null)
-  // The one press that silences the arriving read, exactly as the seeded
-  // settings state does: a change made before the file answers must not be
-  // put back by the answer.
-  const touched = useRef(false)
+  // Whether an enablement is asking macOS right now. The switch answers
+  // nothing further until it settles: a second press in the gap would ask
+  // twice and land wherever the slower answer says.
+  const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
+  // Whether this mount resumes answers the flow kept: read during render,
+  // before any effect leaves this mount's own answers behind.
+  const [resumed] = useState(() => kept.current !== null)
+  // What the arriving read may still seed, per value rather than per step:
+  // a press on the switch silences only the switch's seed, so a tick made
+  // before the read lands still builds on the saved selection — the same
+  // rule the seeded Settings controls live under. See
+  // docs/adr/0028-the-initial-read-seeds-only-what-the-user-has-not-changed.md.
+  const wishTouched = useRef(false)
+  const tickedTouched = useRef(false)
   // How many Import changes and calendar changes have been started since this
   // step mounted. A save that settles — or a rollback read that returns —
   // belongs to the change that started it, and is discarded if a newer one
-  // has begun by then: the same per-attempt rule the seeded Settings controls
-  // live under — see
-  // docs/adr/0028-the-initial-read-seeds-only-what-the-user-has-not-changed.md.
+  // has begun by then.
   const importAttempts = useRef(0)
   const calendarAttempts = useRef(0)
 
+  // Leaves the answers behind on every render, for the next mount of this
+  // step: Back and Continue show what was just saved instead of re-reading
+  // the file while a save is still in flight.
   useEffect(() => {
+    kept.current = {
+      wish,
+      ticked,
+      calendars,
+      problem: calendarProblem,
+      known: calendarsKnown,
+      failed: calendarsFailed,
+    }
+  })
+
+  useEffect(() => {
+    // Already answered once this window: the kept answers stand, and the
+    // file — and macOS — are left alone.
+    if (resumed) return
     // The saved answers, read back without asking macOS for anything new:
     // `calendarAccess` only reports what the OS allows, and the calendars are
     // fetched only over an answer already granted. Entering or replaying the
     // step therefore never prompts.
     void settings.load().then(
       (stored) => {
-        if (touched.current) return
-        setWish(stored.importMeetings)
-        setTicked(stored.importCalendars)
+        if (!wishTouched.current) setWish(stored.importMeetings)
+        if (!tickedTouched.current) setTicked(stored.importCalendars)
         void desktop.calendarAccess().then(
           (access) => {
-            if (touched.current) return
+            if (wishTouched.current) return
             if (access === 'granted') {
-              void desktop.calendars().then(setCalendars, (error: unknown) => {
-                console.error('could not read the calendars', error)
-              })
               setCalendarProblem(null)
+              refreshCalendars()
               return
             }
             setCalendars([])
+            setCalendarsKnown(true)
+            setCalendarsFailed(false)
             // Only worth saying to someone who asked for Import: a user who
             // has never turned it on is owed no explanation for something they
             // never wanted. The stored wish is the evidence, and it survives
@@ -593,6 +661,8 @@ function MeetingImportStep({
         console.error('could not read the saved Import', error)
       },
     )
+    // `kept` is the flow's own ref: written, never replaced.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [desktop, settings])
 
   // Import as the step shows it: the user's wish, less whatever macOS is
@@ -600,10 +670,37 @@ function MeetingImportStep({
   // makes the reason sayable — so the switch is off whenever there is a
   // reason underneath it saying why.
   const importing = wish && calendarProblem === null
-  // What the saved selection names today, for the configured line.
+  // What the saved selection names today, for the configured line: ticked
+  // identifiers that still resolve against the calendars macOS holds.
   const chosen = calendars
     .filter((calendar) => ticked.includes(calendar.id))
     .map((calendar) => calendar.title)
+
+  // The step's standing, for the one status region below: off, configured,
+  // or waiting on a choice — but never a promise the calendars cannot keep.
+  // Stale identifiers resolve to nothing, so they are said as unavailable
+  // rather than imported; genuinely zero calendars are said beside their own
+  // recovery rather than here.
+  let statusText = ''
+  if (
+    calendarProblem === null &&
+    saveProblem === null &&
+    !(importing && calendarsFailed)
+  ) {
+    if (!importing) {
+      statusText = 'Meeting Import is off — Notes and Tasks work without it.'
+    } else if (calendarsKnown && calendars.length > 0) {
+      if (chosen.length > 0) {
+        statusText = `Today's meetings from ${chosen.join(', ')} will be imported.`
+      } else if (ticked.length === 0) {
+        statusText =
+          'No calendars selected — permission alone imports nothing. Tick the calendars that mean work, or continue without Import.'
+      } else {
+        statusText =
+          'Your selected calendars are no longer available. Tick the calendars that mean work, or continue without Import.'
+      }
+    }
+  }
 
   /**
    * Saving the wish, wherever the press that wanted it came from: the switch,
@@ -642,64 +739,85 @@ function MeetingImportStep({
    * second time.
    */
   function toggleImport(next: boolean) {
-    touched.current = true
+    // Answered only once per flight, however the press arrived: the switch
+    // is disabled while busy, and this refuses what gets through anyway, so
+    // a swallowed press neither asks again nor invalidates the flight.
+    if (next && busyRef.current) return
+    wishTouched.current = true
     const attempt = ++importAttempts.current
+    // A toggle supersedes any tick save still in flight: the ticks hide with
+    // Import off, and a late refusal must not re-show its alert over them.
+    ++calendarAttempts.current
     setSaveProblem(null)
     if (!next) {
+      // Withdrawing ends any flight: nothing is asking macOS anymore.
+      busyRef.current = false
+      setBusy(false)
       setWish(false)
       setCalendarProblem(null)
       persistWish(false, attempt)
       return
     }
 
+    setBusy(true)
+    busyRef.current = true
     void (async () => {
-      let access: CalendarAccess
       try {
-        access =
-          (await desktop.calendarAccess()) === 'granted'
-            ? 'granted'
-            : await desktop.requestCalendarAccess()
-      } catch (error) {
-        console.error('could not ask macOS about the calendars', error)
+        let access: CalendarAccess
+        try {
+          access =
+            (await desktop.calendarAccess()) === 'granted'
+              ? 'granted'
+              : await desktop.requestCalendarAccess()
+        } catch (error) {
+          console.error('could not ask macOS about the calendars', error)
+          if (importAttempts.current !== attempt) return
+          setSaveProblem({ kind: 'import', wanted: true })
+          return
+        }
         if (importAttempts.current !== attempt) return
-        setSaveProblem({ kind: 'import', wanted: true })
-        return
-      }
-      if (importAttempts.current !== attempt) return
 
-      if (access !== 'granted') {
+        if (access !== 'granted') {
+          setWish(true)
+          setCalendarProblem(describeCalendarAccess(access))
+          persistWish(true, attempt)
+          return
+        }
+
         setWish(true)
-        setCalendarProblem(describeCalendarAccess(access))
-        persistWish(true, attempt)
-        return
-      }
-
-      setWish(true)
-      setCalendarProblem(null)
-      try {
-        // The calendars over the answer just won, as the Settings switch
-        // fetches them: an unreadable calendar store refuses the change the
-        // same way a refused file write does, rather than leaving Import on
-        // with nothing to select.
-        setCalendars(await desktop.calendars())
-      } catch (error) {
-        console.error('could not read the calendars', error)
+        setCalendarProblem(null)
+        try {
+          // The calendars over the answer just won, as the Settings switch
+          // fetches them: an unreadable calendar store refuses the change the
+          // same way a refused file write does, rather than leaving Import on
+          // with nothing to select.
+          setCalendars(await desktop.calendars())
+          setCalendarsKnown(true)
+          setCalendarsFailed(false)
+        } catch (error) {
+          console.error('could not read the calendars', error)
+          if (importAttempts.current !== attempt) return
+          setSaveProblem({ kind: 'import', wanted: true })
+          void settings.load().then(
+            (stored) => {
+              if (importAttempts.current === attempt) {
+                setWish(stored.importMeetings)
+              }
+            },
+            () => {
+              if (importAttempts.current === attempt) setWish(false)
+            },
+          )
+          return
+        }
         if (importAttempts.current !== attempt) return
-        setSaveProblem({ kind: 'import', wanted: true })
-        void settings.load().then(
-          (stored) => {
-            if (importAttempts.current === attempt) {
-              setWish(stored.importMeetings)
-            }
-          },
-          () => {
-            if (importAttempts.current === attempt) setWish(false)
-          },
-        )
-        return
+        persistWish(true, attempt)
+      } finally {
+        if (importAttempts.current === attempt) {
+          busyRef.current = false
+          setBusy(false)
+        }
       }
-      if (importAttempts.current !== attempt) return
-      persistWish(true, attempt)
     })()
   }
 
@@ -731,9 +849,25 @@ function MeetingImportStep({
     )
   }
 
+  /** (Re-)reads the calendars macOS holds — never as part of asking for them. */
+  function refreshCalendars() {
+    void desktop.calendars().then(
+      (list) => {
+        setCalendars(list)
+        setCalendarsKnown(true)
+        setCalendarsFailed(false)
+      },
+      (error: unknown) => {
+        console.error('could not read the calendars', error)
+        setCalendarsKnown(true)
+        setCalendarsFailed(true)
+      },
+    )
+  }
+
   /** Ticking a calendar, or unticking it — an unticked one is ignored. */
   function toggleCalendar(id: string, next: boolean) {
-    touched.current = true
+    tickedTouched.current = true
     const attempt = ++calendarAttempts.current
     const updated = next
       ? [...ticked, id]
@@ -745,7 +879,7 @@ function MeetingImportStep({
 
   /** Retrying a refused tick save: the refused selection, saved afresh. */
   function retryCalendars(wanted: string[]) {
-    touched.current = true
+    tickedTouched.current = true
     const attempt = ++calendarAttempts.current
     setTicked(wanted)
     setSaveProblem(null)
@@ -778,6 +912,7 @@ function MeetingImportStep({
         <Switch
           id="onboarding-import-meetings"
           checked={importing}
+          disabled={busy}
           // Pressed, the switch means the opposite of the wish rather than
           // the opposite of what it reads: with the permission gone it reads
           // off while the wish is on, and a press there is the user
@@ -828,41 +963,59 @@ function MeetingImportStep({
         </p>
       )}
 
-      {importing && (
-        <>
-          <CalendarTicks
-            calendars={calendars}
-            ticked={ticked}
-            onToggle={toggleCalendar}
-          />
-          {ticked.length === 0 ? (
-            <p className="type-meta text-muted-foreground">
-              No calendars selected — permission alone imports nothing. Tick
-              the calendars that mean work, or continue without Import.
-            </p>
-          ) : (
-            <p
-              aria-live="polite"
-              className="type-meta min-h-4 text-muted-foreground"
-            >
-              Today&apos;s meetings from{' '}
-              {chosen.length > 0
-                ? chosen.join(', ')
-                : 'your selected calendars'}{' '}
-              will be imported.
-            </p>
-          )}
-        </>
-      )}
-
-      {!importing && calendarProblem === null && saveProblem === null && (
-        <p
-          aria-live="polite"
-          className="type-meta min-h-4 text-muted-foreground"
-        >
-          Meeting Import is off — Notes and Tasks work without it.
+      {importing && calendarsFailed && (
+        <p className="type-meta text-destructive" role="alert">
+          Could not read your calendars.{' '}
+          <Button
+            variant="link"
+            size="xs"
+            aria-label="Try reading the calendars again"
+            onClick={refreshCalendars}
+          >
+            Try again
+          </Button>
         </p>
       )}
+
+      {importing && !calendarsFailed && (
+        <CalendarTicks
+          calendars={calendars}
+          ticked={ticked}
+          onToggle={toggleCalendar}
+        />
+      )}
+
+      {importing &&
+        !calendarsFailed &&
+        calendarsKnown &&
+        calendars.length === 0 && (
+          <div className="flex flex-col gap-1">
+            <p className="type-meta text-muted-foreground">
+              Nothing to tick — continue without Import, or add a calendar and
+              check again.
+            </p>
+            <div>
+              <Button
+                variant="link"
+                size="xs"
+                aria-label="Check for calendars again"
+                onClick={refreshCalendars}
+              >
+                Check again
+              </Button>
+            </div>
+          </div>
+        )}
+
+      {/*
+       * The one status the step keeps saying. It is here before there is
+       * anything to say, so that what it says next is announced rather than
+       * merely appearing. The alerts above announce themselves, so while one
+       * of them is up this stays quiet.
+       */}
+      <p role="status" aria-live="polite" className="type-meta min-h-4 text-muted-foreground">
+        {statusText}
+      </p>
 
       <footer className="flex items-center justify-between gap-3 pt-2">
         <div className="flex items-center gap-2">

@@ -4,7 +4,12 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ThemeProvider from '@/components/ThemeProvider'
-import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
+import type { CalendarAccess } from '@/platform/desktop'
+import {
+  deferredStore,
+  fakeDesktop,
+  type FakeDesktop,
+} from '@/platform/testing/desktop'
 import { createAppSettings } from '@/settings/app-settings'
 import OnboardingView from './OnboardingView'
 
@@ -486,5 +491,213 @@ describe('the Meeting Import step', () => {
 
     await user.click(screen.getByRole('button', { name: 'Skip onboarding' }))
     expect(done).toHaveBeenCalledTimes(1)
+  })
+
+  it('builds a tick on the saved selection when the switch was pressed first', async () => {
+    // Replay: the file holds Import on with Work ticked, but the read is
+    // still landing when the switch is pressed. The press silences only the
+    // switch's seed — the saved ticks still land, so ticking Personal keeps
+    // Work instead of dropping it with nothing said.
+    const stored: Record<string, unknown> = {
+      importMeetings: true,
+      importCalendars: ['work'],
+    }
+    const deferred = deferredStore(stored)
+    const desktop = fakeDesktop({
+      stored,
+      answersPrompt: 'granted',
+      calendars: [
+        { id: 'work', title: 'Work', source: 'iCloud' },
+        { id: 'personal', title: 'Personal', source: 'iCloud' },
+      ],
+      openSettingsStore: deferred.openSettingsStore,
+    })
+    showFlow(desktop)
+    const user = await atTheMeetingImportStep()
+
+    await user.click(importSwitch())
+    deferred.openTheStore()
+
+    // The saved ticks landed despite the earlier press.
+    await screen.findByRole('checkbox', { name: /Work/ })
+    await user.click(await screen.findByRole('checkbox', { name: /Personal/ }))
+
+    await expect.poll(() => desktop.stored.importCalendars).toEqual([
+      'work',
+      'personal',
+    ])
+  })
+
+  it('shows the saved choice on Back and Continue while its save is still in flight', async () => {
+    // The file takes a while to write: Back and Continue while the enable
+    // is still landing must show what was chosen — kept by the flow —
+    // rather than re-reading the file mid-save and resetting to off.
+    const stored: Record<string, unknown> = {}
+    const desktop = fakeDesktop({
+      stored,
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          if (key === 'importMeetings') {
+            await new Promise((resolve) => setTimeout(resolve, 500))
+          }
+          stored[key] = value
+        },
+      }),
+    })
+    showFlow(desktop)
+    const user = await atTheMeetingImportStep()
+
+    await user.click(importSwitch())
+    // The choice is made — the calendars arrived over the granted answer —
+    // but not yet written.
+    await screen.findByRole('checkbox', { name: /Work/ })
+
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    await screen.findByRole('heading', { name: 'Start Work Journal at login?' })
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await screen.findByRole('heading', {
+      name: "Add today's meetings to the journal?",
+    })
+
+    await expect.poll(() => readsOn(importSwitch())).toBe(true)
+    await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+  })
+
+  it('says so when the calendars cannot be read on entry, with retry', async () => {
+    // Replay with Import saved on and permission granted, but an unreadable
+    // calendar store: the switch reads the saved on, yet nothing is
+    // promised — the failure is said with a retry, not a configured line.
+    const desktop = fakeDesktop({
+      stored: { importMeetings: true, importCalendars: ['work'] },
+      access: 'granted',
+    })
+    let reads = 0
+    desktop.calendars = async () => {
+      reads += 1
+      if (reads === 1) throw new Error('the calendar store is unavailable')
+      return [{ id: 'work', title: 'Work', source: 'iCloud' }]
+    }
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    showFlow(desktop)
+    const user = await atTheMeetingImportStep()
+
+    await expect.poll(() => readsOn(importSwitch())).toBe(true)
+    expect(
+      await screen.findByText('Could not read your calendars.'),
+    ).toBeTruthy()
+    expect(screen.queryByText(/will be imported/)).toBeNull()
+
+    await user.click(
+      screen.getByRole('button', { name: 'Try reading the calendars again' }),
+    )
+    await screen.findByRole('checkbox', { name: /Work/ })
+    expect(
+      await screen.findByText(/meetings from Work will be imported/),
+    ).toBeTruthy()
+  })
+
+  it('says selected calendars are unavailable instead of promising Import', async () => {
+    // The saved ticks resolve to nothing macOS holds: stale identifiers must
+    // not produce the configured line.
+    const desktop = fakeDesktop({
+      stored: { importMeetings: true, importCalendars: ['gone'] },
+      access: 'granted',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+    })
+    showFlow(desktop)
+    await atTheMeetingImportStep()
+
+    expect(
+      await screen.findByText(/no longer available/),
+    ).toBeTruthy()
+    expect(screen.queryByText(/will be imported/)).toBeNull()
+  })
+
+  it('says there is nothing to tick when no calendars exist, with a way to check again', async () => {
+    const desktop = fakeDesktop({
+      stored: {},
+      access: 'granted',
+      calendars: [],
+    })
+    showFlow(desktop)
+    const user = await atTheMeetingImportStep()
+
+    await user.click(importSwitch())
+    await screen.findByText('No calendars to read.')
+
+    // Genuinely zero calendars is guidance of its own — not the instruction
+    // to tick, which would point at nothing.
+    expect(await screen.findByText(/Nothing to tick/)).toBeTruthy()
+    expect(
+      screen.queryByText(/Tick the calendars that mean work/),
+    ).toBeNull()
+
+    // A calendar added since is one check away.
+    desktop.calendars = async () => [
+      { id: 'work', title: 'Work', source: 'iCloud' },
+    ]
+    await user.click(
+      screen.getByRole('button', { name: 'Check for calendars again' }),
+    )
+    await screen.findByRole('checkbox', { name: /Work/ })
+    expect(
+      await screen.findByText(/permission alone imports nothing/),
+    ).toBeTruthy()
+  })
+
+  it('keeps one status region whose content swaps', async () => {
+    const desktop = fakeDesktop({
+      stored: {},
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+    })
+    showFlow(desktop)
+    const user = await atTheMeetingImportStep()
+
+    // Here before there is anything configured to say, so configuring it is
+    // announced rather than merely appearing.
+    expect(screen.getAllByRole('status')).toHaveLength(1)
+
+    await user.click(importSwitch())
+    await user.click(await screen.findByRole('checkbox', { name: /Work/ }))
+    await screen.findByText(/meetings from Work will be imported/)
+
+    expect(screen.getAllByRole('status')).toHaveLength(1)
+  })
+
+  it('asks macOS once when the switch is pressed twice in the gap', async () => {
+    const desktop = fakeDesktop({ stored: {} })
+    let prompts = 0
+    let release!: (access: CalendarAccess) => void
+    const held = new Promise<CalendarAccess>((resolve) => {
+      release = resolve
+    })
+    desktop.requestCalendarAccess = async () => {
+      prompts += 1
+      desktop.prompted = true
+      return held
+    }
+    showFlow(desktop)
+    await atTheMeetingImportStep()
+
+    // Two presses while macOS is still answering: the second lands on a
+    // disabled switch and through the in-flight guard alike. (Base UI
+    // renders the switch as a span, so disabled reads as data-disabled.)
+    const control = importSwitch()
+    control.click()
+    control.click()
+    await expect.poll(() => control.hasAttribute('data-disabled')).toBe(true)
+
+    release('granted')
+    await expect.poll(() => desktop.stored.importMeetings).toBe(true)
+    await expect.poll(() => readsOn(importSwitch())).toBe(true)
+    expect(prompts).toBe(1)
   })
 })

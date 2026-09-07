@@ -1056,11 +1056,16 @@ describe('Meeting Import during Onboarding', () => {
 
     await user.click(importSwitch())
 
-    // The refusal is said in the step, the retry stays available, and the
-    // wish is kept for a grant given later in System Settings.
-    expect(
-      await screen.findByText(/macOS is not allowing Work Journal/),
-    ).toBeTruthy()
+    // The refusal is said in the step — and mirrored into the mounted but
+    // hidden Settings section, which hears the flow's save through the
+    // in-window announcement. Two copies in the DOM (role queries only ever
+    // see the step's), one retry on screen, and the wish kept for a grant
+    // given later in System Settings.
+    await expect
+      .poll(
+        () => screen.getAllByText(/macOS is not allowing Work Journal/),
+      )
+      .toHaveLength(2)
     expect(
       screen.getByRole('button', { name: 'Try allowing calendar access again' }),
     ).toBeTruthy()
@@ -1164,8 +1169,41 @@ describe('Meeting Import during Onboarding', () => {
     expect(desktop.stored.importCalendars).toEqual(['work'])
   })
 
-  it('replays with the saved Import and without prompting', async () => {
+  it('shows the Import the flow saved, when Settings is opened afterwards', async () => {
     const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+      calendars: [{ id: 'work', title: 'Work', source: 'iCloud' }],
+    })
+    await atTheMeetingImportStep()
+
+    await user.click(importSwitch())
+    await user.click(await screen.findByRole('checkbox', { name: /Work/ }))
+    await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
+
+    // Finish into History, then open Settings: its switch and its ticks are
+    // the same wish and the same list the flow just saved, so they must read
+    // the new answers back rather than the snapshot the window opened with.
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await showsHistory()
+    await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
+    await showsSettings()
+
+    const control = await screen.findByRole('switch', {
+      name: "Add today's meetings to the journal",
+    })
+    await expect
+      .poll(() => control.getAttribute('aria-checked'))
+      .toBe('true')
+    expect(
+      screen
+        .getByRole('checkbox', { name: /Work/ })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
+  })
+
+  it('replays with the saved Import and without prompting', async () => {    const user = userEvent.setup()
     const { desktop } = await showMainWindow({
       captured: [MONDAY],
       section: 'settings',
