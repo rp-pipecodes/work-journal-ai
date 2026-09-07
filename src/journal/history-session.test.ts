@@ -1023,6 +1023,45 @@ describe('copying the Digest', () => {
 
     expect(session.snapshot().confirmation).toBe('Could not copy notes.')
   })
+
+  it('holds the held Digest count for the copy control to preview', async () => {
+    const { session } = await sessionOver([
+      { at: '2026-03-13T10:00:00', body: 'Friday' },
+      { at: '2026-03-13T11:00:00', body: 'Also Friday' },
+    ])
+
+    expect(session.snapshot().noteCount).toBeNull()
+
+    await session.open()
+    expect(session.snapshot().noteCount).toBe(2)
+
+    await session.moveTo(rangeForJournalDay('2026-03-09'))
+    expect(session.snapshot().noteCount).toBe(0)
+  })
+
+  it('keeps the held count when a read fails, as the held Digest does', async () => {
+    silenceErrors()
+    const { session } = await sessionOver(
+      [{ at: '2026-03-13T10:00:00', body: 'Friday' }],
+      {
+        journal: (core) => ({
+          ...core,
+          notesForFilter: (filter) =>
+            filter.from === '2026-03-09'
+              ? Promise.reject(new Error('no database'))
+              : core.notesForFilter(filter),
+        }),
+      },
+    )
+
+    await session.open()
+    expect(session.snapshot().noteCount).toBe(1)
+
+    await session.moveTo(rangeForJournalDay('2026-03-09'))
+    expect(session.snapshot().history).toEqual({ state: 'unreadable' })
+    // The copy still carries the stale Digest, so the preview says so too.
+    expect(session.snapshot().noteCount).toBe(1)
+  })
 })
 
 describe('copying Review Material', () => {

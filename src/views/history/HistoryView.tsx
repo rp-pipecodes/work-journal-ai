@@ -137,6 +137,7 @@ export default function HistoryView({
     term,
     searching,
     nudgedDay,
+    noteCount,
     confirmation,
     problem,
   } = snapshot
@@ -356,7 +357,7 @@ export default function HistoryView({
               <Copies
                 filter={filter}
                 confirmation={confirmation}
-                noteCount={noteCountOf(history)}
+                noteCount={noteCount}
                 onCopyDigest={copyDigest}
                 onCopyReviewMaterial={copyReviewMaterial}
               />
@@ -1065,23 +1066,16 @@ function ProjectConstraintField({
 }
 
 /**
- * How many Notes the Filter holds, for the copy control to preview: the
- * Digest itself is invisible until pasted, so the count is what says what a
- * copy would carry. Read off the list on screen, which is the same Notes the
- * held Digest was read for.
- */
-function noteCountOf(history: HistorySnapshot['history']): number {
-  if (history.state !== 'notes') return 0
-  return history.days.reduce((total, day) => total + day.notes.length, 0)
-}
-
-/**
  * The header's one copy control: a split button whose primary copies the
  * Filter's Notes and whose chevron menu holds the variant that adds the work
  * completed in the Filter's days. One visible button rather than a
  * side-by-side pair, so copying is a default with an escape hatch rather than
  * a decision every time. Each copy's confirmation names which one landed,
  * through the toast and the one live region below.
+ *
+ * The count previews the held Digest itself — what a copy would write — so
+ * it stays honest whatever the list underneath is doing. Null while no read
+ * has landed yet, when the button reads plainly.
  *
  * Completed work has no Project, so under a
  * named Project or Unfiled its menu row is present but disabled, carrying the
@@ -1096,7 +1090,7 @@ function Copies({
 }: {
   filter: Filter
   confirmation: string | null
-  noteCount: number
+  noteCount: number | null
   onCopyDigest: () => void
   onCopyReviewMaterial: () => void
 }) {
@@ -1123,7 +1117,7 @@ function Copies({
           className="rounded-r-none border-r-0"
         >
           <ClipboardCopyIcon data-icon="inline-start" />
-          Copy notes ({noteCount})
+          {noteCount === null ? 'Copy notes' : `Copy notes (${noteCount})`}
         </Button>
         {/*
           A real menu rather than a popover with buttons: arrow keys,

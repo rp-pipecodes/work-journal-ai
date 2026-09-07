@@ -82,6 +82,13 @@ export interface HistorySnapshot {
   /** The day a Nudge is about; null when there is nothing to nudge about. */
   nudgedDay: string | null
   /**
+   * How many Notes the held Digest holds — what `copy()` would write, so the
+   * copy control's preview never describes anything else. Null until the
+   * first read lands; a failed read leaves the held Digest, and its count,
+   * exactly as they were.
+   */
+  noteCount: number | null
+  /**
    * What the last copy did, said back to the reader so they know it worked
    * before they paste. Nothing until they copy, and until they move the Filter.
    */
@@ -102,6 +109,7 @@ export const openingSnapshot: HistorySnapshot = {
   term: '',
   searching: false,
   nudgedDay: null,
+  noteCount: null,
   confirmation: null,
   problem: null,
 }
@@ -269,6 +277,7 @@ export function createHistorySession({
       show({
         projects,
         history: { state: 'notes', days: groupByJournalDay(notes) },
+        noteCount: rendered.noteCount,
       })
     } catch (error) {
       giveUp(error, ticket)

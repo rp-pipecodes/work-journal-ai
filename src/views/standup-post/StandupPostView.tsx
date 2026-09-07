@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { ChevronDownIcon, ClipboardCopyIcon, SparklesIcon } from 'lucide-react'
 import WindowTitleBar from '@/components/WindowTitleBar'
 import { useOffScreen } from '@/components/on-screen-context'
@@ -505,6 +505,7 @@ function CopySplit({
   onCopyYesterday: () => void
   onCopyPost: () => void
 }) {
+  const postRuleId = useId()
   return (
     <div className="flex shrink-0 items-center">
       <Button
@@ -541,14 +542,14 @@ function CopySplit({
             <MenuItem
               onClick={() => onCopyPost()}
               disabled={!postExists}
-              aria-describedby={!postExists ? 'copy-post-rule' : undefined}
+              aria-describedby={!postExists ? postRuleId : undefined}
             >
               <ClipboardCopyIcon data-icon="inline-start" />
               Copy post
             </MenuItem>
             {!postExists && (
               <p
-                id="copy-post-rule"
+                id={postRuleId}
                 className="px-2 pb-1 type-micro text-muted-foreground"
               >
                 Generate a post first.
