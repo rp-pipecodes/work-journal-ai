@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useOnScreenToast } from '@/components/on-screen-toast'
 import type { Desktop } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
+import { apiKeyStatus, keychainRefusedLine } from '@/settings/model-access'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 import type { SettingsInitialState } from './SettingsInitialState'
 import { useSeededState } from './useSeededState'
@@ -71,6 +72,13 @@ export default function ModelAccessSettings({
   // toast replaces itself rather than stacking — one per field, not one per
   // keystroke.
   const says = useOnScreenToast()
+  // The refs the arriving announcement reads: a field the store refused must
+  // not be overwritten by an older file value the announcement carries — the
+  // refusal is what says the field is still the user's, not the file's.
+  const unsavedRef = useRef(unsaved)
+  useEffect(() => {
+    unsavedRef.current = unsaved
+  }, [unsaved])
 
   // Asked on its own rather than with the settings the store holds: a locked
   // Keychain is an ordinary answer here, and it must not take the rest of the
@@ -87,6 +95,27 @@ export default function ModelAccessSettings({
       },
     )
   }, [desktop])
+
+  useEffect(() => {
+    // A Model Access save landed — this group's own, or the Onboarding flow's.
+    // The three answers are one fact, however many controls write it: the
+    // flow may change them while this section is mounted but hidden, and the
+    // section must hear of it without being rebuilt — that would throw away
+    // what else the user has unsaved in Settings. The announcement is newer
+    // than anything this group seeded, so it is applied as a change of its
+    // own; a rollback still in flight from an earlier press is discarded by
+    // the attempt that this starts. A field the store refused keeps its
+    // refusal: the field is still the user's text, and the older value the
+    // announcement would carry must not be put back under it.
+    return settings.onModelAccessChanged(
+      ({ modelBaseUrl: announcedBaseUrl, model: announcedModel, keySet: announcedKeySet }) => {
+        if (!unsavedRef.current.modelBaseUrl) setModelBaseUrl(announcedBaseUrl)
+        if (!unsavedRef.current.model) setModel(announcedModel)
+        setKeySet(announcedKeySet)
+        setKeychainProblem(null)
+      },
+    )
+  }, [settings, setModel, setModelBaseUrl])
 
   /** The Keychain would not answer, and Settings says which one of it did. */
   function refuseKeychain(error: unknown): void {
@@ -129,7 +158,7 @@ export default function ModelAccessSettings({
     const key = typedKey.trim()
     if (key === '') return
 
-    saySettled(says, desktop.saveApiKey(key), {
+    saySettled(says, settings.saveApiKey(key), {
       id: 'api-key',
       saved: 'API Key saved.',
       couldNot: 'Could not save the API Key.',
@@ -148,7 +177,7 @@ export default function ModelAccessSettings({
    * so this is the only way out of one.
    */
   function clearKey() {
-    saySettled(says, desktop.clearApiKey(), {
+    saySettled(says, settings.clearApiKey(), {
       id: 'api-key',
       saved: 'API Key removed.',
       couldNot: 'Could not remove the API Key.',
@@ -231,7 +260,7 @@ export default function ModelAccessSettings({
           user to unlock the Keychain and press again. */}
       {keySet !== null && (
         <div className="flex items-center justify-between gap-6">
-          <SettingsAside>{keyStatus(keySet)}</SettingsAside>
+          <SettingsAside>{apiKeyStatus(keySet)}</SettingsAside>
           {keySet === true && (
             <Button variant="outline" size="sm" onClick={clearKey}>
               Clear
@@ -241,36 +270,4 @@ export default function ModelAccessSettings({
       )}
     </SettingsGroup>
   )
-}
-
-/**
- * Whether there is a key, said rather than shown: what the Keychain holds is
- * never read back into this window. Only ever asked once the Keychain has
- * answered — there is no line for "still asking", because nothing of this is
- * on screen until then.
- */
-function keyStatus(keySet: boolean): string {
-  return keySet
-    ? 'A key is saved in the Keychain. Saving another replaces it.'
-    : 'No key is saved. Nothing reaches a model until there is one.'
-}
-
-/**
- * A locked Keychain, or a prompt the user denied. Routine rather than broken —
- * the same treatment Meeting Import gives a refused calendar grant — and every
- * other setting in this window carries on working. Said with what macOS said,
- * so a locked keychain and a denied prompt do not read the same.
- */
-function keychainRefusedLine(error: unknown): string {
-  return `macOS is not letting Work Journal reach your Keychain, so the API Key cannot be read or changed. Unlock your login keychain in Keychain Access, or allow Work Journal when macOS asks, and open Settings again. macOS said: ${saidBy(error)}`
-}
-
-/**
- * What the far side said, whichever side that was: a Tauri command rejects
- * with the string Rust returned, and the suite throws an Error.
- */
-function saidBy(error: unknown): string {
-  if (typeof error === 'string') return error
-  if (error instanceof Error) return error.message
-  return String(error)
 }

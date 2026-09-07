@@ -79,12 +79,34 @@ export interface AppSettings {
   /** Which calendars an Import reads. Announced for the same reason. */
   saveImportCalendars(importCalendars: string[]): Promise<void>
   /**
-   * Where the model is. Not announced: nothing but the window it was typed in
-   * is looking at it, and whatever reads it next reads it when it needs it.
+   * Whether Model Access has its three parts, remembered and announced — the
+   * two that are ordinary settings, and whether the Keychain holds the Key.
+   * Announced because the Settings group and the Onboarding flow's step share
+   * this very instance: a choice saved by the flow must reach the mounted
+   * section without its state being rebuilt. Every settled save announces the
+   * answers as they stand then, so overlapping saves resolve to the last
+   * write to have landed rather than to whoever started last. The Key itself
+   * never travels on the announcement — only whether the Keychain holds one.
    */
+  onModelAccessChanged(
+    handle: (access: {
+      modelBaseUrl: string
+      model: string
+      keySet: boolean
+    }) => void,
+  ): Unlisten
+  /** Where the model is. Stored, and announced for the reason above. */
   saveModelBaseUrl(modelBaseUrl: string): Promise<void>
   /** Which model to ask. Stored the same way, and for the same reason. */
   saveModel(model: string): Promise<void>
+  /**
+   * Hands the API Key to the Keychain — reached through Rust, and announced
+   * as held or not once it settles, for the reason above. What the Keychain
+   * holds is never read back into this window; only whether it holds one is.
+   */
+  saveApiKey(apiKey: string): Promise<void>
+  /** Takes the API Key out of the Keychain. Announced the same way. */
+  clearApiKey(): Promise<void>
   /**
    * The prompt a Standup Post is written under. Stored the same way, and for
    * the same reason: nothing but the window it was typed in is looking at it,
@@ -135,6 +157,45 @@ export function createAppSettings(desktop: Desktop): AppSettings {
   const importChanged = new Set<
     (imported: { importMeetings: boolean; importCalendars: string[] }) => void
   >()
+  // Who is listening for a Model Access save, in this window. In-window
+  // rather than a Desktop announcement, for the same reason as the Import
+  // one above: the two controls that read the answer — the Settings group
+  // and the Onboarding step — share this very instance.
+  const modelAccessChanged = new Set<
+    (access: { modelBaseUrl: string; model: string; keySet: boolean }) => void
+  >()
+
+  /**
+   * Announces a settled Model Access save, with the three answers as they
+   * stand now. Every settled save speaks — and each re-reads the file and
+   * asks the Keychain, so its payload can never be a superseded answer: it
+   * is the answers as they stand, and the last one to be heard is always
+   * the last write to have landed. Best-effort, like every other
+   * announcement: a refusal is logged rather than allowed to name a saved
+   * setting as refused.
+   */
+  function announceModelAccess(): void {
+    void (async () => {
+      try {
+        const [stored, keySet] = await Promise.all([
+          readSettings(await store()),
+          desktop.apiKeySet(),
+        ])
+        for (const handle of modelAccessChanged) {
+          handle({
+            modelBaseUrl: stored.modelBaseUrl,
+            model: stored.model,
+            keySet,
+          })
+        }
+      } catch (error: unknown) {
+        console.error(
+          'could not announce the change to the other windows',
+          error,
+        )
+      }
+    })()
+  }
 
   /**
    * Announces a settled Import save, with both keys as the file holds them
@@ -232,12 +293,43 @@ export function createAppSettings(desktop: Desktop): AppSettings {
       announceImport()
     },
 
+    /**
+     * A Model Access save landed, in this window. Heard by the Settings
+     * group so a choice saved by the Onboarding flow reaches the mounted
+     * section without its state being rebuilt — the Base URL, the Model and
+     * the Key are one fact, however many controls write it, and rebuilding
+     * would throw away what else the user has unsaved in Settings. Announced
+     * after the save settles, so a departure before it settles still reaches
+     * the control that stayed.
+     */
+    onModelAccessChanged(handle) {
+      modelAccessChanged.add(handle)
+      return () => {
+        modelAccessChanged.delete(handle)
+      }
+    },
+
     async saveModelBaseUrl(modelBaseUrl) {
       await writeModelBaseUrl(await store(), modelBaseUrl)
+      // After it took: a save still in flight when a window departs must
+      // still reach the control that stayed mounted — and every settled save
+      // speaks, because each speaks the answers as they stand.
+      announceModelAccess()
     },
 
     async saveModel(model) {
       await writeModel(await store(), model)
+      announceModelAccess()
+    },
+
+    async saveApiKey(apiKey) {
+      await desktop.saveApiKey(apiKey)
+      announceModelAccess()
+    },
+
+    async clearApiKey() {
+      await desktop.clearApiKey()
+      announceModelAccess()
     },
 
     async saveStandupPrompt(standupPrompt) {

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { START_AT_LOGIN_KEY } from '../platform/desktop'
 import { fakeDesktop } from '../platform/testing/desktop'
-import { DEFAULT_STANDUP_PROMPT } from './settings'
+import { DEFAULT_STANDUP_PROMPT, OPENAI_BASE_URL } from './settings'
 import { createAppSettings } from './app-settings'
 
 // The settings as a running window has them: the core's rules over the
@@ -216,6 +216,85 @@ describe('importing meetings', () => {
     await settings.saveImportMeetings(true)
 
     expect((await settings.load()).importMeetings).toBe(true)
+  })
+})
+
+describe('Model Access', () => {
+  it('announces where the model is and which model, with the Key as it stands', async () => {
+    const desktop = fakeDesktop({ apiKey: 'sk-a-key' })
+    const settings = createAppSettings(desktop)
+    const heard: Array<{
+      modelBaseUrl: string
+      model: string
+      keySet: boolean
+    }> = []
+    settings.onModelAccessChanged((access) => heard.push(access))
+
+    await settings.saveModelBaseUrl('http://localhost:11434/v1')
+    await settings.saveModel('llama3.1')
+
+    // Every settled save speaks, with the answers as they stand then: the
+    // file re-read and the Keychain asked afresh, so the Key is never a
+    // payload that could go stale.
+    await expect.poll(() => heard).toEqual([
+      {
+        modelBaseUrl: 'http://localhost:11434/v1',
+        model: '',
+        keySet: true,
+      },
+      {
+        modelBaseUrl: 'http://localhost:11434/v1',
+        model: 'llama3.1',
+        keySet: true,
+      },
+    ])
+  })
+
+  it('announces a Key handed to the Keychain, and one taken out of it', async () => {
+    const desktop = fakeDesktop()
+    const settings = createAppSettings(desktop)
+    const heard: Array<{ modelBaseUrl: string; model: string; keySet: boolean }> =
+      []
+    settings.onModelAccessChanged((access) => heard.push(access))
+
+    await settings.saveApiKey('sk-a-key')
+    await settings.clearApiKey()
+
+    await expect.poll(() => heard).toEqual([
+      { modelBaseUrl: OPENAI_BASE_URL, model: '', keySet: true },
+      { modelBaseUrl: OPENAI_BASE_URL, model: '', keySet: false },
+    ])
+    // The Key is a Keychain matter, never a settings-file one.
+    expect(desktop.apiKey).toBe(null)
+    expect(desktop.stored.apiKey).toBeUndefined()
+  })
+
+  it('records a Key the Keychain refused to take, announcing nothing', async () => {
+    const desktop = fakeDesktop({ keychainRefuses: true })
+    const settings = createAppSettings(desktop)
+    const heard: Array<{ modelBaseUrl: string; model: string; keySet: boolean }> =
+      []
+    settings.onModelAccessChanged((access) => heard.push(access))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await expect(settings.saveApiKey('sk-a-key')).rejects.toThrow()
+    // No settled save speaks for one that never landed.
+    expect(heard).toEqual([])
+  })
+
+  it('says a Base URL save took even when the announcement could not be sent', async () => {
+    // The mounted group catches up at its next read; the user who pressed is
+    // told what the file holds, not that an emit hiccuped.
+    const desktop = fakeDesktop()
+    desktop.apiKeySet = () => Promise.reject(new Error('the Keychain is shut'))
+    const settings = createAppSettings(desktop)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await settings.saveModelBaseUrl('http://localhost:11434/v1')
+
+    expect((await settings.load()).modelBaseUrl).toBe(
+      'http://localhost:11434/v1',
+    )
   })
 })
 

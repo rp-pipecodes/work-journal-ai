@@ -709,8 +709,11 @@ describe('automatic Onboarding', () => {
     await user.click(
       await screen.findByRole('button', { name: 'Continue' }),
     )
-    // Through Start at Login to Meeting Import, the last setup step, where
-    // the flow finishes.
+    // Through Start at Login and Meeting Import to Model Access, the last
+    // setup step, where the flow finishes.
+    await user.click(
+      await screen.findByRole('button', { name: 'Continue' }),
+    )
     await user.click(
       await screen.findByRole('button', { name: 'Continue' }),
     )
@@ -817,6 +820,7 @@ describe('automatic Onboarding', () => {
     // item the flow just changed, so it must read the new answer back rather
     // than the snapshot it took when the window opened.
     await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: 'Open History' }))
     await showsHistory()
     await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
@@ -855,7 +859,8 @@ describe('automatic Onboarding', () => {
       await screen.findByRole('switch', { name: 'Start at login' }),
     )
 
-    // Continue to Meeting Import while the save is still settling.
+    // Continue on through Meeting Import while the save is still settling.
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: 'Open History' }))
     await showsHistory()
@@ -906,7 +911,9 @@ describe('automatic Onboarding', () => {
     ).toBeTruthy()
     expect(desktop.loginItem).toBe(false)
 
-    // The refusal never blocks the way on: through Meeting Import to History.
+    // The refusal never blocks the way on: through the remaining setup steps
+    // to History.
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: 'Open History' }))
 
@@ -985,6 +992,7 @@ describe('replaying Onboarding from Settings', () => {
     await screen.findByRole('heading', { name: 'Welcome to Work Journal' })
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: 'Open History' }))
 
     await showsHistory()
@@ -1019,6 +1027,17 @@ describe('Meeting Import during Onboarding', () => {
     return control.getAttribute('aria-checked') === 'true'
   }
 
+  /** Walks from Meeting Import through Model Access to the finish. */
+  async function finishFromMeetingImport(
+    user: ReturnType<typeof userEvent.setup>,
+  ) {
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await screen.findByRole('heading', {
+      name: 'Write Standup Posts with a model?',
+    })
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+  }
+
   it('enables Import and ticks work calendars through the existing settings', async () => {
     const user = userEvent.setup()
     const { desktop } = await showMainWindow({
@@ -1040,7 +1059,7 @@ describe('Meeting Import during Onboarding', () => {
     expect(desktop.alertPermission).toBe('undetermined')
     expect(desktop.alertPrompted).toBe(false)
 
-    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await finishFromMeetingImport(user)
     await showsHistory()
     await expect.poll(() => desktop.onboarding).toBe('suppressed')
   })
@@ -1071,7 +1090,7 @@ describe('Meeting Import during Onboarding', () => {
     ).toBeTruthy()
     await expect.poll(() => desktop.stored.importMeetings).toBe(true)
 
-    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await finishFromMeetingImport(user)
     await showsHistory()
     await expect.poll(() => desktop.onboarding).toBe('suppressed')
   })
@@ -1097,7 +1116,7 @@ describe('Meeting Import during Onboarding', () => {
     // Already granted, so enabling asked macOS for nothing new.
     expect(desktop.prompted).toBe(false)
 
-    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await finishFromMeetingImport(user)
     await showsHistory()
     await expect.poll(() => desktop.onboarding).toBe('suppressed')
   })
@@ -1142,7 +1161,7 @@ describe('Meeting Import during Onboarding', () => {
     )
     await expect.poll(() => desktop.stored.importMeetings).toBe(true)
 
-    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await finishFromMeetingImport(user)
     await showsHistory()
     await expect.poll(() => desktop.onboarding).toBe('suppressed')
   })
@@ -1160,13 +1179,17 @@ describe('Meeting Import during Onboarding', () => {
     await user.click(await screen.findByRole('checkbox', { name: /Work/ }))
     await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
 
-    // Per-step Skip is the walk finishing, not the flow dismissed early:
-    // the saves stand.
+    // Per-step Skip is the walk advancing, not the flow dismissed early:
+    // the Model Access step opens and the saves stand.
     await user.click(screen.getByRole('button', { name: 'Skip this step' }))
-    await showsHistory()
-    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+    await screen.findByRole('heading', {
+      name: 'Write Standup Posts with a model?',
+    })
     expect(desktop.stored.importMeetings).toBe(true)
     expect(desktop.stored.importCalendars).toEqual(['work'])
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await showsHistory()
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
   })
 
   it('shows the Import the flow saved, when Settings is opened afterwards', async () => {
@@ -1185,7 +1208,7 @@ describe('Meeting Import during Onboarding', () => {
     // Finish into History, then open Settings: its switch and its ticks are
     // the same wish and the same list the flow just saved, so they must read
     // the new answers back rather than the snapshot the window opened with.
-    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await finishFromMeetingImport(user)
     await showsHistory()
     await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
     await showsSettings()
@@ -1247,7 +1270,7 @@ describe('Meeting Import during Onboarding', () => {
     releaseCalendars()
     await expect.poll(() => desktop.stored.importCalendars).toEqual(['work'])
 
-    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await finishFromMeetingImport(user)
     await showsHistory()
     await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
     await showsSettings()
@@ -1295,6 +1318,300 @@ describe('Meeting Import during Onboarding', () => {
         .getAttribute('aria-checked'),
     ).toBe('true')
     expect(desktop.prompted).toBe(false)
+  })
+})
+
+describe('Model Access during Onboarding', () => {
+  /** Walks automatic Onboarding through Start at Login and Meeting Import. */
+  async function atTheModelAccessStep() {
+    const user = userEvent.setup()
+    await user.click(
+      await screen.findByRole('button', { name: 'Continue' }),
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Continue' }),
+    )
+    await user.click(
+      await screen.findByRole('button', { name: 'Continue' }),
+    )
+    await screen.findByRole('heading', {
+      name: 'Write Standup Posts with a model?',
+    })
+    return user
+  }
+
+  // A label query matches the hidden Settings controls too — every surface
+  // stays mounted under the flow — so each field is the visible one, found
+  // the way the user finds it. (Role queries cannot name the Key field: a
+  // password input exposes no textbox role.)
+  function field(label: string): HTMLInputElement {
+    const matches = screen
+      .getAllByLabelText(label)
+      .filter((element): element is HTMLInputElement => {
+        return element instanceof HTMLInputElement && onScreen(element)
+      })
+    if (matches.length !== 1) {
+      throw new Error(`expected one visible ${label} field, found ${matches.length}`)
+    }
+    return matches[0]
+  }
+
+  function baseUrlField(): HTMLInputElement {
+    return field('Base URL')
+  }
+
+  function modelField(): HTMLInputElement {
+    return field('Model')
+  }
+
+  function apiKeyField(): HTMLInputElement {
+    return field('API Key')
+  }
+
+  function saveKeyButton(): HTMLElement {
+    return screen.getByRole('button', { name: 'Save' })
+  }
+
+  it('configures Model Access through the existing settings, shown in Settings afterwards', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+    await atTheModelAccessStep()
+
+    // The two ordinary fields save on every keystroke through the same
+    // writes Settings uses; the Key goes to the Keychain and nowhere else.
+    fireEvent.change(baseUrlField(), {
+      target: { value: 'http://localhost:11434/v1' },
+    })
+    fireEvent.change(modelField(), { target: { value: 'llama3.1' } })
+    fireEvent.change(apiKeyField(), { target: { value: 'sk-a-real-key' } })
+    await user.click(saveKeyButton())
+
+    await expect.poll(() => desktop.stored.modelBaseUrl).toBe(
+      'http://localhost:11434/v1',
+    )
+    await expect.poll(() => desktop.stored.model).toBe('llama3.1')
+    await expect.poll(() => desktop.apiKey).toBe('sk-a-real-key')
+    expect(Object.values(desktop.stored)).not.toContain('sk-a-real-key')
+    // Configured but unverified: saving is not a connection test.
+    expect(
+      await screen.findByText(/set to ask llama3\.1/),
+    ).toBeTruthy()
+    expect(screen.getByText(/has not been tried/)).toBeTruthy()
+
+    // Finish into History, then open Settings: its fields and its Key line
+    // are the same Base URL, Model and Key the flow just saved — they must
+    // read the new answers back rather than the snapshot the window opened
+    // with. The secret itself never appears.
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await showsHistory()
+    await user.click(within(sidebar()).getByRole('button', { name: 'Settings' }))
+    await showsSettings()
+
+    await expect.poll(() => baseUrlField().value).toBe(
+      'http://localhost:11434/v1',
+    )
+    expect(modelField().value).toBe('llama3.1')
+    expect(await screen.findByText(/A key is saved/)).toBeTruthy()
+    expect(apiKeyField().value).toBe('')
+    expect(document.body.textContent).not.toContain('sk-a-real-key')
+  })
+
+  it('sends nothing automatically, and asks a model only on the explicit Generate', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [
+        { at: '2026-03-08T10:00:00', body: 'Yesterday\u2019s work' },
+        { at: '2026-03-09T09:00:00', body: 'Today\u2019s own note' },
+      ],
+      onboarding: 'unfinished',
+    })
+
+    // Entering, saving and finishing the step never ask the model: no
+    // automatic request is made by any of it.
+    await atTheModelAccessStep()
+    fireEvent.change(modelField(), { target: { value: 'gpt-test' } })
+    fireEvent.change(apiKeyField(), { target: { value: 'sk-a-real-key' } })
+    await user.click(saveKeyButton())
+    await expect.poll(() => desktop.apiKey).toBe('sk-a-real-key')
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await showsHistory()
+    expect(desktop.standupRequests).toEqual([])
+
+    // The only request is the explicitly asked-for Standup Post.
+    await user.click(
+      within(sidebar()).getByRole('button', { name: 'Standup Post' }),
+    )
+    await showsStandupPost()
+    await user.click(await screen.findByRole('button', { name: 'Generate' }))
+    await expect.poll(() => desktop.standupRequests).toHaveLength(1)
+  })
+
+  it('says partial configuration stays needs-attention and still finishes', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+    await atTheModelAccessStep()
+
+    // A Model alone is partial: the step names what is missing instead of
+    // claiming Model Access is configured or the endpoint works.
+    fireEvent.change(modelField(), { target: { value: 'llama3.1' } })
+    expect(await screen.findByText(/add an API Key/)).toBeTruthy()
+    expect(desktop.standupRequests).toEqual([])
+
+    // Partial configuration never blocks the way on: the step finishes.
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await showsHistory()
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+    expect(desktop.stored.model).toBe('llama3.1')
+  })
+
+  it('says a refused Base URL save, with retry and continuation', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const stored: Record<string, unknown> = { startAtLogin: false }
+    let writes = 0
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+      stored,
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          if (key === 'modelBaseUrl') {
+            writes += 1
+            if (writes === 1) throw new Error('the file is read-only')
+          }
+          stored[key] = value
+        },
+      }),
+    })
+    await atTheModelAccessStep()
+
+    fireEvent.change(baseUrlField(), {
+      target: { value: 'http://localhost:11434/v1' },
+    })
+
+    // The refused field is named, and the step still lets the user on.
+    expect(
+      await screen.findByText(/Base URL could not be saved/),
+    ).toBeTruthy()
+
+    await user.click(
+      screen.getByRole('button', { name: 'Try saving the Base URL again' }),
+    )
+    await expect.poll(() => desktop.stored.modelBaseUrl).toBe(
+      'http://localhost:11434/v1',
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await showsHistory()
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+  })
+
+  it('says why a Keychain save refused, lets the retry land it, and finishes', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+    await atTheModelAccessStep()
+
+    // The Keychain shuts as Save is pressed. The typed Key stays under the
+    // cursor, still the user's.
+    desktop.keychainRefuses = true
+    fireEvent.change(apiKeyField(), { target: { value: 'sk-a-real-key' } })
+    await user.click(saveKeyButton())
+
+    expect(
+      await screen.findByText(/the keychain could not be reached/),
+    ).toBeTruthy()
+    expect(desktop.apiKey).toBe(null)
+    expect(apiKeyField().value).toBe('sk-a-real-key')
+
+    desktop.keychainRefuses = false
+    await user.click(
+      screen.getByRole('button', { name: 'Try saving the API Key again' }),
+    )
+    await expect.poll(() => desktop.apiKey).toBe('sk-a-real-key')
+    await expect.poll(() => apiKeyField().value).toBe('')
+
+    await user.click(screen.getByRole('button', { name: 'Open History' }))
+    await showsHistory()
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+  })
+
+  it('replays with the saved Model Access and key status, asking nothing new', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      section: 'settings',
+      stored: {
+        modelBaseUrl: 'https://example.test/v1',
+        model: 'gpt-test',
+      },
+      apiKey: 'sk-from-an-earlier-run',
+    })
+    await showsSettings()
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Replay introduction' }),
+    )
+    await screen.findByRole('heading', { name: 'Welcome to Work Journal' })
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await screen.findByRole('heading', {
+      name: 'Write Standup Posts with a model?',
+    })
+
+    // The step reads the saved answers back — never the secret itself — and
+    // makes no model request while it does.
+    await expect.poll(() => baseUrlField().value).toBe(
+      'https://example.test/v1',
+    )
+    expect(modelField().value).toBe('gpt-test')
+    expect(apiKeyField().value).toBe('')
+    // The key status is carried: the step offers the way out of a Keychain
+    // entry. The secret itself never appears.
+    expect(await screen.findByRole('button', { name: 'Clear' })).toBeTruthy()
+    expect(document.body.textContent).not.toContain('sk-from-an-earlier-run')
+    expect(desktop.prompted).toBe(false)
+    expect(desktop.standupRequests).toEqual([])
+  })
+
+  it('reaches History with every optional setup step skipped', async () => {
+    const user = userEvent.setup()
+    const { desktop } = await showMainWindow({
+      captured: [MONDAY],
+      onboarding: 'unfinished',
+    })
+    await screen.findByRole('heading', { name: 'Welcome to Work Journal' })
+
+    // Per-step Skip walks through the optional setup without it: no Meeting
+    // Import, no Model Access, and no practice Note are required to finish.
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: 'Skip this step' }))
+    await user.click(screen.getByRole('button', { name: 'Skip this step' }))
+    await user.click(screen.getByRole('button', { name: 'Skip this step' }))
+
+    await showsHistory()
+    await expect.poll(() => desktop.onboarding).toBe('suppressed')
+    expect(desktop.stored.startAtLogin).toBe(false)
+    expect(desktop.stored.importMeetings ?? false).toBe(false)
+    expect(desktop.stored.model ?? '').toBe('')
+    expect(desktop.apiKey).toBe(null)
+    expect(desktop.standupRequests).toEqual([])
   })
 })
 
@@ -1813,6 +2130,8 @@ async function showMainWindow({
   access,
   answersPrompt,
   calendars,
+  apiKey,
+  keychainRefuses,
   openSettingsStore,
 }: {
   captured: Array<{ at: string; body: string }>
@@ -1840,6 +2159,10 @@ async function showMainWindow({
   answersPrompt?: CalendarAccess
   /** What the calendars hold, for the Meeting Import step to tick. */
   calendars?: CalendarInfo[]
+  /** What the Keychain already holds, as an earlier run would have left it. */
+  apiKey?: string
+  /** Whether the Keychain refuses to answer, as it does when locked. */
+  keychainRefuses?: boolean
   /** Overridden by the tests about a settings file that cannot be written. */
   openSettingsStore?: () => Promise<SettingsStore>
 }) {
@@ -1856,6 +2179,8 @@ async function showMainWindow({
     ...(access !== undefined ? { access } : {}),
     ...(answersPrompt !== undefined ? { answersPrompt } : {}),
     ...(calendars !== undefined ? { calendars } : {}),
+    ...(apiKey !== undefined ? { apiKey } : {}),
+    ...(keychainRefuses !== undefined ? { keychainRefuses } : {}),
     ...(openSettingsStore !== undefined ? { openSettingsStore } : {}),
   })
   if (onboarding !== undefined) desktop.onboarding = onboarding
