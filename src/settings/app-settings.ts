@@ -53,6 +53,21 @@ export interface AppSettings {
    */
   onStartAtLoginChanged(handle: (startAtLogin: boolean) => void): Unlisten
   /**
+   * Whether meetings are swept and which calendars are read, remembered and
+   * announced. Announced because the window that sweeps is not the window
+   * this is changed in — and because the Settings group and the Onboarding
+   * flow's step share this very instance: a choice saved by the flow must
+   * reach the mounted section without its state being rebuilt. Every settled
+   * save announces the file as it stands then, so overlapping saves resolve
+   * to the last write to have landed rather than to whoever started last.
+   */
+  onImportChanged(
+    handle: (imported: {
+      importMeetings: boolean
+      importCalendars: string[]
+    }) => void,
+  ): Unlisten
+  /**
    * Whether meetings are swept, remembered and announced. Announced because
    * the window that sweeps is not the window this is changed in, and a change
    * the user just made should reach the journal now rather than at the next
@@ -113,6 +128,42 @@ export function createAppSettings(desktop: Desktop): AppSettings {
   // that is still the newest when it settles speaks for the answer that came
   // to hold.
   let startAtLoginSaves = 0
+  // Who is listening for an Import save, in this window. In-window rather
+  // than a Desktop announcement, for the same reason as above: the two
+  // controls that read the answer — the Settings group and the Onboarding
+  // step — share this very instance.
+  const importChanged = new Set<
+    (imported: { importMeetings: boolean; importCalendars: string[] }) => void
+  >()
+
+  /**
+   * Announces a settled Import save, with both keys as the file holds them
+   * now. Every settled save speaks — unlike the Start at Login announcement,
+   * which carries the caller's value and must stay silent once superseded,
+   * this one re-reads the file, so its payload can never be a superseded
+   * answer: it is the file as it stands, and the last one to be heard is
+   * always the last write to have landed. Best-effort, like every other
+   * announcement: a refusal is logged rather than allowed to name a saved
+   * setting as refused.
+   */
+  function announceImport(): void {
+    void (async () => {
+      try {
+        const stored = await readSettings(await store())
+        for (const handle of importChanged) {
+          handle({
+            importMeetings: stored.importMeetings,
+            importCalendars: stored.importCalendars,
+          })
+        }
+      } catch (error: unknown) {
+        console.error(
+          'could not announce the change to the other windows',
+          error,
+        )
+      }
+    })()
+  }
 
   return {
     async load() {
@@ -150,15 +201,35 @@ export function createAppSettings(desktop: Desktop): AppSettings {
         startAtLoginChanged.delete(handle)
       }
     },
+    /**
+     * An Import save landed, in this window. Heard by the Settings group so
+     * a choice saved by the Onboarding flow reaches the mounted section
+     * without its state being rebuilt — the wish and the ticks are one fact
+     * the file holds, however many controls write it, and rebuilding would
+     * throw away what else the user has unsaved in Settings. Announced after
+     * the save settles, so a departure before it settles still reaches the
+     * control that stayed.
+     */
+    onImportChanged(handle) {
+      importChanged.add(handle)
+      return () => {
+        importChanged.delete(handle)
+      }
+    },
 
     async saveImportMeetings(importMeetings) {
       await writeImportMeetings(await store(), importMeetings)
       emitChange(desktop.announceImportChanged())
+      // After it took: a save still in flight when a window departs must
+      // still reach the control that stayed mounted — and every settled save
+      // speaks, because each speaks the file as it stands.
+      announceImport()
     },
 
     async saveImportCalendars(importCalendars) {
       await writeImportCalendars(await store(), importCalendars)
       emitChange(desktop.announceImportChanged())
+      announceImport()
     },
 
     async saveModelBaseUrl(modelBaseUrl) {

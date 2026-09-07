@@ -1,12 +1,9 @@
-import { useEffect, useState } from 'react'
-import { Checkbox } from '@/components/ui/checkbox'
+import { useEffect, useRef, useState } from 'react'
 import { Switch } from '@/components/ui/switch'
 import { useOnScreenToast } from '@/components/on-screen-toast'
-import type {
-  CalendarAccess,
-  CalendarInfo,
-  Desktop,
-} from '@/platform/desktop'
+import { CalendarTicks } from '@/components/CalendarTicks'
+import type { CalendarInfo, Desktop } from '@/platform/desktop'
+import { describeCalendarAccess } from '@/settings/calendar-access'
 import type { AppSettings } from '@/settings/app-settings'
 import { DEFAULT_SETTINGS } from '@/settings/settings'
 import type { SettingsInitialState } from './SettingsInitialState'
@@ -50,6 +47,11 @@ export default function MeetingImportSettings({
   // Why Import is not on, when the reason is the OS rather than the user.
   // Nothing until there is something to say.
   const [calendarProblem, setCalendarProblem] = useState<string | null>(null)
+  // How many Import changes have been started since this group mounted —
+  // presses here and announcements of saves made anywhere. A slow
+  // permission re-read belongs to the change that started it, and is
+  // discarded if a newer one has begun by then.
+  const order = useRef(0)
   // A save here ends in a login item, a permission, or a file write the user
   // cannot see; the toast is where each of those is confirmed.
   const says = useOnScreenToast()
@@ -89,6 +91,49 @@ export default function MeetingImportSettings({
     })
   }, [desktop, initialSettings, importTouched])
 
+  useEffect(() => {
+    // An Import save landed — this group's own, or the Onboarding flow's.
+    // The wish and the ticks are one fact the file holds, however many
+    // controls write it: the flow may change them while this section is
+    // mounted but hidden, and the section must hear of it without being
+    // rebuilt — that would throw away what else the user has unsaved in
+    // Settings. The announcement is newer than anything this group seeded,
+    // so it is applied as a change of its own; a rollback still in flight
+    // from an earlier press is discarded by the attempt that this starts.
+    // The reason underneath is re-derived from what macOS allows now, so a
+    // withdrawal made elsewhere takes its reason with it and a grant won
+    // elsewhere clears a stale one — and the calendars are fetched over a
+    // granted answer, so ticks chosen elsewhere arrive visible.
+    return settings.onImportChanged(({ importMeetings, importCalendars }) => {
+      const seen = ++order.current
+      setImportMeetings(importMeetings)
+      setImportCalendars(importCalendars)
+      void desktop.calendarAccess().then(
+        (access) => {
+          if (order.current !== seen) return
+          if (access === 'granted') {
+            setCalendarProblem(null)
+            if (importMeetings) {
+              void desktop.calendars().then(
+                setCalendars,
+                (error: unknown) => {
+                  console.error('could not read the calendars', error)
+                },
+              )
+            }
+            return
+          }
+          setCalendarProblem(
+            importMeetings ? describeCalendarAccess(access) : null,
+          )
+        },
+        (error: unknown) => {
+          console.error('could not read the calendar permission', error)
+        },
+      )
+    })
+  }, [desktop, settings, setImportCalendars, setImportMeetings])
+
   // Import as the window shows it: the user's wish, less whatever macOS is
   // withholding. The stored wish outlives a lost permission — that is what
   // makes the reason sayable — so the toggle is off whenever there is a reason
@@ -101,6 +146,9 @@ export default function MeetingImportSettings({
    * says why — the app asks once here and never again on its own.
    */
   function toggleImport(next: boolean) {
+    // A press supersedes any announcement still resolving: what it says
+    // about the reason underneath belongs to the newer word.
+    ++order.current
     void (async () => {
       // The rollback for whatever this press moved, if it moved anything.
       let rollback: ((value: boolean) => void) | undefined
@@ -108,6 +156,11 @@ export default function MeetingImportSettings({
         if (!next) {
           rollback = setImportMeetings(false)
           await settings.saveImportMeetings(false)
+          // Withdrawing takes the reason underneath with it — said by the
+          // save's own announcement, which re-derives the reason from what
+          // macOS allows now: the switch read off while the wish was on
+          // only because the reason said so. A refusal keeps the reason the
+          // rollback restores, because a refused save announces nothing.
           says.success('Meetings will no longer be imported.', 'import-meetings')
           return
         }
@@ -219,56 +272,5 @@ export default function MeetingImportSettings({
         added in the first place.
       </SettingsAside>
     </SettingsGroup>
-  )
-}
-
-/**
- * Why Import is not on, when the reason is macOS rather than the user. Both
- * answers are routine: a grant is keyed to the binary, so every rebuilt release
- * starts as one macOS has no record of.
- */
-function describeCalendarAccess(access: Exclude<CalendarAccess, 'granted'>): string {
-  return access === 'denied'
-    ? 'macOS is not allowing Work Journal to read your calendars. Turn Calendars on for Work Journal in System Settings › Privacy & Security, then switch this back on.'
-    : 'macOS has not been asked about your calendars — a rebuilt Work Journal is a new app as far as it is concerned. Meetings are not being imported; everything else in the journal is unaffected.'
-}
-
-/**
- * Which calendars an Import reads. None are ticked to begin with, because the
- * app cannot tell which of them mean work — a calendar nobody ticked is ignored
- * entirely rather than swept quietly.
- */
-function CalendarTicks({
-  calendars,
-  ticked,
-  onToggle,
-}: {
-  calendars: CalendarInfo[]
-  ticked: string[]
-  onToggle: (id: string, ticked: boolean) => void
-}) {
-  if (calendars.length === 0) {
-    return <SettingsAside>No calendars to read.</SettingsAside>
-  }
-
-  return (
-    <fieldset className="flex flex-col gap-2 pl-1">
-      <legend className="sr-only">Calendars to import from</legend>
-      {calendars.map((calendar) => (
-        <div key={calendar.id} className="flex items-center gap-2">
-          <Checkbox
-            id={`calendar-${calendar.id}`}
-            checked={ticked.includes(calendar.id)}
-            onCheckedChange={(next: boolean) => onToggle(calendar.id, next)}
-          />
-          <label htmlFor={`calendar-${calendar.id}`} className="type-meta">
-            {calendar.title}
-          </label>
-          <span className="type-micro text-muted-foreground">
-            {calendar.source}
-          </span>
-        </div>
-      ))}
-    </fieldset>
   )
 }

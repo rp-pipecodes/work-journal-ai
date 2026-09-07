@@ -147,6 +147,63 @@ describe('importing meetings', () => {
     expect(stored.importCalendars).toEqual([])
   })
 
+  it('announces every settled Import save with the file as it stands', async () => {
+    // Save A turns Import on and starts writing the file; save B ticks a
+    // calendar while that write is still held, and B's write lands first.
+    // Both speak when they settle — each announcement re-reads the file, so
+    // no payload can be a superseded answer — and the last one heard is the
+    // last write to have landed, whatever order the saves started in.
+    const stored: Record<string, unknown> = {}
+    let release = () => {}
+    const firstWriteHeld = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let writes = 0
+    const desktop = fakeDesktop({
+      stored,
+      openSettingsStore: async () => ({
+        async get<T>(key: string) {
+          return stored[key] as T | undefined
+        },
+        async has(key: string) {
+          return key in stored
+        },
+        async set(key: string, value: unknown) {
+          // A write in flight has not landed: what the file holds is what
+          // settled before it.
+          if (key === 'importMeetings' && ++writes === 1) {
+            await firstWriteHeld
+          }
+          stored[key] = value
+        },
+      }),
+    })
+    const settings = createAppSettings(desktop)
+    const heard: Array<{ importMeetings: boolean; importCalendars: string[] }> =
+      []
+    settings.onImportChanged((imported) => heard.push(imported))
+
+    const older = settings.saveImportMeetings(true)
+    await expect.poll(() => writes).toBe(1)
+    await settings.saveImportCalendars(['work'])
+
+    // The newer save settled first and spoke the file as it stood then.
+    await expect
+      .poll(() => heard)
+      .toEqual([{ importMeetings: false, importCalendars: ['work'] }])
+
+    release()
+    await older
+
+    // The older save settles after it — and speaks too, with the file as it
+    // stands now: listeners end agreeing with the file on both keys.
+    await expect.poll(() => heard).toEqual([
+      { importMeetings: false, importCalendars: ['work'] },
+      { importMeetings: true, importCalendars: ['work'] },
+    ])
+    expect(stored.importMeetings).toBe(true)
+    expect(stored.importCalendars).toEqual(['work'])
+  })
   it('says a save took even when the announcement could not be sent', async () => {
     // The window that sweeps catches up at its next read; the user who
     // pressed is told what the file holds, not that an emit hiccuped.
