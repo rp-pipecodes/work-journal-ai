@@ -98,9 +98,19 @@ const THEME_KEY: &str = "theme";
 
 /// Told to the capture window every time it is shown. It is long-lived, so it
 /// clears its field and takes focus on this rather than on being built — see
-/// docs/adr/0002-capture-window-is-hidden-never-closed.md. Must match
+/// docs/adr/0002-capture-window-is-hidden-never-closed.md. Carries whether
+/// the showing was raised for Onboarding practice, so the view can route its
+/// dismissal. Must match
 /// `CAPTURE_SHOWN_EVENT` in `src/platform/desktop.ts`, as `src/platform/desktop-rust.test.ts` checks.
 const CAPTURE_SHOWN_EVENT: &str = "capture://shown";
+
+/// A practice Capture ended, submitted or cancelled. Reported by the Capture
+/// view through its dismissal — or announced on its own when a showing raised
+/// for practice is displaced by an ordinary one — and heard by the Main Window
+/// holding the practice attempt, which closes it on this alone. Must match
+/// `PRACTICE_ENDED_EVENT` in `src/platform/desktop.ts`, as
+/// `src/platform/desktop-rust.test.ts` checks.
+const PRACTICE_ENDED_EVENT: &str = "practice://ended";
 
 /// Told to the Task Creation window every time it is shown, for the same
 /// reason: it is resident and hidden between uses rather than rebuilt — see
@@ -327,6 +337,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             dismiss_capture,
+            dismiss_practice_capture,
+            start_practice_capture,
             start_task_creation,
             dismiss_task_creation,
             hotkey_status,
@@ -554,17 +566,27 @@ fn build_resident_window(
 /// place, and none can fail loudly enough to be worth more than a log: the user
 /// asked for a Capture, not for an error.
 fn start_capture(app: &tauri::AppHandle) {
-    show_resident_window(app, CAPTURE_WINDOW, CAPTURE_SHOWN_EVENT)
+    show_resident_window(app, CAPTURE_WINDOW, CAPTURE_SHOWN_EVENT, false)
 }
 
 /// What every Task Entry Point does — the Task Hotkey, New Task in the Tray
 /// Menu, and the New Task control in Tasks View all arrive here.
 fn start_task_creation_window(app: &tauri::AppHandle) {
-    show_resident_window(app, TASK_CREATION_WINDOW, TASK_CREATION_SHOWN_EVENT)
+    show_resident_window(
+        app,
+        TASK_CREATION_WINDOW,
+        TASK_CREATION_SHOWN_EVENT,
+        false,
+    )
 }
 
-fn show_resident_window(app: &tauri::AppHandle, label: &str, shown_event: &str) {
-    if let Err(error) = raise_resident_window(app, label, shown_event) {
+fn show_resident_window(
+    app: &tauri::AppHandle,
+    label: &str,
+    shown_event: &str,
+    practice: bool,
+) {
+    if let Err(error) = raise_resident_window(app, label, shown_event, practice) {
         log::error!("could not show the {label} window: {error}");
     }
 }
@@ -582,6 +604,7 @@ fn raise_resident_window(
     app: &tauri::AppHandle,
     label: &str,
     shown_event: &str,
+    practice: bool,
 ) -> tauri::Result<()> {
     let Some(window) = app.get_webview_window(label) else {
         log::error!("the {label} window is missing");
@@ -606,9 +629,20 @@ fn raise_resident_window(
 
     window.show()?;
     window.set_focus()?;
-    window.emit(shown_event, ())?;
+    window.emit(shown_event, CaptureShown { practice })?;
 
     Ok(())
+}
+
+/// What a resident window is told every time it is shown: whether this
+/// showing was raised for Onboarding practice. The Capture view routes its
+/// dismissal on it — a practice ending returns focus to the Main Window and
+/// reports its outcome, an ordinary one hands focus back as before — so the
+/// return destination is carried by the showing itself rather than by any
+/// flag that could outlive it. The Task Creation view ignores the payload.
+#[derive(Clone, serde::Serialize)]
+struct CaptureShown {
+    practice: bool,
 }
 
 /// The resident window that is not this one. There are exactly two.
@@ -1979,6 +2013,50 @@ fn dismiss_capture(app: tauri::AppHandle) -> Result<(), String> {
     hide_resident_window(&app, CAPTURE_WINDOW).map_err(|error| error.to_string())
 }
 
+/// Ends a Capture raised for Onboarding practice, whether it committed a Note
+/// or discarded one. Hidden rather than closed, like any Capture — but focus
+/// returns to the Main Window showing Onboarding instead of to whoever was in
+/// front, and the outcome is reported for the Main Window holding the practice
+/// attempt. Which dismiss command the Capture view calls is what scopes the
+/// return destination to practice: there is no flag to go stale, so a Capture
+/// put away for something else and dismissed later still hands focus back as
+/// before.
+#[tauri::command]
+fn dismiss_practice_capture(app: tauri::AppHandle, ended: PracticeEnded) -> Result<(), String> {
+    hide_capture_for_practice(&app).map_err(|error| error.to_string())?;
+    if let Err(error) = app.emit(PRACTICE_ENDED_EVENT, ended) {
+        log::warn!("could not report the practice outcome: {error}");
+    }
+    Ok(())
+}
+
+/// How a practice Capture ended: submitted with the Note's Journal Day, or
+/// cancelled with nothing created. Must match `PracticeEnded` in
+/// `src/platform/desktop.ts`, as `src/platform/desktop-rust.test.ts` checks.
+/// Both attributes matter: `rename_all` spells the variants, while
+/// `rename_all_fields` spells the fields inside them — without the latter a
+/// `submitted` outcome arrives as `journal_day` and never deserializes.
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "outcome"
+)]
+pub enum PracticeEnded {
+    Submitted { journal_day: String },
+    Cancelled,
+}
+
+/// Raises the real resident Capture window for optional Onboarding practice.
+/// The Note it commits is an ordinary Captured Note; cancelling creates
+/// nothing. The showing carries that it is practice, so the Capture view can
+/// route its dismissal back to the Main Window — ordinary Capture behavior
+/// elsewhere is unchanged.
+#[tauri::command]
+fn start_practice_capture(app: tauri::AppHandle) {
+    show_resident_window(&app, CAPTURE_WINDOW, CAPTURE_SHOWN_EVENT, true);
+}
+
 /// A Task Entry Point reached from a webview — the New Task control in Tasks
 /// View. The Hotkey and the Tray Menu reach the same place without this.
 #[tauri::command]
@@ -2006,6 +2084,25 @@ fn hide_resident_window(app: &tauri::AppHandle, label: &str) -> tauri::Result<()
     // it away is what gives that back. Every other Work Journal window is left
     // exactly as it was, on screen and unfocused.
     hand_focus_back(app);
+
+    Ok(())
+}
+
+/// Puts the practice Capture away and returns focus to the Main Window
+/// showing Onboarding. The Main Window is already open — practice begins
+/// there — so focusing it is the whole return. With no Main Window to return
+/// to, focus goes back to whoever was in front, exactly as an ordinary
+/// Capture would.
+fn hide_capture_for_practice(app: &tauri::AppHandle) -> tauri::Result<()> {
+    if let Some(window) = app.get_webview_window(CAPTURE_WINDOW) {
+        window.hide()?;
+    }
+
+    if let Some(main) = app.get_webview_window(MAIN_WINDOW) {
+        main.set_focus()?;
+    } else {
+        hand_focus_back(app);
+    }
 
     Ok(())
 }
@@ -2206,6 +2303,31 @@ mod tests {
         assert_eq!(
             DATABASE_URL,
             format!("sqlite:{}", backup::DATABASE_FILE_NAME)
+        );
+    }
+
+    /// The practice outcome crosses the webview boundary as JSON, and a field
+    /// spelled wrong on either side refuses the call before any command body
+    /// runs — a Capture window left standing with no way to dismiss it. These
+    /// are the literals the TypeScript side sends and reads, so a drift in
+    /// either direction fails here instead of on a user's screen.
+    #[test]
+    fn the_practice_outcome_matches_the_literals_the_webview_sends() {
+        let submitted: PracticeEnded =
+            serde_json::from_str(r#"{"outcome":"submitted","journalDay":"2026-03-12"}"#)
+                .expect("a submitted practice outcome must deserialize");
+        assert!(matches!(submitted, PracticeEnded::Submitted { .. }));
+
+        let cancelled: PracticeEnded = serde_json::from_str(r#"{"outcome":"cancelled"}"#)
+            .expect("a cancelled practice outcome must deserialize");
+        assert!(matches!(cancelled, PracticeEnded::Cancelled));
+
+        // And the way back: what this side emits for the Main Window to read
+        // carries the day under the same spelling.
+        let rendered = serde_json::to_value(&submitted).expect("must serialize");
+        assert_eq!(
+            rendered,
+            serde_json::json!({"outcome": "submitted", "journalDay": "2026-03-12"})
         );
     }
 }

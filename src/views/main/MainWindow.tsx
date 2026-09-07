@@ -63,6 +63,13 @@ export default function MainWindow({
   const [onboarding, setOnboarding] = useState<{ automatic: boolean } | null>(
     null,
   )
+  // The practice Note to reveal in History once Onboarding leaves for it: its
+  // Journal Day. Null is the ordinary state: History opens where its Filter
+  // already is. A new object per request, so asking for the same day twice
+  // still lands.
+  const [historyReveal, setHistoryReveal] = useState<{ day: string } | null>(
+    null,
+  )
   // The section on screen, as the element the sidebar is not part of.
   const showing = useRef<HTMLDivElement>(null)
   // The flow's own mount state, read by the section switch that ends it.
@@ -116,6 +123,19 @@ export default function MainWindow({
       setSection(next)
     },
     [leaveOnboarding],
+  )
+
+  /**
+   * Shows the practice Note in History: its Journal Day with Project = Any,
+   * whatever the Filter said before. Leaving the flow this way is navigating
+   * away, so an automatic flow records its dismissal as it goes.
+   */
+  const viewPracticeNote = useCallback(
+    (journalDay: string) => {
+      setHistoryReveal({ day: journalDay })
+      openSection('history')
+    },
+    [openSection],
   )
 
   useEffect(() => {
@@ -217,10 +237,11 @@ export default function MainWindow({
           desktop={desktop}
           settings={settings}
           onDone={() => openSection('history')}
+          onViewNote={viewPracticeNote}
         />
       )}
       <Section section="history" on={!sectionsOffScreen && section === 'history'} onScreen={showing}>
-        <HistoryView desktop={desktop} journal={journal} />
+        <HistoryView desktop={desktop} journal={journal} reveal={historyReveal} />
       </Section>
       <Section section="tasks" on={!sectionsOffScreen && section === 'tasks'} onScreen={showing}>
         <TasksView desktop={desktop} journal={journal} clock={clock} />

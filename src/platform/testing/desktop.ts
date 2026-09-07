@@ -14,6 +14,7 @@ import type {
   ExportedFile,
   MainSection,
   OnboardingState,
+  PracticeEnded,
   StandupPostRequest,
   StandupPostResponse,
   TaskAlertCompletion,
@@ -33,6 +34,8 @@ export interface FakeDesktop extends Desktop {
   showTaskCreation(): void
   /** How many times a Task Entry Point asked for the resident window. */
   taskCreationsBegun: number
+  /** How many times practice asked for the real Capture window. */
+  practiceCapturesBegun: number
   /** How many times the window the caller is in was closed. */
   windowsClosed: number
   /** How many times a Task Creation was dismissed. */
@@ -230,7 +233,7 @@ export function fakeDesktop({
   /** Whether the Keychain is locked, or the prompt was refused. */
   keychainRefuses?: boolean
 } = {}): FakeDesktop {
-  const captureShown = subscribers<void>()
+  const captureShown = subscribers<boolean>()
   const windowBlurred = subscribers<void>()
   const taskCreationShown = subscribers<void>()
   const tasksChanged = subscribers<void>()
@@ -238,6 +241,7 @@ export function fakeDesktop({
   const importChanged = subscribers<void>()
   const yesterdayDigestRequested = subscribers<void>()
   const noteCaptured = subscribers<string>()
+  const practiceEnded = subscribers<PracticeEnded>()
   const journalChanged = subscribers<void>()
   const themeChanged = subscribers<Theme>()
   const windowFocused = subscribers<void>()
@@ -269,6 +273,7 @@ export function fakeDesktop({
     events,
     windowsClosed: 0,
     taskCreationsBegun: 0,
+    practiceCapturesBegun: 0,
     taskCreationsDismissed: 0,
     capturesDismissed: 0,
     taskCreationFits: [],
@@ -294,7 +299,7 @@ export function fakeDesktop({
     standupRequests: [],
     standupPostResponse: { state: 'generated', markdown: GENERATED_POST },
 
-    beginCapture: () => captureShown.announce(undefined),
+    beginCapture: () => captureShown.announce(false),
     showTaskCreation: () => taskCreationShown.announce(undefined),
     requestYesterdayDigest: () => yesterdayDigestRequested.announce(undefined),
     wake: () => systemWoke.announce(undefined),
@@ -347,6 +352,22 @@ export function fakeDesktop({
 
     dismissCapture: async () => {
       desktop.capturesDismissed += 1
+    },
+    // A practice ending goes away through its own dismiss, which returns
+    // focus to the Main Window and reports the outcome for the attempt
+    // holding it — exactly as the command does.
+    dismissPracticeCapture: async (ended) => {
+      desktop.capturesDismissed += 1
+      practiceEnded.announce(ended)
+    },
+    announcePracticeEnded: async (ended) => practiceEnded.announce(ended),
+    onPracticeEnded: async (handle) => practiceEnded.add(handle),
+    // Practice reaches the same resident window ordinary Capture does: the
+    // real one, counted separately so a test can tell practice asked for it.
+    // The showing carries that it is practice, as the Rust side's does.
+    beginPracticeCapture: async () => {
+      desktop.practiceCapturesBegun += 1
+      captureShown.announce(true)
     },
     fitCapture: async (fit) => {
       desktop.fits.push(fit)

@@ -100,9 +100,16 @@ import { formatDayRange } from './range-label'
 export default function HistoryView({
   desktop,
   journal,
+  reveal = null,
 }: {
   desktop: Desktop
   journal: Promise<Journal>
+  /**
+   * A practice Note to reveal: its Journal Day, shown with Project = Any
+   * whatever the Filter said before. A new object per request, so asking for
+   * the same day twice still lands.
+   */
+  reveal?: { day: string } | null
 }) {
   const [snapshot, setSnapshot] = useState<HistorySnapshot>(openingSnapshot)
   const [session] = useState(() =>
@@ -168,6 +175,15 @@ export default function HistoryView({
 
     void session.open()
   }, [session])
+
+  useEffect(() => {
+    // A practice Note to reveal, asked from Onboarding: its Journal Day with
+    // Project = Any, whatever the Filter said before manual replay left it.
+    // One call through the session boundary, so both axes move atomically and
+    // a day the reader picks mid-read still wins.
+    if (reveal === null) return
+    void session.reveal(reveal.day)
+  }, [reveal, session])
 
   useEffect(() => {
     // Every session update is a new snapshot, so a copy is heard even when it

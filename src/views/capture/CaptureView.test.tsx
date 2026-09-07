@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
+import type { PracticeEnded } from '@/platform/desktop'
 import { createJournal, type Journal } from '@/journal/journal'
 import { fixedClock, openTestDatabase } from '@/journal/testing/database'
 import CaptureView from './CaptureView'
@@ -173,8 +174,7 @@ describe('the keyboard bargain', () => {
   })
 })
 
-describe('a Capture that loses focus', () => {
-  it('is discarded when the panel is still on screen — the user walked away', async () => {
+describe('a Capture that loses focus', () => {  it('is discarded when the panel is still on screen — the user walked away', async () => {
     const desktop = fakeDesktop()
     showCapture(desktop, await openJournal())
 
@@ -203,6 +203,105 @@ describe('a Capture that loses focus', () => {
     // And the next Capture opens on the words that were already typed.
     desktop.windowVisible = true
     desktop.beginCapture()
+    expect(field().value).toBe('half a Note')
+  })
+})
+
+describe('a Capture raised for Onboarding practice', () => {
+  /** Every practice outcome the showing reported, in order. */
+  async function reportedOutcomes(desktop: FakeDesktop) {
+    const outcomes: PracticeEnded[] = []
+    await desktop.onPracticeEnded((ended) => outcomes.push(ended))
+    return outcomes
+  }
+
+  it('reports a submission with its day through the practice dismiss', async () => {
+    const desktop = fakeDesktop()
+    const outcomes = await reportedOutcomes(desktop)
+    const journal = await openJournal()
+    showCapture(desktop, journal)
+    desktop.beginPracticeCapture()
+
+    type('my practice note')
+    pressEnter()
+
+    await expect.poll(() => desktop.capturesDismissed).toBe(1)
+    expect(outcomes).toHaveLength(1)
+    const [reported] = outcomes
+    expect(reported?.outcome).toBe('submitted')
+    // The day is the Note's own: the journal holds it under exactly that day.
+    const notes = await journal.notesForFilter({
+      from: '2000-01-01',
+      to: '2100-01-01',
+    })
+    expect(notes).toHaveLength(1)
+    expect(reported).toEqual({
+      outcome: 'submitted',
+      journalDay: notes[0].journalDay,
+    })
+  })
+
+  it('reports abandoning as cancelled through the practice dismiss', async () => {
+    const desktop = fakeDesktop()
+    const outcomes = await reportedOutcomes(desktop)
+    showCapture(desktop, await openJournal())
+
+    desktop.beginPracticeCapture()
+    pressEscape()
+
+    await expect.poll(() => desktop.capturesDismissed).toBe(1)
+    expect(outcomes).toEqual([{ outcome: 'cancelled' }])
+  })
+
+  it('reports a practice blur-discard as cancelled', async () => {
+    const desktop = fakeDesktop()
+    const outcomes = await reportedOutcomes(desktop)
+    showCapture(desktop, await openJournal())
+
+    desktop.beginPracticeCapture()
+    type('half a Note')
+    desktop.blur()
+
+    await expect.poll(() => desktop.capturesDismissed).toBe(1)
+    expect(outcomes).toEqual([{ outcome: 'cancelled' }])
+    await expect.poll(() => field().value).toBe('')
+  })
+
+  it('dismisses ordinarily when the showing was not practice', async () => {
+    const desktop = fakeDesktop()
+    const outcomes = await reportedOutcomes(desktop)
+    const journal = await openJournal()
+    showCapture(desktop, journal)
+
+    type('an ordinary note')
+    pressEnter()
+
+    // An ordinary ending reports nothing and goes away ordinarily, though the
+    // Note itself is still announced the way any Capture announces one.
+    await expect.poll(() => desktop.capturesDismissed).toBe(1)
+    expect(outcomes).toEqual([])
+    const notes = await journal.notesForFilter({
+      from: '2000-01-01',
+      to: '2100-01-01',
+    })
+    expect(notes).toHaveLength(1)
+  })
+
+  it('announces cancelled without dismissing when an ordinary showing displaces practice', async () => {
+    const desktop = fakeDesktop()
+    const outcomes = await reportedOutcomes(desktop)
+    showCapture(desktop, await openJournal())
+
+    desktop.beginPracticeCapture()
+    type('half a Note')
+
+    // Put away for something else, then raised again ordinarily: the practice
+    // attempt that showing displaced is over, but the window has just been
+    // shown and its half-typed Body belongs to the ordinary showing now.
+    desktop.beginCapture()
+
+    await expect.poll(() => outcomes).toEqual([{ outcome: 'cancelled' }])
+    expect(desktop.capturesDismissed).toBe(0)
     expect(field().value).toBe('half a Note')
   })
 })

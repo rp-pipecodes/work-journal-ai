@@ -16,6 +16,7 @@ import {
   CAPTURE_REFUSAL_HEIGHT,
   CAPTURE_SHADOW_GUTTER,
   type Desktop,
+  type PracticeEnded,
 } from '@/platform/desktop'
 
 /**
@@ -54,6 +55,11 @@ export default function CaptureView({
   const field = useRef<HTMLInputElement>(null)
   const prefix = markerPrefix(body)
   const predictions = prefix === null ? [] : offered
+  // Whether this showing was raised for Onboarding practice, as the last
+  // shown announcement said. A practice ending goes away through its own
+  // dismiss — returning focus to the Main Window and reporting its outcome —
+  // while an ordinary one hands focus back as before.
+  const practiceRaised = useRef(false)
 
   // A Capture never inherits the last one: a Draft is nothing, so ending one
   // leaves exactly the empty window the next one begins in. Ending it is the
@@ -69,6 +75,36 @@ export default function CaptureView({
     reset()
     await desktop.dismissCapture()
   }, [desktop, reset])
+
+  /**
+   * Ends this showing as a practice ending: goes away through the practice
+   * dismiss, which returns focus to the Main Window and reports the outcome
+   * for the attempt holding it. A showing reports exactly once, however it
+   * ends — the dismissal carries the outcome, so the two cannot split. The
+   * marker is cleared here rather than left for the next showing to correct,
+   * so nothing read between the dismissal and that showing can mistake this
+   * ended attempt for an open one.
+   */
+  const dismissPractice = useCallback(
+    async (ended: PracticeEnded) => {
+      practiceRaised.current = false
+      reset()
+      await desktop.dismissPracticeCapture(ended)
+    },
+    [desktop, reset],
+  )
+
+  /** Ends this showing, routing a practice ending through its own dismiss. */
+  const endShowing = useCallback(
+    async (ended: PracticeEnded | null) => {
+      if (ended !== null && practiceRaised.current) {
+        await dismissPractice(ended)
+      } else {
+        await dismiss()
+      }
+    },
+    [dismiss, dismissPractice],
+  )
 
   const commit = useCallback(
     async (text: string) => {
@@ -104,9 +140,18 @@ export default function CaptureView({
         }
       }
 
-      await dismiss()
+      // An empty commit stores nothing, so for practice it ends the attempt
+      // as a cancellation; an ordinary empty commit just goes away.
+      const raised = practiceRaised.current
+      await endShowing(
+        !raised
+          ? null
+          : note === null
+            ? { outcome: 'cancelled' }
+            : { outcome: 'submitted', journalDay: note.journalDay },
+      )
     },
-    [desktop, journal, dismiss],
+    [desktop, journal, endShowing],
   )
 
   const choosePrediction = useCallback((name: string) => {
@@ -134,7 +179,21 @@ export default function CaptureView({
     // else. A window is put away either by a dismiss, which has already
     // cleared it, or by the other Entry Point being invoked, which must leave
     // the half-typed Body exactly where the user left it.
-    const shown = desktop.onCaptureShown(() => field.current?.focus())
+    //
+    // The showing also says whether it is practice. A practice showing
+    // displaced by an ordinary one — put away for something else, then raised
+    // again ordinarily — ends the practice attempt it displaced as cancelled:
+    // announced, never dismissed, since the window has just been shown and
+    // whatever is half-typed in it belongs to the ordinary showing now.
+    const shown = desktop.onCaptureShown((practice) => {
+      if (!practice && practiceRaised.current) {
+        practiceRaised.current = false
+        void desktop.announcePracticeEnded({ outcome: 'cancelled' })
+      } else {
+        practiceRaised.current = practice
+      }
+      field.current?.focus()
+    })
     // Clicking away is a discard, not a Capture left floating over the screen.
     // Unless the window is already gone: another Work Journal window was
     // invoked — the other resident panel, or the Main Window — the Rust side
@@ -142,7 +201,11 @@ export default function CaptureView({
     // time rather than being thrown away behind the user's back.
     const blurred = desktop.onWindowBlurred(() => {
       void desktop.isWindowVisible().then((visible) => {
-        if (visible) void dismiss()
+        if (visible) {
+          void endShowing(
+            practiceRaised.current ? { outcome: 'cancelled' } : null,
+          )
+        }
       })
     })
 
@@ -151,7 +214,7 @@ export default function CaptureView({
       void shown.then((stop) => stop())
       void blurred.then((stop) => stop())
     }
-  }, [desktop, dismiss])
+  }, [desktop, endShowing])
 
   useEffect(() => {
     if (prefix === null) {
@@ -224,7 +287,11 @@ export default function CaptureView({
     if (decision === 'commit') {
       await commit(body)
     } else if (decision === 'discard') {
-      await dismiss()
+      // Escape abandons: for practice that ends the attempt as a
+      // cancellation, otherwise the window just goes away.
+      await endShowing(
+        practiceRaised.current ? { outcome: 'cancelled' } : null,
+      )
     }
   }
 
@@ -238,7 +305,11 @@ export default function CaptureView({
       className="flex h-screen flex-col"
       style={{ padding: CAPTURE_SHADOW_GUTTER }}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) void dismiss()
+        if (event.target === event.currentTarget) {
+          void endShowing(
+            practiceRaised.current ? { outcome: 'cancelled' } : null,
+          )
+        }
       }}
     >
       {/* The corners are rounded here rather than on the field: the field all

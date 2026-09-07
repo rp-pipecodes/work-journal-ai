@@ -22,6 +22,7 @@ import {
   HISTORY_SECTION,
   MAIN_WINDOW,
   ONBOARDING_KEY,
+  PRACTICE_ENDED_EVENT,
   SECTION_REQUESTED_EVENT,
   STANDUP_POST_SECTION,
   SETTINGS_FILE,
@@ -86,6 +87,7 @@ const shared: Record<string, string> = {
   SETTINGS_FILE,
   THEME_KEY,
   ONBOARDING_KEY,
+  PRACTICE_ENDED_EVENT,
   DATABASE_URL,
 }
 
@@ -306,7 +308,12 @@ describe('the onboarding state and commands', () => {
     )?.[1]
     expect(handler, 'the invoke handler could not be read').toBeTruthy()
 
-    for (const command of ['onboarding_state', 'dismiss_onboarding']) {
+    for (const command of [
+      'onboarding_state',
+      'dismiss_onboarding',
+      'start_practice_capture',
+      'dismiss_practice_capture',
+    ]) {
       expect(
         rustSource.match(new RegExp(`fn ${command}\\b`)),
         `${command} is not a command in ${RUST_FILE}`,
@@ -316,6 +323,74 @@ describe('the onboarding state and commands', () => {
         `${command} is not registered in the invoke handler`,
       ).toContain(command)
     }
+  })
+
+  it('invokes practice through the command the desktop surface names', () => {
+    // Practice reaches the real resident Capture window through the desktop
+    // boundary: a rename on either side is a Try it button that answers
+    // nothing.
+    const tauriSource = read('src/platform/tauri-desktop.ts')
+    expect(tauriSource).toContain("invoke('start_practice_capture'")
+  })
+
+  it('spells the practice outcome the same on both sides', () => {
+    // The Capture view reports how its practice showing ended, and the Main
+    // Window closes the attempt on it: a drift between the two is a practice
+    // that never lands, or one that lands as the wrong outcome.
+    const rustOutcomes = rustVariants(rustSource, 'PracticeEnded').map(kebab)
+    const tsOutcomes = tsUnionKinds(desktop, 'PracticeEnded')
+
+    expect(rustOutcomes).toEqual(['submitted', 'cancelled'])
+    expect(tsOutcomes).toEqual(rustOutcomes)
+  })
+
+  it('spells the submitted day field the same on both sides', () => {
+    // Variants alone are not the contract: the day travels inside
+    // `Submitted`, and a field spelled `journal_day` on one side and
+    // `journalDay` on the other refuses the dismiss call before its body
+    // runs — leaving the Capture window standing.
+    const enumBody =
+      rustSource.match(/pub enum PracticeEnded \{([\s\S]*?)\n\}/)?.[1] ?? ''
+    const rustFields = [...enumBody.matchAll(/Submitted\s*\{([^}]*)\}/g)]
+      .flatMap(([, fields]) => [
+        ...fields.matchAll(/([a-z_][a-z0-9_]*)\s*:/g),
+      ])
+      .map(([, field]) => camel(field))
+
+    const unionBody =
+      desktop.match(/export type PracticeEnded =\n([\s\S]*?)\n\n/)?.[1] ?? ''
+    const submittedMember =
+      [...unionBody.matchAll(/\{([^{}]*)\}/g)]
+        .map(([, member]) => member)
+        .find((member) => member.includes("'submitted'")) ?? ''
+    const tsFields = [...submittedMember.matchAll(/([a-zA-Z_$][\w$]*)\s*:/g)]
+      .map(([, field]) => field)
+      .filter((field) => field !== 'outcome')
+
+    expect(rustFields).toEqual(['journalDay'])
+    expect(tsFields).toEqual(rustFields)
+
+    // And the attribute that makes the spelling true on the wire: on an enum,
+    // `rename_all` renames the variants only, so the field inside `Submitted`
+    // needs `rename_all_fields` (or a per-variant attribute) — without it both
+    // name lists above agree and the call still refuses `journalDay`. Read
+    // from the attribute directly above the enum, so an unrelated `#[serde]`
+    // elsewhere cannot satisfy this by accident.
+    const enumAt = rustSource.indexOf('pub enum PracticeEnded')
+    const attribute =
+      rustSource
+        .slice(Math.max(0, enumAt - 500), enumAt)
+        .match(/#\[serde\(([\s\S]*?)\)\]\s*$/)?.[1] ?? ''
+    expect(attribute).toContain('rename_all_fields')
+  })
+
+  it('dismisses practice with the outcome the command receives', () => {
+    // The webview sends the outcome under the name the command receives it
+    // under; a rename on either side refuses the call before its body runs.
+    const tauriSource = read('src/platform/tauri-desktop.ts')
+    expect(tauriSource).toContain(
+      "invoke('dismiss_practice_capture', { ended })",
+    )
   })
 })
 

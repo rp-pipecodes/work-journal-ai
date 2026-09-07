@@ -30,14 +30,35 @@ export default function OnboardingView({
   desktop,
   settings,
   onDone,
+  onViewNote,
 }: {
   desktop: Desktop
   settings: AppSettings
   /** The user finished or deliberately skipped the whole flow. */
   onDone: () => void
+  /** The user asked to see the practice Note they saved, in History. */
+  onViewNote: (journalDay: string) => void
 }) {
   const [step, setStep] = useState<Step>('introduction')
   const [hotkeys, setHotkeys] = useState<HotkeyStatuses | null>(null)
+  // The practice attempt, as one fact with one owner. Each Try it replaces it
+  // wholesale: a new attempt id, open, and no Note recorded yet. The attempt
+  // closes on the Capture window's explicit outcome alone — submitted with
+  // the Note's day, or cancelled with nothing created — never on focus
+  // arriving, so a submission and the focus that follows it cannot race.
+  // Practice is optional, and nothing about continuing requires a Note.
+  const [practice, setPractice] = useState<Practice>({
+    attempt: 0,
+    open: false,
+    day: null,
+  })
+  const practiceRef = useRef(practice)
+
+  /** Replaces the attempt in both places event handlers read. */
+  function setPracticeState(next: Practice) {
+    practiceRef.current = next
+    setPractice(next)
+  }
 
   useEffect(() => {
     void desktop.hotkeyStatus().then(setHotkeys, (error: unknown) => {
@@ -45,11 +66,66 @@ export default function OnboardingView({
     })
   }, [desktop])
 
+  useEffect(() => {
+    // How the practice attempt ended, as the Capture window reports it. Heard
+    // only while its own attempt is open, so a Capture from anywhere else —
+    // before the first Try it, after a cancellation, after a save — never
+    // stands in for practice.
+    const subscription = desktop.onPracticeEnded((ended) => {
+      const current = practiceRef.current
+      if (!current.open) return
+      setPracticeState({
+        attempt: current.attempt,
+        open: false,
+        day: ended.outcome === 'submitted' ? ended.journalDay : null,
+      })
+    })
+
+    return () => {
+      void subscription.then((stop) => stop())
+    }
+  }, [desktop])
+
+  /** Opens the real Capture window without leaving the flow. */
+  function tryPractice() {
+    const current = practiceRef.current
+    if (current.open) {
+      // The attempt is already open but its window was put away for something
+      // else: raise it again under the same attempt rather than starting over.
+      void desktop.beginPracticeCapture().catch((error: unknown) => {
+        console.error('could not open Capture for practice', error)
+      })
+      return
+    }
+    const previous = current
+    const next: Practice = {
+      attempt: current.attempt + 1,
+      open: true,
+      day: null,
+    }
+    setPracticeState(next)
+    void desktop.beginPracticeCapture().catch((error: unknown) => {
+      console.error('could not open Capture for practice', error)
+      // The window never opened, so this attempt never began: go back to
+      // what was there before it, but only if nothing has moved on since.
+      if (practiceRef.current.attempt === next.attempt) {
+        setPracticeState({ ...previous, open: false })
+      }
+    })
+  }
+
   if (step === 'introduction') {
     return (
       <OnboardingShell desktop={desktop}>
         <Introduction
           hotkeys={hotkeys}
+          practicing={practice.open}
+          savedDay={practice.day}
+          onTryIt={tryPractice}
+          onViewNote={() => {
+            const day = practiceRef.current.day
+            if (day !== null) onViewNote(day)
+          }}
           onContinue={() => setStep('start-at-login')}
           onSkip={onDone}
         />
@@ -72,6 +148,18 @@ export default function OnboardingView({
 
 /** The step that follows the introduction in this build. */
 type Step = 'introduction' | 'start-at-login'
+
+/**
+ * One practice attempt. Replaced wholesale on every Try it, so no flag from
+ * an earlier attempt — or from no practice at all — can be read by a later
+ * event. `open` is whether the Capture window is out for this attempt; `day`
+ * is the submitted Note's Journal Day once one has arrived.
+ */
+interface Practice {
+  attempt: number
+  open: boolean
+  day: string | null
+}
 
 /**
  * The window chrome around the flow: the strip the traffic lights sit in and
@@ -118,10 +206,20 @@ function OnboardingShell({
 
 function Introduction({
   hotkeys,
+  practicing,
+  savedDay,
+  onTryIt,
+  onViewNote,
   onContinue,
   onSkip,
 }: {
   hotkeys: HotkeyStatuses | null
+  /** Whether the practice Capture is open right now. */
+  practicing: boolean
+  /** The Journal Day of the practice Note, once one has been saved. */
+  savedDay: string | null
+  onTryIt: () => void
+  onViewNote: () => void
   onContinue: () => void
   onSkip: () => void
 }) {
@@ -179,11 +277,42 @@ function Introduction({
         </p>
       </section>
 
+      <section aria-label="Try capturing a Note" className="flex flex-col gap-2">
+        <h2 className="type-section">Try capturing a Note</h2>
+        <p className="type-body text-muted-foreground">
+          Optional — trying it opens the real Capture window, and nothing is
+          required to continue. A Note you save becomes part of the journal;
+          cancelling creates nothing.
+        </p>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            onClick={onTryIt}
+            disabled={practicing}
+          >
+            Try it
+          </Button>
+        </div>
+        <p aria-live="polite" className="type-meta min-h-4 text-muted-foreground">
+          {practicing && 'The Capture window is open — saving or cancelling returns here.'}
+          {!practicing && savedDay !== null && 'Saved — your Note is in the journal.'}
+        </p>
+      </section>
+
       <footer className="flex items-center justify-between gap-3 pt-2">
         <Button variant="ghost" onClick={onSkip}>
           Skip onboarding
         </Button>
-        <Button onClick={onContinue}>Continue</Button>
+        {savedDay === null ? (
+          <Button onClick={onContinue}>Continue</Button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={onViewNote}>
+              View your note
+            </Button>
+            <Button onClick={onContinue}>Continue setup</Button>
+          </div>
+        )}
       </footer>
     </>
   )
