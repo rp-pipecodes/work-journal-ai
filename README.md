@@ -2,110 +2,48 @@
 
 A personal, local-first log of short work notes captured throughout the day, so that what you did is recoverable later — at standup, in a review, or as context for an LLM.
 
-macOS on Apple Silicon only. Everything is local: no account, no server, no network call.
+macOS on Apple Silicon only. No account, no server. Notes and Tasks live in a SQLite file on your Mac.
 
-To install rather than build, the [download page](https://rp-pipecodes.github.io/work-journal-ai/) has the DMG and the one command macOS needs before it will open it. The page's source is [`site/index.html`](site/index.html), published by [`pages.yml`](.github/workflows/pages.yml) on every push to `main` that touches it.
+**[Download for macOS](https://rp-pipecodes.github.io/work-journal-ai/)** — or [build it yourself](CONTRIBUTING.md#building-locally).
 
-The vocabulary the app and its code use is defined in [CONTEXT.md](CONTEXT.md) and is normative.
+## How it works
 
-## Status
+1. **Capture** — one Hotkey opens a text field over whatever you are doing. Write one line, press Enter, the window is gone.
+2. **File** — start the line with `#name` and the Note is filed under that Project. Names you already used are offered as you type.
+3. **Read back** — the Tray Menu copies Yesterday's Digest with no window open. One click further gives the Standup Material or a Standup Post.
 
-Notes are complete: Capture from every Entry Point, Project filing with Predictions, history over a Filter of Journal Days — Presets, the Project constraint, Search and the Nudge — editing, refiling and deletion, the Digest, Yesterday's Digest and the Tray Count from the Tray Menu, and Import of today's meetings from the macOS calendar.
+The [download page](https://rp-pipecodes.github.io/work-journal-ai/) has a live demo of this loop.
 
-Tasks are complete beside them: Task Creation in its own resident window on its own Hotkey, Scheduled For with an optional time, Recurring Tasks with one Open Task Occurrence and its completion history, Task Alerts delivered by macOS, and Tasks View over Open and Completed Tasks.
+## What it does
 
-Settings covers both: the Note and Task Hotkeys, Theme, Start at Login, Meeting Import, Task Alert Permission recovery, and Export of every Note and Task.
+- **Notes** — capture from the Hotkey, the Tray Menu, or relaunch. Read any range (today, yesterday, this or last week or month), narrowed to one Project or not at all. Search every Note's text to jump to the day it lives on. Reword, refile to another day, or delete — no trash.
+- **Tasks** — commitments beside Notes, with their own Hotkey and always-ready window. A date, with an optional time; past dates read as overdue. Daily, weekly, monthly, yearly, or every-N repeats with one open occurrence, never a backlog. A dated Task with a time raises a local macOS alert.
+- **Standup** — Yesterday's Digest from the tray (Markdown, nothing to configure), Standup Material one click in (Notes plus work kept plus open Tasks due), or a Standup Post in prose from your own OpenAI-compatible model. The post is read before copying — it may be wrong and is never kept. The API key stays in your keychain; everything else works without it.
+- **The rest** — today's macOS calendar meetings can become Notes on their own (off until you pick the calendars). Export the whole journal to Markdown any time. Automatic and on-demand Backup of the SQLite file, Restore with rollback, and self-updates from Settings.
 
-## Prerequisites
+## Privacy
 
-- Node 24+ and [pnpm](https://pnpm.io)
-- A Rust toolchain via [rustup](https://rustup.rs)
+The network is touched only for a Standup Post you request and an update you confirm. Meeting Import reads the local macOS calendar store — no OAuth, no network call.
 
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
+## Install
 
-## Development
-
-Install dependencies, then run the app:
-
-```bash
-pnpm install
-```
-
-```bash
-pnpm tauri:dev
-```
-
-There is no Dock icon and no `Cmd+Tab` entry — the app is in the menu bar. Quit it from the Tray Menu.
-
-`pnpm tauri:dev` merges [`tauri.dev.conf.json`](src-tauri/tauri.dev.conf.json) over the release config, which swaps the bundle identifier for `com.pipecodes.work-journal.dev`. Everything the app stores — the journal database, `settings.json`, the login item — lives under the identifier, so the dev build gets its own copy and cannot touch the notes of an installed release. Plain `pnpm tauri dev` shares them; use it only when that is what you want.
-
-`pnpm tauri:dev` cannot hold a calendar grant: it builds a bare binary with no bundle around it, so macOS never prompts. Work on Import against `pnpm tauri:dev:app`, which builds a real debug `.app` under the same `.dev` identifier — see [docs/calendar-access.md](docs/calendar-access.md).
-
-Both builds can run at once, but a combination can only be held once: for each of the Note Hotkey and the Task Hotkey, whichever build registers second finds it taken and reports it unavailable. Give the dev build its own combination for both in its Settings — those choices persist separately too.
-
-## Tests
-
-```bash
-pnpm test
-```
-
-Vitest, run once. `pnpm test:watch` re-runs on change. OS integrations that a test could only assert mocks against are covered by [the manual checklist](docs/manual-verification.md) instead.
-
-## Type checking and linting
-
-```bash
-pnpm build
-```
-
-```bash
-pnpm lint
-```
-
-`pnpm build` runs `tsc -b` before bundling, so it doubles as the type check.
-
-## Building locally
-
-```bash
-pnpm tauri build --bundles app
-```
-
-The result lands in `src-tauri/target/release/bundle/macos/Work Journal.app`.
-
-## Cutting a release
-
-Pushing a `vX.Y.Z` tag builds the DMG and publishes it as a GitHub release. The version lives in `src-tauri/tauri.conf.json` and nowhere else — the versions in `package.json` and `src-tauri/Cargo.toml` are fixed at `0.0.0` and mean nothing.
-
-Bump it, commit, then tag the commit that carries the bump:
-
-```bash
-git tag v0.1.0 && git push origin v0.1.0
-```
-
-The workflow refuses to build if the tag and `tauri.conf.json` disagree, and runs the tests before the build, so a red suite produces no release at all. It builds for Apple Silicon only, and the DMG is unsigned — the release notes carry the `xattr` instruction below.
-
-Every release also publishes a signed `.app.tar.gz` and a `latest.json`, which is what installed copies update themselves from.
-
-### Updating an installed copy
-
-Settings › Updates › **Check for updates** finds the latest release, names the version, and installs and restarts into it when pressed again. Nothing is downloaded until it is; the app never looks on its own. See [ADR 0030](docs/adr/0030-the-app-updates-itself-from-its-own-releases.md).
-
-The update bundle is signed with a minisign key whose public half is compiled into the app, and refused if it does not verify. The private half lives in the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` repository secrets and nowhere else — **lose it and no installed copy can ever be updated again**; every user would have to reinstall from a DMG once.
-
-This is Tauri's own signature over the update payload, not Apple code signing: builds remain unsigned and unnotarized, and the `xattr` step below still applies to a DMG. It does not apply to an update, which the app unpacks itself.
-
-### Gatekeeper and the quarantine attribute
-
-Builds are unsigned and unnotarized by design. macOS attaches a quarantine attribute to anything that arrives from another machine — via AirDrop, a download, or a shared drive — and Gatekeeper then refuses to open the app, usually with "the app is damaged and can't be opened".
-
-Clear the attribute on the copy you received:
+The build is unsigned and unnotarized by design, so macOS quarantines the download. After dragging Work Journal to Applications, run once:
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/Work Journal.app"
 ```
 
-A build you produced locally and never moved is not quarantined and needs nothing.
+A copy you compiled yourself was never quarantined and needs nothing. Updates need nothing either — the app unpacks its own signed payload and restarts into it.
+
+Already running Work Journal? **Settings › Updates › Check for updates** installs the next version with no download and no terminal.
+
+## Vocabulary
+
+The words the app uses — Note, Task, Capture, Project, Digest, Standup Post, and the rest — are defined in [CONTEXT.md](CONTEXT.md) and are normative there and in the code.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and releases.
 
 ## Licence
 
