@@ -2194,10 +2194,10 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         MenuItem::with_id(app, VIEW_NOTES_MENU_ITEM, "View Notes", true, None::<&str>)?;
     let view_tasks =
         MenuItem::with_id(app, VIEW_TASKS_MENU_ITEM, "View Tasks", true, None::<&str>)?;
-    let write_standup_post = MenuItem::with_id(
+    let view_standup_post = MenuItem::with_id(
         app,
         WRITE_STANDUP_POST_MENU_ITEM,
-        "Write Standup Post…",
+        "View Standup Post",
         true,
         None::<&str>,
     )?;
@@ -2206,13 +2206,17 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let copy_yesterday = MenuItem::with_id(
         app,
         COPY_YESTERDAY_DIGEST_MENU_ITEM,
-        "Copy Yesterday's Digest",
+        "Copy Yesterday's Notes",
         true,
         None::<&str>,
     )?;
     let settings = MenuItem::with_id(app, SETTINGS_MENU_ITEM, "Settings", true, None::<&str>)?;
+    let readback_separator = PredefinedMenuItem::separator(app)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, QUIT_MENU_ITEM, "Quit", true, None::<&str>)?;
+    // Navigating first — every item that opens the Main Window on a section —
+    // then the one action that reads back without opening a window, alone in
+    // its group, then out.
     let menu = Menu::with_items(
         app,
         &[
@@ -2220,9 +2224,10 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             &new_task,
             &view_notes,
             &view_tasks,
-            &write_standup_post,
-            &copy_yesterday,
+            &view_standup_post,
             &settings,
+            &readback_separator,
+            &copy_yesterday,
             &separator,
             &quit,
         ],

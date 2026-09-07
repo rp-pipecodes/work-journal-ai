@@ -292,14 +292,14 @@ describe('Rename Project', () => {
   })
 })
 
-describe('Copy Digest', () => {
+describe('Copy notes', () => {
   it('reports through a toast, and says so politely as well', async () => {
     const user = userEvent.setup()
     const { desktop } = await showFilter([
       { at: '2026-03-09T10:00:00', body: 'Monday' },
     ])
 
-    await user.click(screen.getByRole('button', { name: /copy digest/i }))
+    await user.click(screen.getByRole('button', { name: 'Copy notes (1)' }))
 
     const said = await screen.findByRole('status')
     expect(said.getAttribute('aria-live')).toBe('polite')
@@ -315,6 +315,17 @@ describe('Copy Digest', () => {
     expect(toast.textContent).toContain(said.textContent)
   })
 
+  it('previews how many Notes a copy would carry', async () => {
+    await showFilter([
+      { at: '2026-03-09T10:00:00', body: 'Monday' },
+      { at: '2026-03-09T11:00:00', body: 'More Monday' },
+    ])
+
+    expect(
+      screen.getByRole('button', { name: 'Copy notes (2)' }),
+    ).toBeTruthy()
+  })
+
   it('is not offered while a Search is showing', async () => {
     const user = userEvent.setup()
     await showFilter([{ at: '2026-03-09T10:00:00', body: 'Monday' }])
@@ -322,12 +333,15 @@ describe('Copy Digest', () => {
     await user.type(within(header()).getByLabelText('Search'), 'Mon')
 
     await vi.waitFor(() => {
-      expect(screen.queryByRole('button', { name: /copy digest/i })).toBeNull()
+      expect(screen.queryByRole('button', { name: /copy notes/i })).toBeNull()
+      expect(
+        screen.queryByRole('menuitem', { name: /copy notes/i }),
+      ).toBeNull()
     })
   })
 })
 
-describe('Copy Review Material', () => {
+describe('Copy notes + completed work', () => {
   it('copies the Filter’s Notes and completed work, naming which copy landed', async () => {
     const user = userEvent.setup()
     const { desktop, core, clock } = await showHistory([
@@ -338,10 +352,19 @@ describe('Copy Review Material', () => {
     const kept = await core.createTask('kept Monday')
     await core.completeTask(kept.id)
 
-    await user.click(screen.getByRole('button', { name: /copy review material/i }))
+    await user.click(
+      screen.getByRole('button', { name: 'More copy options' }),
+    )
+    await user.click(
+      await screen.findByRole('menuitem', {
+        name: 'Copy notes + completed work',
+      }),
+    )
 
     const said = await screen.findByRole('status')
-    await vi.waitFor(() => expect(said.textContent).toContain('Review Material'))
+    await vi.waitFor(() =>
+      expect(said.textContent).toContain('notes + completed work'),
+    )
     expect(desktop.clipboard).toContain('Monday')
     expect(desktop.clipboard).toContain('## Completed')
     expect(desktop.clipboard).toContain('kept Monday')
@@ -355,14 +378,22 @@ describe('Copy Review Material', () => {
     expect(toast.textContent).toContain(said.textContent)
   })
 
-  it('is a second action beside Copy Digest, labelled so the two cannot be confused', async () => {
+  it('lives in the copy menu rather than beside the copy button', async () => {
+    const user = userEvent.setup()
     await showHistory([{ at: '2026-03-09T10:00:00', body: 'Monday' }])
 
+    // One visible copy button: the variant is behind the chevron.
     expect(
-      screen.getByRole('button', { name: /copy digest/i }),
-    ).toBeTruthy()
+      screen.getAllByRole('button', { name: /copy notes/i }),
+    ).toHaveLength(1)
+
+    await user.click(
+      screen.getByRole('button', { name: 'More copy options' }),
+    )
     expect(
-      screen.getByRole('button', { name: /copy review material/i }),
+      await screen.findByRole('menuitem', {
+        name: 'Copy notes + completed work',
+      }),
     ).toBeTruthy()
   })
 
@@ -374,19 +405,22 @@ describe('Copy Review Material', () => {
 
     await user.click(project())
     await user.click(await screen.findByRole('option', { name: '#alpha' }))
-
-    const copy = screen.getByRole('button', {
-      name: /copy review material/i,
-    }) as HTMLButtonElement
-    expect(copy.disabled).toBe(true)
-    // The rule is readable rather than hidden: the disabled action states it.
-    expect(copy.parentElement?.getAttribute('title')).toContain(
-      'Review Material covers completed work, which has no Project.',
+    await user.click(
+      screen.getByRole('button', { name: 'More copy options' }),
     )
-    // …and said, to whoever is listening rather than looking: a title on a
-    // wrapper is announced to nobody, so the rule is described to the button.
+
+    const copy = (await screen.findByRole('menuitem', {
+      name: 'Copy notes + completed work',
+    })) as HTMLButtonElement
+    expect(copy.disabled).toBe(true)
+    // The rule is readable rather than hidden: the disabled row carries it as
+    // visible text…
+    expect(copy.parentElement?.textContent).toContain(
+      'Completed work has no Project, so this is only offered for Any Project.',
+    )
+    // …and said, to whoever is listening rather than looking.
     expect(ruleSaidTo(copy)).toContain(
-      'Review Material covers completed work, which has no Project.',
+      'Completed work has no Project, so this is only offered for Any Project.',
     )
   })
 
@@ -398,16 +432,19 @@ describe('Copy Review Material', () => {
 
     await user.click(project())
     await user.click(await screen.findByRole('option', { name: 'Unfiled' }))
+    await user.click(
+      screen.getByRole('button', { name: 'More copy options' }),
+    )
 
-    const copy = screen.getByRole('button', {
-      name: /copy review material/i,
-    }) as HTMLButtonElement
+    const copy = (await screen.findByRole('menuitem', {
+      name: 'Copy notes + completed work',
+    })) as HTMLButtonElement
     expect(copy.disabled).toBe(true)
-    expect(copy.parentElement?.getAttribute('title')).toContain(
-      'Review Material covers completed work, which has no Project.',
+    expect(copy.parentElement?.textContent).toContain(
+      'Completed work has no Project, so this is only offered for Any Project.',
     )
     expect(ruleSaidTo(copy)).toContain(
-      'Review Material covers completed work, which has no Project.',
+      'Completed work has no Project, so this is only offered for Any Project.',
     )
   })
 
@@ -422,13 +459,18 @@ describe('Copy Review Material', () => {
     await user.click(await dayCell('2026-03-11'))
 
     await user.click(
-      screen.getByRole('button', { name: /copy review material/i }),
+      screen.getByRole('button', { name: 'More copy options' }),
+    )
+    await user.click(
+      await screen.findByRole('menuitem', {
+        name: 'Copy notes + completed work',
+      }),
     )
 
     const said = await screen.findByRole('status')
     await vi.waitFor(() =>
       expect(said.textContent).toContain(
-        'No Notes or completed work to copy.',
+        'No notes or completed work to copy.',
       ),
     )
     expect(desktop.clipboard).toBeNull()
@@ -442,7 +484,7 @@ describe('Copy Review Material', () => {
 
     await vi.waitFor(() => {
       expect(
-        screen.queryByRole('button', { name: /copy review material/i }),
+        screen.queryByRole('button', { name: /copy notes/i }),
       ).toBeNull()
     })
   })
@@ -477,7 +519,7 @@ describe('Escape', () => {
     const search = within(header()).getByLabelText('Search') as HTMLInputElement
     await user.type(search, 'Mon')
     await vi.waitFor(() => {
-      expect(screen.queryByRole('button', { name: /copy digest/i })).toBeNull()
+      expect(screen.queryByRole('button', { name: /copy notes/i })).toBeNull()
     })
 
     await user.keyboard('{Escape}')

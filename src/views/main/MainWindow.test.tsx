@@ -481,7 +481,7 @@ describe('a section that is not showing', () => {
       tasks: ['renew the cert'],
     })
 
-    await user.click(screen.getByRole('button', { name: /copy digest/i }))
+    await user.click(screen.getByRole('button', { name: /copy notes \(1\)/i }))
     await vi.waitFor(() => {
       if (document.querySelector('[data-sonner-toast]') === null) {
         throw new Error('no toast')
@@ -541,13 +541,13 @@ describe('a section that is not showing', () => {
       await write(text)
     }
 
-    await user.click(screen.getByRole('button', { name: /copy digest/i }))
+    await user.click(screen.getByRole('button', { name: /copy notes \(1\)/i }))
     desktop.requestSection('settings')
     await showsSettings()
     releaseCopy()
     await expect.poll(() => desktop.clipboard).toContain('Monday')
     await vi.waitFor(() => {
-      if (!document.body.textContent?.includes('Copied 1 Note')) {
+      if (!document.body.textContent?.includes('Copied 1 note')) {
         throw new Error('copy not confirmed')
       }
     })

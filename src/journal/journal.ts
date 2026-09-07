@@ -2025,9 +2025,9 @@ function bulletPrefix(note: Note, projectPrefixes: boolean): string {
  */
 export function describeCopiedDigest(digest: Digest): string {
   if (digest.noteCount === 0) {
-    return 'No Notes to copy.'
+    return 'No notes to copy.'
   }
-  return `Copied ${plural(digest.noteCount, 'Note')}.`
+  return `Copied ${plural(digest.noteCount, 'note')}.`
 }
 
 /**

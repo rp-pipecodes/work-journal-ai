@@ -75,7 +75,7 @@ export interface HistorySnapshot {
    * Whether a Search has taken the screen over — true from the keystroke that
    * reaches two characters until the term is cleared or the Filter moves, and
    * true whether or not the term matched anything. What Escape belongs to, and
-   * why Copy Digest is not on screen: the Digest is bound to the Filter, so it
+   * why the copy control is not on screen: the Digest is bound to the Filter, so it
    * must not be offered beside something that is not one.
    */
   searching: boolean
@@ -553,7 +553,7 @@ export function createHistorySession({
         () => show({ confirmation: describeCopiedDigest(copied) }),
         (error: unknown) => {
           console.error('could not copy the Digest', error)
-          show({ confirmation: 'Could not copy.' })
+          show({ confirmation: 'Could not copy notes.' })
         },
       )
     },
@@ -582,7 +582,7 @@ export function createHistorySession({
       } catch (error) {
         console.error('could not read Review Material', error)
         if (latestRead === ticket && digest === held) {
-          show({ confirmation: 'Could not copy Review Material.' })
+          show({ confirmation: 'Could not copy notes + completed work.' })
         }
         return
       }
@@ -603,7 +603,7 @@ export function createHistorySession({
         show({ confirmation: describeCopiedReviewMaterial(material) })
       } catch (error) {
         console.error('could not copy Review Material', error)
-        show({ confirmation: 'Could not copy Review Material.' })
+        show({ confirmation: 'Could not copy notes + completed work.' })
       }
     },
   }
