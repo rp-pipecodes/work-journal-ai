@@ -146,10 +146,10 @@ export default function UpdateSettings({ desktop }: { desktop: Desktop }) {
     })()
   }
 
-  // The release these lines are about: found, downloading, or on disk waiting
-  // for the restart. Every stage but the two where there is no release at all.
-  const found =
-    stage.at === 'idle' || stage.at === 'checking' ? null : stage.update
+  // The release these lines are about, or null at the two stages where there
+  // is no release to be about — read off the stage exhaustively, beside the
+  // label that reads off the same stage.
+  const release = updateOf(stage)
 
   return (
     <SettingsGroup>
@@ -188,11 +188,11 @@ export default function UpdateSettings({ desktop }: { desktop: Desktop }) {
           up through the download, because that is when there is time to read
           it. Nothing renders for a release that said nothing — every release
           published before the manifest carried the changelog. */}
-      {found !== null && found.notes.length > 0 && (
-        <section aria-label={`What changed in ${found.version}`}>
+      {release !== null && release.notes.length > 0 && (
+        <section aria-label={`What changed in ${release.version}`}>
           <ul className="type-meta text-muted-foreground list-disc pl-4">
-            {found.notes.map((note) => (
-              <li key={note}>{note}</li>
+            {release.notes.map((note, line) => (
+              <li key={line}>{note}</li>
             ))}
           </ul>
         </section>
@@ -218,6 +218,26 @@ type Stage =
   | { at: 'installing'; update: AvailableUpdate; progress: UpdateProgress | null }
   | { at: 'installed'; update: AvailableUpdate }
   | { at: 'quit-needed'; update: AvailableUpdate }
+
+/**
+ * The release a stage is about: found, downloading, on disk on its way into a
+ * restart, or on disk with a restart the user has to make. `quit-needed` is in
+ * here because the release is still what the group is about — the app is
+ * waiting to be quit into it, and what it changed is still what the user is
+ * quitting for.
+ */
+function updateOf(stage: Stage): AvailableUpdate | null {
+  switch (stage.at) {
+    case 'idle':
+    case 'checking':
+      return null
+    case 'found':
+    case 'installing':
+    case 'installed':
+    case 'quit-needed':
+      return stage.update
+  }
+}
 
 /** What the one control says it will do, or is doing, at each stage. */
 function label(stage: Stage): string {

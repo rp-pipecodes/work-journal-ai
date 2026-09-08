@@ -13,15 +13,15 @@ it('reads a changelog section as the sentences it is made of', () => {
   ])
 })
 
-it('drops the blank lines and any heading the section came with', () => {
-  const body = '\n## 0.12.0 — 2026-09-08\n\n- One thing changed.\n\n'
+it('drops the blank lines the section is spaced out with', () => {
+  const body = '\n- One thing changed.\n\n- And another.\n\n'
 
-  expect(releaseNotes(body)).toEqual(['One thing changed.'])
+  expect(releaseNotes(body)).toEqual(['One thing changed.', 'And another.'])
 })
 
-// Every release published before the manifest carried the changelog, which is
-// every release an installed copy could be updating from today.
-it('says nothing when the release said nothing', () => {
+// A manifest published before the workflow put the changelog in it, which is
+// every release so far.
+it('says nothing when the manifest carried no notes', () => {
   expect(releaseNotes(undefined)).toEqual([])
   expect(releaseNotes('   \n\n')).toEqual([])
 })

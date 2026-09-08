@@ -235,6 +235,10 @@ Confirmed permanent removal of a Note or Task. There is no trash, no archive, no
 **Settings**:
 What the user gets to decide about the app: the Note and Task Hotkeys, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars, and how to recover unavailable Task Alert Permission — plus Export, Backup and Update as its actions rather than settings. A Main Window section, reached from the sidebar or named directly from the Tray Menu.
 
+**Changelog**:
+What each released version changed, a section per version, written as the change lands and kept in the repository. Plain sentences, one per line, addressed to the person running the app: the release publishes its version's section as the release notes, and an Update shows those notes to the reader deciding whether to move to it. Not a commit log, and not release-time archaeology.
+_Avoid_: Release notes (that is where a section ends up, not what it is), what's new, history
+
 **Update**:
 Moving from the version running to a newer released one, without leaving the app: Settings looks for it, names the version found along with what that version changed, and installs and restarts into it when the user presses again. What it changed is the release's own notes, which are the version's section of the changelog and nothing else. Only when asked — the app never looks on its own schedule. The release it finds is the project's own latest, and the bundle is refused unless it is signed by the key this build was compiled to trust. First-time installation is still the DMG, and still needs the quarantine attribute cleared; an update does not, because the app unpacks it itself.
 _Avoid_: Upgrade, auto-update, patch

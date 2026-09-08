@@ -99,7 +99,12 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
-          releaseDraft: false
+          # A draft, published by the step below once `latest.json` says what
+          # this release changed. `/releases/latest` skips drafts, so the
+          # manifest an installed copy reads is never the one this action
+          # uploaded: there is no window in which it serves the release body,
+          # and none in which the asset is being replaced.
+          releaseDraft: true
           prerelease: false
           args: --target aarch64-apple-darwin --bundles app,dmg
           releaseBody: |
@@ -120,15 +125,21 @@ jobs:
       # `latest.json`'s notes are what an updating app shows before it installs
       # anything, and tauri-action fills them with the release body — which
       # carries the DMG instructions that reader is precisely not following.
-      # The changelog section alone goes back over them, on the release the
-      # action has just published. Nothing is re-signed: the minisign signature
-      # covers the `.app.tar.gz`, not the manifest that points at it.
-      - name: Leave the app the changelog alone in latest.json
+      # The changelog section alone goes over them, and only then does the
+      # release stop being a draft. Nothing is re-signed: the minisign
+      # signature covers the `.app.tar.gz`, not the manifest that points at it.
+      #
+      # `--clobber` on the download because the action leaves a `latest.json`
+      # of its own in the workspace and `gh` will not write over a file it did
+      # not put there. The published asset is what gets edited: this step does
+      # not rest on the leftovers being the same bytes.
+      - name: Put the changelog in latest.json, then publish the release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NOTES: ${{ steps.notes.outputs.body }}
         run: |
-          gh release download "$GITHUB_REF_NAME" --pattern latest.json --dir .
+          gh release download "$GITHUB_REF_NAME" --pattern latest.json --dir . --clobber
           jq --arg notes "$NOTES" '.notes = $notes' latest.json > latest.notes.json
           mv latest.notes.json latest.json
           gh release upload "$GITHUB_REF_NAME" latest.json --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
