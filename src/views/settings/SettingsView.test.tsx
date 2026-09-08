@@ -1179,6 +1179,24 @@ describe('Restore', () => {
   })
 })
 
+describe("What's new", () => {
+  it('shows the shipped changelog in Settings, with no check for updates first', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+
+    showSettings(desktop)
+
+    // The changelog is in the build, so the group is answerable the moment
+    // Settings is on screen — the release notes beside it need a release to
+    // have been found first, and this is the same question asked at any time.
+    await screen.findByRole('heading', { name: "What's new" })
+    const newest = screen.getByRole('region', {
+      name: /^Work Journal \d+\.\d+\.\d+$/,
+    })
+    expect(newest.querySelectorAll('li').length).toBeGreaterThan(0)
+    expect(desktop.updateChecks).toBe(0)
+  })
+})
+
 describe('Updates', () => {
   /** The line the Updates group keeps saying, found inside that group alone. */
   function updateStatus(): string | null | undefined {
