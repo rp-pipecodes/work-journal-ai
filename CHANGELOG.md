@@ -2,7 +2,7 @@
 
 What changed in each released version, newest first. Every `vX.Y.Z` section here is published verbatim as that release's notes, and Settings shows those notes to a reader deciding whether to update — so each bullet is a plain sentence, with no Markdown emphasis. See [CONTRIBUTING.md](CONTRIBUTING.md#cutting-a-release).
 
-## Unreleased
+## 0.12.0 — 2026-09-08
 
 - Settings shows what a release changed before you install it: the version's changelog, from the release itself, under the Updates control and up until the app restarts into it.
 - The README is now the page a user reads, and the contributor instructions moved to CONTRIBUTING.md.
