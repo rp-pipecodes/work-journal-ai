@@ -390,6 +390,8 @@ Needs two builds: the one installed, and a release tagged after it.
 
 - [ ] **Check for updates** on a build that is the latest says Work Journal is up to date, and offers to look again.
 - [ ] With a newer release published, the same press names that version, and the control becomes **Install X.Y.Z**.
+- [ ] Under the control, the release's own changelog is listed — the same sentences as that version's section of `CHANGELOG.md`, without the `- ` markers or the heading, and no install instructions. They stay there while the download runs.
+- [ ] The release's `latest.json` asset has the changelog section in `notes` and nothing else, while the release page itself still carries the DMG instructions.
 - [ ] Pressing it reports the share of the download that has arrived, then says the version is installed and restarting — that line is readable before the window goes — and the app restarts on its own.
 - [ ] Switching to History while the download runs leaves the app running: it must not quit out from under a section that never mentioned an update. Coming back to Settings is where the restart happens.
 - [ ] That line is genuinely on screen, not merely in the DOM. The suite can only prove the restart waits two frames; whether a frame was painted is a thing only eyes and a screen recording settle. Record the window during the update and step through the frames before it closes.

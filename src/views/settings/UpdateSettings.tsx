@@ -146,6 +146,11 @@ export default function UpdateSettings({ desktop }: { desktop: Desktop }) {
     })()
   }
 
+  // The release these lines are about: found, downloading, or on disk waiting
+  // for the restart. Every stage but the two where there is no release at all.
+  const found =
+    stage.at === 'idle' || stage.at === 'checking' ? null : stage.update
+
   return (
     <SettingsGroup>
       <SettingsRow
@@ -175,6 +180,23 @@ export default function UpdateSettings({ desktop }: { desktop: Desktop }) {
       >
         {said}
       </p>
+
+      {/* What the release changed, from the release itself. Outside the status
+          line above on purpose: this is the content of the version being
+          decided about, not the answer to the press, and reading a changelog
+          out as a live announcement would talk over the line that is. It stays
+          up through the download, because that is when there is time to read
+          it. Nothing renders for a release that said nothing — every release
+          published before the manifest carried the changelog. */}
+      {found !== null && found.notes.length > 0 && (
+        <section aria-label={`What changed in ${found.version}`}>
+          <ul className="type-meta text-muted-foreground list-disc pl-4">
+            {found.notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        </section>
+      )}
     </SettingsGroup>
   )
 }

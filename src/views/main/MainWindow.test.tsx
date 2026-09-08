@@ -170,7 +170,7 @@ describe('an update installing while the user goes elsewhere', () => {
   it('defers the restart until Settings is being looked at again', async () => {
     const user = userEvent.setup()
     const { desktop } = await showMainWindow({ captured: [MONDAY] })
-    desktop.availableUpdate = { version: '0.9.0' }
+    desktop.availableUpdate = { version: '0.9.0', notes: [] }
 
     // The frames the restart waits for, held so the moment between the install
     // and the paint can be widened to whatever this test needs.
