@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
+import { CHANGELOG } from '@/settings/changelog'
 import { Toaster } from '@/components/ui/sonner'
 import {
   SettingsGroup,
@@ -25,6 +26,7 @@ import {
 import TaskAlertSettings from './TaskAlertSettings'
 import ThemeSettings from './ThemeSettings'
 import UpdateSettings from './UpdateSettings'
+import ChangelogSettings from './ChangelogSettings'
 
 /**
  * The settings section of the Main Window: a shell that composes one group per
@@ -157,9 +159,19 @@ export default function SettingsView({
         <BackupSettings desktop={desktop} />
         <Separator />
 
-        {/* Last, beside the version in the footer: both are about the build
-            rather than about the journal it holds. */}
+        {/* Beside the version in the footer: both are about the build rather
+            than about the journal it holds. */}
         <UpdateSettings desktop={desktop} />
+
+        <Separator />
+
+        {/* Under the way into the next version, because it is what the last
+            one did. The version is null until it has been read, and the
+            changelog opens at its own newest entry until then. */}
+        <ChangelogSettings
+          versions={CHANGELOG}
+          running={appIdentity?.version ?? ''}
+        />
         <Separator />
 
         {/* The introduction itself, offered again. An action rather than a

@@ -233,10 +233,10 @@ Confirmed permanent removal of a Note or Task. There is no trash, no archive, no
 ## Settings
 
 **Settings**:
-What the user gets to decide about the app: the Note and Task Hotkeys, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars, and how to recover unavailable Task Alert Permission — plus Export, Backup and Update as its actions rather than settings. A Main Window section, reached from the sidebar or named directly from the Tray Menu.
+What the user gets to decide about the app: the Note and Task Hotkeys, the Theme, whether the app starts at login, whether today's meetings are imported and from which calendars, and how to recover unavailable Task Alert Permission — plus Export, Backup, Update and the Changelog as its actions and answers rather than settings. A Main Window section, reached from the sidebar or named directly from the Tray Menu.
 
 **Changelog**:
-What each released version changed, a section per version, written as the change lands and kept in the repository. Plain sentences, one per line, addressed to the person running the app: the release publishes its version's section as the release notes, and an Update shows those notes to the reader deciding whether to move to it. Not a commit log, and not release-time archaeology.
+What each released version changed, a section per version, written as the change lands and kept in the repository. Plain sentences, one per line, addressed to the person running the app: the release publishes its version's section as the release notes, an Update shows those notes to the reader deciding whether to move to it, and the app ships with the file itself — Settings answers what this version changed, and what every earlier one did, at any time and offline. Not a commit log, and not release-time archaeology.
 _Avoid_: Release notes (that is where a section ends up, not what it is), what's new, history
 
 **Update**:
