@@ -116,3 +116,19 @@ jobs:
             ```
 
             This build is ad-hoc signed and unnotarized — without that step macOS reports the app as damaged. Apple Silicon only.
+
+      # `latest.json`'s notes are what an updating app shows before it installs
+      # anything, and tauri-action fills them with the release body — which
+      # carries the DMG instructions that reader is precisely not following.
+      # The changelog section alone goes back over them, on the release the
+      # action has just published. Nothing is re-signed: the minisign signature
+      # covers the `.app.tar.gz`, not the manifest that points at it.
+      - name: Leave the app the changelog alone in latest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES: ${{ steps.notes.outputs.body }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" --pattern latest.json --dir .
+          jq --arg notes "$NOTES" '.notes = $notes' latest.json > latest.notes.json
+          mv latest.notes.json latest.json
+          gh release upload "$GITHUB_REF_NAME" latest.json --clobber

@@ -1208,7 +1208,7 @@ describe('Updates', () => {
 
   it('names the release found and installs that one when pressed', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
-    desktop.availableUpdate = { version: '0.9.0' }
+    desktop.availableUpdate = { version: '0.9.0', notes: [] }
 
     showSettings(desktop)
 
@@ -1238,6 +1238,61 @@ describe('Updates', () => {
     ).toMatch(/0\.9\.0 is installed/)
   })
 
+  it('shows what the release changed before it is installed, and while it downloads', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    desktop.availableUpdate = {
+      version: '0.9.0',
+      notes: ['Copies are named by what they contain.', 'Tasks can be searched.'],
+    }
+    // Held open at the download, which is where a reader has the time for the
+    // notes — and where a group that dropped them would be showing a progress
+    // share for a change nobody could still read about.
+    desktop.installUpdate = async (report) => {
+      report({ downloaded: 0, total: desktop.updateSize })
+      return new Promise<void>(() => {})
+    }
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+
+    const changed = await screen.findByRole('region', {
+      name: 'What changed in 0.9.0',
+    })
+    expect(
+      [...changed.querySelectorAll('li')].map((line) => line.textContent),
+    ).toEqual([
+      'Copies are named by what they contain.',
+      'Tasks can be searched.',
+    ])
+    // The lines are the content of the version, not the answer to the press:
+    // the status line is what gets announced, and it says its own thing.
+    expect(changed.closest('p[role="status"]')).toBe(null)
+
+    ;(await screen.findByRole('button', { name: 'Install 0.9.0' })).click()
+
+    await screen.findByRole('button', { name: 'Downloading… 0%' })
+    expect(
+      screen.getByRole('region', { name: 'What changed in 0.9.0' }),
+    ).toBeTruthy()
+  })
+
+  it('shows no notes for a release that carried none', async () => {
+    const desktop = fakeDesktop({ stored: { startAtLogin: false } })
+    // Every release published before the manifest carried the changelog, which
+    // is what an installed copy updating today is most likely to find.
+    desktop.availableUpdate = { version: '0.9.0', notes: [] }
+
+    showSettings(desktop)
+
+    ;(await screen.findByRole('button', { name: 'Check for updates' })).click()
+
+    await screen.findByRole('button', { name: 'Install 0.9.0' })
+    // The version is still named; there is simply no empty list under it.
+    expect(updateStatus()).toBe('Work Journal 0.9.0 is available.')
+    expect(screen.queryByRole('region', { name: /What changed/ })).toBe(null)
+  })
+
   it('says so when nothing could be reached, and offers to look again', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
     desktop.updateCheckFails = true
@@ -1254,7 +1309,7 @@ describe('Updates', () => {
 
   it('names the version that could not be installed, and keeps it installable', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
-    desktop.availableUpdate = { version: '0.9.0' }
+    desktop.availableUpdate = { version: '0.9.0', notes: [] }
     desktop.updateInstallFails = true
 
     showSettings(desktop)
@@ -1272,7 +1327,7 @@ describe('Updates', () => {
 
   it('has said the update is installed before the app is restarted', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
-    desktop.availableUpdate = { version: '0.9.0' }
+    desktop.availableUpdate = { version: '0.9.0', notes: [] }
     // What the user could read at the moment the restart was asked for. The
     // real restart takes this webview with it, so a line that is not on screen
     // by then is a line nobody ever sees.
@@ -1299,7 +1354,7 @@ describe('Updates', () => {
 
   it('lets a paint happen before restarting, not just a DOM write', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
-    desktop.availableUpdate = { version: '0.9.0' }
+    desktop.availableUpdate = { version: '0.9.0', notes: [] }
 
     // jsdom paints nothing, so what can be checked here is not the pixels but
     // the boundary: that the restart waits for the moment a paint happens at,
@@ -1336,7 +1391,7 @@ describe('Updates', () => {
 
   it('does not restart once Settings has gone away', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
-    desktop.availableUpdate = { version: '0.9.0' }
+    desktop.availableUpdate = { version: '0.9.0', notes: [] }
 
     // Frames asked for and frames taken back, both held, so that a
     // cancellation is something this test can actually observe.
@@ -1366,7 +1421,7 @@ describe('Updates', () => {
 
   it('says to quit by hand when the restart itself will not happen', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
-    desktop.availableUpdate = { version: '0.9.0' }
+    desktop.availableUpdate = { version: '0.9.0', notes: [] }
     desktop.restart = async () => {
       desktop.restarts += 1
       throw new Error('The process would not go.')
@@ -1398,7 +1453,7 @@ describe('Updates', () => {
 
   it('shows how much of the download has arrived while it is arriving', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
-    desktop.availableUpdate = { version: '0.9.0' }
+    desktop.availableUpdate = { version: '0.9.0', notes: [] }
     // A download that never finishes, so the wait itself can be read.
     desktop.installUpdate = async (report) => {
       report({ downloaded: 5_000_000, total: 20_000_000 })

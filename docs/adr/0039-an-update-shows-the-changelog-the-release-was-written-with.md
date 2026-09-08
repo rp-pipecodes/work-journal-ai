@@ -1,0 +1,20 @@
+# An update shows the changelog the release was written with
+
+Settings names the version it would move to and nothing else, so the decision to replace the running build is made against a number. ADR 0030 left the release's own notes off that seam for a good reason: `latest.json`'s `notes` is the release body verbatim, and this project's release body was the DMG install instructions — telling a reader who is already updating, inside the app, to go download a DMG and run `xattr`. It named the condition for revisiting: "worth revisiting if release bodies ever become real per-version changelogs: that is a change to `releaseBody` first and a UI change second."
+
+That condition now holds. `CHANGELOG.md` carries a section per version, written when the change lands, and the release workflow publishes the tag's section as the release notes. So the notes are on the seam: `AvailableUpdate` carries the version and the sentences that version changed, and Settings shows them under the control, from the moment the release is found until the app restarts into it.
+
+## Considered options
+
+- **Show `latest.json`'s `notes` as the workflow leaves them.** Rejected: `tauri-action` fills `notes` from `releaseBody`, and the release page needs the install instructions the app's reader must not be given. The workflow writes the changelog section back over `notes` on the published release instead — one `jq` on an asset, after the action, changing nothing that is signed: the minisign signature covers the `.app.tar.gz`, not the manifest that points at it.
+- **Split the install instructions out of the release body entirely, so `notes` is already the changelog.** Rejected: the release page is where a first-time installer arrives from the site, and the `xattr` step is the difference between an app that opens and an app macOS calls damaged. The two audiences want different bodies; the manifest is the one that can be corrected after the fact.
+- **Render the notes as Markdown.** Rejected: it buys inline emphasis and costs a renderer in the bundle for text this project writes itself. The changelog's bullets are plain sentences by convention (CONTRIBUTING.md), so `releaseNotes` turns the section into the sentences it is made of — one line each, marker and heading dropped — and the view renders a list. A convention the changelog can hold to beats a parser for a syntax nobody needs.
+- **Fetch `CHANGELOG.md` from the repository when the update is found.** Rejected: it is a second network call, against a file whose `main` is not the release being installed, to learn something the manifest the app already downloaded can carry.
+- **Announce the notes with the status line.** Rejected: `role="status"` is how the answer to the press reaches a screen reader, and reading a changelog out over it would bury the one line that says what just happened. The notes are the content of the version being decided about, so they sit outside it, in a region named after that version.
+
+## Consequences
+
+- **`AvailableUpdate` gains `notes: string[]`, empty when the release said nothing.** Every release published before this one has install instructions in its `notes`, and an installed copy checking today finds the newest release — but a manifest with no changelog in it must still be installable, so nothing renders rather than a heading over an empty list.
+- **The release refuses to build without a changelog section**, which is ADR 0030's `notes` problem solved at the source: there is no release whose notes are something other than what changed.
+- **The notes stay on screen through the download and up to the restart.** The download is when there is time to read them, and a group that dropped them at the press would be showing a progress share for a change nobody could still read about.
+- **The changelog is now a released artifact of the app, not only of the repository.** A bullet written for a reader of GitHub is read inside Settings by someone deciding whether to restart, so it is written for them: what changed, in a sentence, without Markdown emphasis.

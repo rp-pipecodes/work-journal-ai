@@ -59,7 +59,7 @@ function aTick(): Promise<void> {
 
 it('cancels the restart in the commit that hides Settings, not a tick later', async () => {
   const desktop = fakeDesktop({ stored: { startAtLogin: false } })
-  desktop.availableUpdate = { version: '0.9.0' }
+  desktop.availableUpdate = { version: '0.9.0', notes: [] }
   const frames = holdFrames()
 
   try {
