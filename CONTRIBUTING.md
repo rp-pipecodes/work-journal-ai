@@ -68,13 +68,15 @@ The result lands in `src-tauri/target/release/bundle/macos/Work Journal.app`.
 
 Pushing a `vX.Y.Z` tag builds the DMG and publishes it as a GitHub release. The version lives in `src-tauri/tauri.conf.json` and nowhere else — the versions in `package.json` and `src-tauri/Cargo.toml` are fixed at `0.0.0` and mean nothing.
 
-Bump it, commit, then tag the commit that carries the bump:
+Entries go into the `## Unreleased` section of [CHANGELOG.md](CHANGELOG.md) as the work lands. Cutting a release renames that section to the version and dates it: the workflow publishes it verbatim as the release notes, above the install instructions, and refuses to build if the tag has no section of its own.
+
+Bump the version, rename the section, commit both, then tag the commit that carries them:
 
 ```bash
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-The workflow refuses to build if the tag and `tauri.conf.json` disagree, and runs the tests before the build, so a red suite produces no release at all. It builds for Apple Silicon only, and the DMG is unsigned — the release notes carry the `xattr` instruction from the README.
+The workflow refuses to build if the tag and `tauri.conf.json` disagree, and runs the tests before the build, so a red suite produces no release at all. It builds for Apple Silicon only, and the DMG is unsigned — the release notes carry the `xattr` instruction from the README below the version's changelog section.
 
 Every release also publishes a signed `.app.tar.gz` and a `latest.json`, which is what installed copies update themselves from — see [ADR 0030](docs/adr/0030-the-app-updates-itself-from-its-own-releases.md).
 
