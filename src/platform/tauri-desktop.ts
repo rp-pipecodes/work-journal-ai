@@ -62,6 +62,7 @@ import {
   type TaskAlertCompletion,
   type TaskAlertPermission,
 } from './desktop'
+import { releaseNotes } from './release-notes'
 
 export function createTauriDesktop(): Desktop {
   // What the last check found, kept until it is installed or a later check
@@ -333,7 +334,9 @@ export function createTauriDesktop(): Desktop {
     async checkForUpdate(): Promise<AvailableUpdate | null> {
       found = await check()
 
-      return found === null ? null : { version: found.version }
+      return found === null
+        ? null
+        : { version: found.version, notes: releaseNotes(found.body) }
     },
 
     async installUpdate(report) {

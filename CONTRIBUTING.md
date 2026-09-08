@@ -70,6 +70,8 @@ Pushing a `vX.Y.Z` tag builds the DMG and publishes it as a GitHub release. The 
 
 Entries go into the `## Unreleased` section of [CHANGELOG.md](CHANGELOG.md) as the work lands. Cutting a release renames that section to the version and dates it: the workflow publishes it verbatim as the release notes, above the install instructions, and refuses to build if the tag has no section of its own.
 
+Each bullet is one plain sentence about what changed for the user, with no Markdown emphasis: the workflow also writes the section over `latest.json`'s `notes`, where Settings shows it line by line to someone deciding whether to update — see [ADR 0039](docs/adr/0039-an-update-shows-the-changelog-the-release-was-written-with.md).
+
 Bump the version, rename the section, commit both, then tag the commit that carries them:
 
 ```bash

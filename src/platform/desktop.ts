@@ -361,14 +361,19 @@ export const TASK_ALERT_COMPLETED_EVENT = 'task-alert://completed'
 export const TASK_ALERTS_RECONCILED_EVENT = 'task-alert://reconciled'
 
 /**
- * A release newer than the running build, as the updater found it. Only what
- * Settings has to say out loud: the version it would move to. The release's own
- * notes are deliberately not here — this project's release bodies are install
- * instructions for the DMG, which is exactly what the reader of this line is
- * no longer doing.
+ * A release newer than the running build, as the updater found it. What
+ * Settings has to say out loud: the version it would move to, and what that
+ * version changed — the release's own notes, which the release workflow fills
+ * with the version's CHANGELOG.md section and nothing else, one sentence per
+ * line. Empty when the manifest carried no notes at all, which is every
+ * release published before the workflow started writing them. These lines are
+ * shown as they arrive, so a manifest whose notes were something other than a
+ * changelog would be read out as one: the workflow refusing to release a tag
+ * without a section is what makes that impossible, not anything here.
  */
 export interface AvailableUpdate {
   version: string
+  notes: string[]
 }
 
 /**
