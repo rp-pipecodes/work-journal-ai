@@ -38,6 +38,26 @@ jobs:
             exit 1
           fi
 
+      # The notes a release carries are the tag's own CHANGELOG.md section, so
+      # they are written alongside the change rather than at release time. Also
+      # before the build, and fatal when the section is missing: a release whose
+      # notes say nothing is a release nobody can tell apart from the last one.
+      - name: Take the release notes from the changelog
+        id: notes
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          notes=$(awk -v v="$tag_version" '/^## /{ take = ($2 == v); next } take' CHANGELOG.md)
+          if [ -z "$(echo "$notes" | tr -d '[:space:]')" ]; then
+            echo "CHANGELOG.md has no entries under '## $tag_version' — not releasing." >&2
+            echo "Rename the Unreleased section to $tag_version and commit it before tagging." >&2
+            exit 1
+          fi
+          {
+            echo 'body<<CHANGELOG_SECTION_EOF'
+            echo "$notes"
+            echo 'CHANGELOG_SECTION_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86  # v6.0.10
 
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6.5.0
@@ -83,6 +103,10 @@ jobs:
           prerelease: false
           args: --target aarch64-apple-darwin --bundles app,dmg
           releaseBody: |
+            ${{ steps.notes.outputs.body }}
+
+            ---
+
             Already running a Work Journal with **Settings › Updates**? Check for updates there — no download and no terminal.
 
             Installing for the first time: download the DMG, drag **Work Journal** to Applications, then clear the quarantine attribute macOS attached to it:

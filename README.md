@@ -37,6 +37,8 @@ A copy you compiled yourself was never quarantined and needs nothing. Updates ne
 
 Already running Work Journal? **Settings › Updates › Check for updates** installs the next version with no download and no terminal.
 
+What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
+
 ## Vocabulary
 
 The words the app uses — Note, Task, Capture, Project, Digest, Standup Post, and the rest — are defined in [CONTEXT.md](CONTEXT.md) and are normative there and in the code.
