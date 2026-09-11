@@ -1,5 +1,7 @@
 # Standup Material is a second lossless rendering
 
+> Superseded for Work Summary scope by [ADR 0041](0041-work-summary-combines-a-selected-period-with-current-commitments.md): Work Summary Material replaces Standup Material with the selected period's Notes and completions plus all current Open Tasks. What follows describes the yesterday-shaped input it replaced. ADR 0027's independent lossless-output principle still holds and is not amended by that replacement.
+
 The material a Standup Post is written from is complete — yesterday's Notes, the work kept yesterday, and the Open Tasks that still stand — but until now it only reached the user as prose a model wrote from it. A user with no Model Access, or an endpoint that is down, could not paste what the app had already assembled. Standup Material is that Markdown, copyable on its own, with no key, no network and no waiting.
 
 That means the app now has two lossless renderings of yesterday: [Yesterday's Digest](0027-the-standup-post-never-replaces-yesterdays-digest.md), which is Notes only and lives on the Tray Menu, and Standup Material, which adds Tasks and lives in the Standup Post section. This is deliberate, and it is the alternative to the tempting fix.

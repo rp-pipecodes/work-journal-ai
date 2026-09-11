@@ -74,7 +74,7 @@ export function typeTheKeyAgainLine(): string {
  * Whether the API Key may travel to a Base URL: always over https, or over
  * plaintext only to this machine's own loopback — `localhost`, any of
  * `127.0.0.0/8`, or `::1`. The mirror of the rule Rust enforces where the Key
- * would be attached (`transport_allows` in `src-tauri/src/standup.rs`), so
+ * would be attached (`transport_allows` in `src-tauri/src/work_summary.rs`), so
  * the step's status line can tell a Base URL the app will refuse from one it
  * will not — the words a user reads never promise a call the app refuses. The
  * call itself stays the one enforcement; this only keeps the on-screen claim

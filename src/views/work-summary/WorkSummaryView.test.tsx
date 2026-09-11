@@ -9,6 +9,7 @@ import {
   waitFor,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { fakeDesktop, type FakeDesktop } from '@/platform/testing/desktop'
 import { createJournal, formatDayRange, type Journal } from '@/journal/journal'
 import { fixedClock, openTestDatabase } from '@/journal/testing/database'
@@ -24,6 +25,9 @@ const openDatabases: Array<() => void> = []
 
 afterEach(() => {
   cleanup()
+  // Sonner keeps its messages outside React, so unmounting a view leaves
+  // them standing for the next test to count.
+  toast.dismiss()
   for (const close of openDatabases.splice(0)) close()
 })
 
@@ -172,6 +176,43 @@ describe('Work Summary section', () => {
     )
   })
 
+  it('copies and generates from the selection on screen when Notes change underneath', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await workSummaryAt()
+    clock.set(new Date('2026-03-10T09:00:00'))
+    const note = await journal.capture('about to go')
+    await journal.createTask('still open')
+    clock.set(new Date('2026-03-12T09:00:00'))
+
+    renderWorkSummary({ journal, clock, desktop, settings })
+    await screen.findByText('1 Note')
+
+    // Deleted with no change announced, so the session still holds the
+    // selection the section showed: counts, copy, and request all describe
+    // that same selection rather than a mix of old and new.
+    await journal.delete(note!.id)
+    expect(screen.getByText('1 Note')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Copy material' }))
+    await waitFor(() => {
+      expect(desktop.clipboard).toContain('about to go')
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    await screen.findByText('The work summary the model wrote.')
+    expect(desktop.workSummaryRequests[0].userContent).toContain('about to go')
+
+    // After a refresh the new selection is used instead.
+    desktop.announceJournalChanged()
+    await waitFor(() => {
+      expect(screen.getByText('0 Notes')).toBeTruthy()
+    })
+    await user.click(screen.getByRole('button', { name: 'Copy material' }))
+    await waitFor(() => {
+      expect(desktop.clipboard).not.toContain('about to go')
+    })
+  })
+
   it('counts recurring completions separately from Completed Tasks', async () => {
     const { journal, clock, desktop, settings } = await workSummaryAt()
     await journalWithCompletedOccurrence(journal, clock)
@@ -216,6 +257,9 @@ describe('Work Summary section', () => {
     const generate = screen.getByRole('button', { name: 'Generate' })
     expect((generate as HTMLButtonElement).disabled).toBe(true)
     expect(desktop.workSummaryRequests).toEqual([])
+    // And the clipboard is untouched: there is no material to write and no
+    // claim about one.
+    expect(desktop.clipboard).toBeNull()
   })
 
   it('generates from the week’s Notes and the Tasks, and Copy puts it on the clipboard', async () => {
@@ -272,10 +316,7 @@ describe('Work Summary section', () => {
 
     await user.click(screen.getByRole('button', { name: 'Copy material' }))
 
-    const expected = await buildWorkSummaryMaterial({
-      journal,
-      selection: await selectWorkSummary({ journal, range: { from: '2026-03-09', to: '2026-03-12' } }),
-    })
+    const expected = buildWorkSummaryMaterial(await selectWorkSummary({ journal, range: { from: '2026-03-09', to: '2026-03-12' } }))
     await waitFor(() => {
       expect(desktop.clipboard).toBe(expected)
     })
@@ -319,10 +360,7 @@ describe('Work Summary section', () => {
 
     // Built before the click: the fixture's clock is shared with the section,
     // and what the selection describes must not move while the copy lands.
-    const expected = await buildWorkSummaryMaterial({
-      journal,
-      selection: await selectWorkSummary({ journal, range: { from: '2026-03-09', to: '2026-03-12' } }),
-    })
+    const expected = buildWorkSummaryMaterial(await selectWorkSummary({ journal, range: { from: '2026-03-09', to: '2026-03-12' } }))
     await user.click(copyMaterial)
     await waitFor(() => {
       expect(desktop.clipboard).toBe(expected)
@@ -473,10 +511,7 @@ describe('Work Summary section', () => {
 
     // No summary ever arrived; the material is still one click away.
     await user.click(screen.getByRole('button', { name: 'Copy material' }))
-    const expected = await buildWorkSummaryMaterial({
-      journal,
-      selection: await selectWorkSummary({ journal, range: { from: '2026-03-09', to: '2026-03-12' } }),
-    })
+    const expected = buildWorkSummaryMaterial(await selectWorkSummary({ journal, range: { from: '2026-03-09', to: '2026-03-12' } }))
     await waitFor(() => {
       expect(desktop.clipboard).toBe(expected)
     })
@@ -779,8 +814,13 @@ describe('Work Summary section', () => {
     await user.click(screen.getByRole('button', { name: 'Generate' }))
 
     await screen.findByText('The work summary the model wrote.')
-    expect(desktop.workSummaryRequests[0].systemPrompt).toBe(
+    // A tone-only customization rides along, but the mandatory grounding
+    // rules ride with it: no customization edits them out.
+    expect(desktop.workSummaryRequests[0].systemPrompt).toContain(
       'Write it in pirate speak.',
+    )
+    expect(desktop.workSummaryRequests[0].systemPrompt).toContain(
+      'Say only what the input supports',
     )
   })
 
@@ -801,8 +841,9 @@ describe('Work Summary section', () => {
     const prompt = desktop.workSummaryRequests[0].systemPrompt
     expect(prompt).not.toBe('')
     // A model asked nothing does not write a work summary: the cleared field
-    // reads as the shipped prompt again.
+    // reads as the shipped voice again, still under the grounding rules.
     expect(prompt).toContain('work summary')
+    expect(prompt).toContain('Say only what the input supports')
   })
 
   it('generates from the current commitments alone when the week holds no accomplishments', async () => {

@@ -84,7 +84,7 @@ export default function WorkSummaryPromptSettings({
     <SettingsGroup>
       <SettingsRow
         label="Work Summary Prompt"
-        explanation="What voice and structure a Work Summary is written with. It never changes which records the summary describes. Left empty, the shipped prompt is used — a model is never asked nothing."
+        explanation="What voice and structure a Work Summary is written with. Factual-grounding rules are always sent with it and cannot be edited out. Left empty, the shipped voice is used — a model is never asked nothing."
         controls="work-summary-prompt"
         stacked
       >

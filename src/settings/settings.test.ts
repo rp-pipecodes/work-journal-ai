@@ -3,6 +3,7 @@ import {
   DEFAULT_SETTINGS,
   DEFAULT_WORK_SUMMARY_PROMPT,
   OPENAI_BASE_URL,
+  WORK_SUMMARY_GROUNDING,
   readSettings,
   writeImportCalendars,
   writeImportMeetings,
@@ -10,6 +11,7 @@ import {
   writeModelBaseUrl,
   writeWorkSummaryPrompt,
   writeStartAtLogin,
+  workSummarySystemPrompt,
   type SettingsStore,
 } from './settings'
 
@@ -114,13 +116,27 @@ describe('the Work Summary Prompt', () => {
     expect(DEFAULT_SETTINGS.workSummaryPrompt).toBe(
       DEFAULT_WORK_SUMMARY_PROMPT,
     )
-    // A personal assessment, not yesterday's chat post: accomplishments and
-    // current commitments distinguished, inference qualified, empty halves
-    // identified rather than invented, no invented priorities — grounded in
-    // the input throughout.
+    // Voice only: a personal summary in the user's language, brief and
+    // natural.
     expect(DEFAULT_WORK_SUMMARY_PROMPT).toContain('work summary')
-    expect(DEFAULT_WORK_SUMMARY_PROMPT).toContain('open')
-    expect(DEFAULT_WORK_SUMMARY_PROMPT).toContain('empty')
+  })
+
+  it('keeps mandatory grounding outside the editable voice', async () => {
+    // Factual/source rules ship separately and compose with any voice, so a
+    // tone-only customization cannot remove them: accomplishments and current
+    // commitments distinguished, empty halves identified rather than invented,
+    // inference qualified, no invented priorities — grounded throughout.
+    expect(WORK_SUMMARY_GROUNDING).toContain('currently open commitments')
+    expect(WORK_SUMMARY_GROUNDING).toContain('empty')
+    expect(WORK_SUMMARY_GROUNDING).toContain(
+      'Say only what the input supports',
+    )
+    expect(
+      workSummarySystemPrompt('Write it in pirate speak.'),
+    ).toContain('Write it in pirate speak.')
+    expect(
+      workSummarySystemPrompt('Write it in pirate speak.'),
+    ).toContain('Say only what the input supports')
   })
 
   it('starts everyone at the shipped prompt rather than at silence', async () => {

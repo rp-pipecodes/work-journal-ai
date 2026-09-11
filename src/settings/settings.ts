@@ -79,15 +79,13 @@ export interface Settings {
 export const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 
 /**
- * The preferences a Work Summary is written under, as shipped — the value
- * `readSettings` falls back to while the Work Summary Prompt setting holds
- * nothing of the user's, and the one Restore Default puts back. It asks for a
- * personal assessment of the selected period's accomplishments and the current
- * commitments, with inferred connections qualified as interpretations and no
- * unsolicited priorities or next steps — while saying only what the input
- * supports, so the prose stays grounded however the voice is customized.
+ * The mandatory factual and source rules every Work Summary is written under.
+ * Composed with the user's voice/structure preferences for every request —
+ * never stored, never edited, and never left out, so a tone-only
+ * customization cannot remove factual grounding or redefine which records a
+ * summary describes. See issue #238.
  */
-export const DEFAULT_WORK_SUMMARY_PROMPT = `You are writing a personal work summary for the user, from the work records given.
+export const WORK_SUMMARY_GROUNDING = `The material below is the complete record selection: Notes filed in the selected range, Tasks and Task Occurrences completed in that range by completion time, and all currently Open Tasks.
 
 Summarize what was accomplished in the selected period, and connect related work across Notes and completed Tasks.
 
@@ -97,9 +95,24 @@ If either half of the input is empty — no accomplishments in the period, or no
 
 Say only what the input supports, and mark anything inferred or connected across records as an interpretation rather than a recorded fact.
 
-Offer no priorities, no next steps, and no assessment of importance or urgency.
+Offer no priorities, no next steps, and no assessment of importance or urgency.`
+
+/**
+ * The voice and structure a Work Summary is written with, as shipped — the
+ * value `readSettings` falls back to while the Work Summary Prompt setting
+ * holds nothing of the user's, and the one Restore Default puts back.
+ */
+export const DEFAULT_WORK_SUMMARY_PROMPT = `You are writing a personal work summary for the user, from the work records given.
 
 Write in the first person, in the same language as the input. Keep it brief and natural, ready to read back.`
+
+/**
+ * The system prompt one request is sent under: the mandatory grounding rules
+ * always on top of the user's voice/structure preferences.
+ */
+export function workSummarySystemPrompt(voice: string): string {
+  return `${WORK_SUMMARY_GROUNDING}\n\n${voice}`
+}
 
 export const DEFAULT_SETTINGS: Settings = {
   startAtLogin: false,

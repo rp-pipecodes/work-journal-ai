@@ -31,6 +31,7 @@ import {
 } from '@/journal/work-summary'
 import type { Desktop, WorkSummaryFailure } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
+import { workSummarySystemPrompt } from '@/settings/settings'
 
 /**
  * The prose a model writes from this week's accomplishments and the current
@@ -174,14 +175,12 @@ export default function WorkSummaryView({
       const response = await desktop.generateWorkSummary({
         baseUrl: stored.modelBaseUrl,
         model: stored.model,
-        // The user's prompt, or the shipped one whenever nothing of theirs is
+        // The user's voice, or the shipped one whenever nothing of theirs is
         // stored — `readSettings` resolves a cleared field to the default, so
-        // a model is never asked under an empty system prompt.
-        systemPrompt: stored.workSummaryPrompt,
-        userContent: await buildWorkSummaryMaterial({
-          journal: await journal,
-          selection: state.selection,
-        }),
+        // a model is never asked under an empty system prompt — always under
+        // the mandatory grounding rules, which no customization edits out.
+        systemPrompt: workSummarySystemPrompt(stored.workSummaryPrompt),
+        userContent: buildWorkSummaryMaterial(state.selection),
       })
 
       if (response.state === 'generated') {
@@ -287,7 +286,7 @@ export default function WorkSummaryView({
       'material',
       selection,
       await putOnClipboard('material', async () =>
-        buildWorkSummaryMaterial({ journal: await journal, selection }),
+        buildWorkSummaryMaterial(selection),
       ),
     )
   }
@@ -431,7 +430,7 @@ function MaterialSummary({ selection }: { selection: WorkSummarySelection }) {
           This week
         </h2>
         <p className="type-meta text-muted-foreground">
-          {count(selection.notes.length, 'Note')}
+          {count(selection.digest.noteCount, 'Note')}
         </p>
         <p className="type-meta text-muted-foreground">
           {count(selection.completedTasks.length, 'Completed Task')}

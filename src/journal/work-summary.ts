@@ -14,6 +14,7 @@ import {
   journalDayFor,
   type CompletedOccurrence,
   type DayRange,
+  type Digest,
   type Journal,
   type Note,
   type Task,
@@ -31,12 +32,23 @@ export interface WorkSummarySelection {
   to: string
   /** Every Note filed in the range, including Imported Notes. */
   notes: Note[]
-  /** Ordinary Tasks completed in the range, oldest completion first. */
+  /**
+   * The range's canonical Digest — the Notes half of the material, read with
+   * the selection and carried in it. Counts, refusal, generation, and copy
+   * all describe this same Digest, so Notes added or removed after the
+   * selection was captured cannot mix with older Task data.
+   */
+  digest: Digest
+  /**
+   * Ordinary Tasks completed in the range, as the journal returns them. The
+   * material renders them oldest completion first.
+   */
   completedTasks: Task[]
   /**
-   * Task Occurrences completed in the range, oldest completion first, each
-   * with the Recurring Task it belongs to. The parent is never completed by
-   * this — it continues, and appears among the current Open Tasks.
+   * Task Occurrences completed in the range, as the journal returns them,
+   * each with the Recurring Task it belongs to. The parent is never completed
+   * by this — it continues, and appears among the current Open Tasks. The
+   * material renders them oldest completion first.
    */
   completedOccurrences: CompletedOccurrence[]
   /**
@@ -62,9 +74,10 @@ export async function selectWorkSummary({
   journal: Journal
   range: DayRange
 }): Promise<WorkSummarySelection> {
-  const [notes, completedTasks, completedOccurrences, openTasks] =
+  const [notes, digest, completedTasks, completedOccurrences, openTasks] =
     await Promise.all([
       journal.notesForFilter({ from, to }),
+      journal.digest({ from, to }),
       journal.completedTasks(),
       journal.occurrencesKeptIn({ from, to }),
       journal.openTasks(),
@@ -74,6 +87,7 @@ export async function selectWorkSummary({
     from,
     to,
     notes,
+    digest,
     completedTasks: completedTasks.filter(
       (task) =>
         task.completedAt !== null &&
@@ -102,7 +116,7 @@ export async function selectWorkSummary({
  */
 export function workSummaryRefuses(selection: WorkSummarySelection): boolean {
   return (
-    selection.notes.length === 0 &&
+    selection.digest.noteCount === 0 &&
     selection.completedTasks.length === 0 &&
     selection.completedOccurrences.length === 0 &&
     selection.openTasks.length === 0
@@ -111,33 +125,27 @@ export function workSummaryRefuses(selection: WorkSummarySelection): boolean {
 
 /**
  * Work Summary Material: the complete, lossless Markdown of the selected
- * range, built from the selection already on screen — the range's Digest
- * verbatim, `#project` prefixes and all, plus the work completed in it
- * oldest-first — followed by every currently Open Task explicitly identified
- * as current. It is what a Work Summary is written from, and what the user
- * pastes instead when there is no Model Access, the endpoint is down, or the
- * prose came back wrong. See `CONTEXT.md` and
+ * range — the selection's own Digest verbatim, `#project` prefixes and all,
+ * plus the work completed in it oldest-first — followed by every currently
+ * Open Task explicitly identified as current. It is what a Work Summary is
+ * written from, and what the user pastes instead when there is no Model
+ * Access, the endpoint is down, or the prose came back wrong. See `CONTEXT.md`
+ * and
  * docs/adr/0041-work-summary-combines-a-selected-period-with-current-commitments.md.
  *
- * No second serialisation: a second format would eventually describe a
- * journal the user does not have.
+ * Synchronous over the selection it is handed: everything it renders was read
+ * together, so it always describes one selection and never a mix of an old
+ * Task read with newer Notes. No second serialisation: a second format would
+ * eventually describe a journal the user does not have.
  *
  * A section with nothing in it is left out entirely, so a week of
  * commitments alone carries no empty accomplishments heading, and vice versa.
  * A week with neither half reads as the clear empty result the section
  * refuses to send or copy.
  */
-export async function buildWorkSummaryMaterial({
-  journal,
-  selection,
-}: {
-  journal: Journal
-  selection: WorkSummarySelection
-}): Promise<string> {
-  const digest = await journal.digest({
-    from: selection.from,
-    to: selection.to,
-  })
+export function buildWorkSummaryMaterial(
+  selection: WorkSummarySelection,
+): string {
   const completions = mergeCompletions({
     completedTasks: selection.completedTasks,
     completedOccurrences: selection.completedOccurrences,
@@ -145,7 +153,7 @@ export async function buildWorkSummaryMaterial({
   })
 
   if (
-    digest.markdown === '' &&
+    selection.digest.markdown === '' &&
     completions.length === 0 &&
     selection.openTasks.length === 0
   ) {
@@ -153,7 +161,7 @@ export async function buildWorkSummaryMaterial({
   }
 
   const parts: string[] = [`# ${formatDayRange(selection.from, selection.to)}`]
-  if (digest.markdown !== '') parts.push(digest.markdown)
+  if (selection.digest.markdown !== '') parts.push(selection.digest.markdown)
   if (completions.length > 0) {
     parts.push(renderCompletedSection(completions, selection.from !== selection.to))
   }

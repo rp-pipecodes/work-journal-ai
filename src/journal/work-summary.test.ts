@@ -237,6 +237,7 @@ describe('selectWorkSummary', () => {
       from: '2026-03-09',
       to: '2026-03-12',
       notes: [],
+      digest: { markdown: '', noteCount: 0 },
       completedTasks: [],
       completedOccurrences: [],
       openTasks: [],
@@ -308,7 +309,7 @@ describe('buildWorkSummaryMaterial', () => {
     await journal.createTask('unscheduled')
 
     const selection = await selectWorkSummary({ journal, range: WEEK })
-    const userContent = await buildWorkSummaryMaterial({ journal, selection })
+    const userContent = buildWorkSummaryMaterial(selection)
 
     // The Notes half is exactly what the journal's Digest renders — the same
     // Markdown History would copy — and the Tasks are one bullet each, with
@@ -327,7 +328,7 @@ describe('buildWorkSummaryMaterial', () => {
     await journal.createTask('today', { date: '2026-03-12', time: '17:00' })
 
     const selection = await selectWorkSummary({ journal, range: WEEK })
-    const userContent = await buildWorkSummaryMaterial({ journal, selection })
+    const userContent = buildWorkSummaryMaterial(selection)
 
     expect(userContent).toBe(
       `# ${formatDayRange('2026-03-09', '2026-03-12')}\n` +
@@ -343,7 +344,7 @@ describe('buildWorkSummaryMaterial', () => {
     clock.set(new Date('2026-03-12T09:00:00'))
 
     const selection = await selectWorkSummary({ journal, range: WEEK })
-    const userContent = await buildWorkSummaryMaterial({ journal, selection })
+    const userContent = buildWorkSummaryMaterial(selection)
 
     expect(userContent).toBe(
       `# ${formatDayRange('2026-03-09', '2026-03-12')}\n` +
@@ -372,7 +373,7 @@ describe('buildWorkSummaryMaterial', () => {
     })
 
     const selection = await selectWorkSummary({ journal, range: WEEK })
-    const userContent = await buildWorkSummaryMaterial({ journal, selection })
+    const userContent = buildWorkSummaryMaterial(selection)
 
     expect(userContent).toContain(
       `## Completed\n### Mon 9 Mar\n- [x] water the plants (occurrence 2026-03-09 09:00)\n### Wed 11 Mar\n- [x] chase the invoice`,
@@ -392,7 +393,7 @@ describe('buildWorkSummaryMaterial', () => {
     clock.set(new Date('2026-03-12T09:00:00')) // …and the parent now stands overdue on Tuesday's.
 
     const selection = await selectWorkSummary({ journal, range: WEEK })
-    const userContent = await buildWorkSummaryMaterial({ journal, selection })
+    const userContent = buildWorkSummaryMaterial(selection)
 
     // The same Task Description twice is correct and deliberate: the kept
     // occurrence is work done, while the Task itself carries on.
@@ -414,7 +415,7 @@ describe('buildWorkSummaryMaterial', () => {
     await journal.createTask('unscheduled')
 
     const selection = await selectWorkSummary({ journal, range: MONDAY })
-    const userContent = await buildWorkSummaryMaterial({ journal, selection })
+    const userContent = buildWorkSummaryMaterial(selection)
 
     expect(userContent).toBe(
       `# ${formatDayRange('2026-03-09', '2026-03-09')}\n` +
@@ -422,6 +423,38 @@ describe('buildWorkSummaryMaterial', () => {
         `\n## Completed\n- [x] kept monday\n` +
         `\n## Currently open\n- [ ] unscheduled`,
     )
+  })
+
+  it('describes the captured selection when Notes change afterwards', async () => {
+    const { journal, clock } = await journalAt('2026-03-12T09:00:00')
+
+    clock.set(new Date('2026-03-10T09:00:00'))
+    const note = await journal.capture('doomed note')
+    const kept = await journal.createTask('kept')
+    await journal.completeTask(kept.id)
+    clock.set(new Date('2026-03-12T09:00:00'))
+
+    const selected = await selectWorkSummary({ journal, range: WEEK })
+    // Deleted straight from the journal, with no change announced: the
+    // captured selection still describes what was on screen.
+    await journal.delete(note!.id)
+
+    expect(workSummaryRefuses(selected)).toBe(false)
+    expect(buildWorkSummaryMaterial(selected)).toContain('doomed note')
+
+    // A fresh selection describes the journal as it stands now.
+    const refreshed = await selectWorkSummary({ journal, range: WEEK })
+    expect(buildWorkSummaryMaterial(refreshed)).not.toContain('doomed note')
+    expect(buildWorkSummaryMaterial(refreshed)).toContain('- [x] kept')
+  })
+
+  it('reads an empty selection as empty', async () => {
+    const { journal } = await journalAt('2026-03-12T09:00:00')
+
+    const selected = await selectWorkSummary({ journal, range: WEEK })
+
+    expect(workSummaryRefuses(selected)).toBe(true)
+    expect(buildWorkSummaryMaterial(selected)).toBe('')
   })
 })
 
