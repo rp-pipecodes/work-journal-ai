@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Journal } from './journal'
 import { fixedClock } from './testing/database'
 import { fakeDesktop } from '../platform/testing/desktop'
-import { createStandupPostSession } from './standup-post-session'
+import { createWorkSummarySession } from './work-summary-session'
 
-describe('Standup Post session startup', () => {
+describe('Work Summary session startup', () => {
   it('stops every subscription across a start-stop-start lifecycle', async () => {
     const desktop = fakeDesktop()
     const installed: Array<() => void> = []
@@ -21,7 +21,7 @@ describe('Standup Post session startup', () => {
     desktop.onWindowFocused = subscribe
     desktop.onSystemWoke = subscribe
 
-    const session = createStandupPostSession({
+    const session = createWorkSummarySession({
       journal: Promise.resolve({
         notesForFilter: async () => [],
         completedTasks: async () => [],
@@ -30,6 +30,7 @@ describe('Standup Post session startup', () => {
       } as unknown as Journal),
       desktop,
       clock: fixedClock('2026-03-12T09:00:00'),
+      range: { from: '2026-03-09', to: '2026-03-12' },
       onChange: vi.fn(),
     })
 

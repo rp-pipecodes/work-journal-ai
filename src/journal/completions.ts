@@ -1,8 +1,8 @@
 /**
  * The work kept as Markdown bullets, shared by the lossless renderings that
- * name it — Standup Material and Review Material. Extracted from
- * `standup-post.ts` rather than copied, so the two can never disagree about
- * what one kept commitment reads as.
+ * name it — Work Summary Material and Review Material. One shared reading of
+ * one kept commitment, so the two materials can never disagree about what it
+ * reads as.
  *
  * A Task and a Task Occurrence are different records that read as one set of
  * work kept, so the merge sorts both by completion instant. Ordering is
@@ -11,6 +11,7 @@
  */
 
 import {
+  formatDigestDay,
   formatSlot,
   journalDayFor,
   scheduleOf,
@@ -50,7 +51,7 @@ export function taskBullet(task: Task): string {
 /**
  * One kept Task Occurrence as the model hears it: always checked, because
  * the record is a completion — the checkbox is the occurrence's, never the
- * parent Task's, which carries on and is rendered only under Still to do.
+ * parent Task's, which carries on and is rendered only under Currently open.
  * The Task Description comes from the parent riding along in the selection,
  * and the slot is spelled the one way the app spells one, the word
  * `occurrence` matching Export and the glossary.
@@ -105,6 +106,32 @@ export function mergeCompletions({
   })
 
   return merged
+}
+
+/**
+ * The Completed section shared by the lossless renderings that name it —
+ * Review Material and Work Summary Material. Oldest-first bullets,
+ * day-grouped when the range spans more than one day: single-day ranges read
+ * plainly, while wider ones name each day under the same headings the Digest
+ * uses. One function rather than two copies, so the two materials can never
+ * disagree about what completed work reads as.
+ */
+export function renderCompletedSection(
+  completions: CompletionBullet[],
+  dayGrouped: boolean,
+): string {
+  if (!dayGrouped) {
+    return `## Completed\n${completions.map((one) => one.bullet).join('\n')}`
+  }
+
+  const groups = groupCompletionsByDay(completions)
+  const grouped = groups
+    .map(
+      (group) =>
+        `### ${formatDigestDay(group.journalDay)}\n${group.bullets.join('\n')}`,
+    )
+    .join('\n')
+  return `## Completed\n${grouped}`
 }
 
 /**

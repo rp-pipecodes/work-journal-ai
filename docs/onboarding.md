@@ -34,7 +34,7 @@ Manual replay starts at the introduction and shows current saved values and stat
 
 Explain what remains unavailable, offer retry, and always allow continuation. Preserve successful changes and distinguish configured, skipped, and needs-attention states.
 
-Saving Model Access does not automatically send a request or claim verified connectivity. Explain that connectivity has not been verified; the first explicitly requested Standup Post exercises it. A dedicated connection test is outside this issue.
+Saving Model Access does not automatically send a request or claim verified connectivity. Explain that connectivity has not been verified; the first explicitly requested Work Summary exercises it. A dedicated connection test is outside this issue.
 
 ## Implementation constraints found in the existing code
 

@@ -59,13 +59,13 @@ describe('the Main Window', () => {
       within(sidebar())
         .getAllByRole('button')
         .map((button) => button.textContent),
-    ).toEqual(['History', 'Tasks', 'Standup Post', 'Settings'])
+    ).toEqual(['History', 'Tasks', 'Work Summary', 'Settings'])
   })
 
   it('puts every section a Tab away, as an ordinary button', async () => {
     await showMainWindow({ captured: [MONDAY] })
 
-    for (const name of ['History', 'Tasks', 'Standup Post', 'Settings']) {
+    for (const name of ['History', 'Tasks', 'Work Summary', 'Settings']) {
       const section = within(sidebar()).getByRole('button', { name })
       // Nothing takes the section out of the tab order or rebinds a key to
       // reach it: the sidebar is a short list of named places.
@@ -101,10 +101,10 @@ describe('the section the Main Window opens on', () => {
     ).toBe('page')
   })
 
-  it('lands on Standup Post when the Entry Point names it', async () => {
-    await showMainWindow({ captured: [MONDAY], section: 'standup-post' })
+  it('lands on Work Summary when the Entry Point names it', async () => {
+    await showMainWindow({ captured: [MONDAY], section: 'work-summary' })
 
-    await showsStandupPost()
+    await showsWorkSummary()
   })
 
   it('is History when the Entry Point named none', async () => {
@@ -278,7 +278,7 @@ describe('switching sections', () => {
     expect(screen.getByText('Monday')).toBeTruthy()
   })
 
-  it('does not touch History’s Filter when Standup Post is opened', async () => {
+  it('does not touch History’s Filter when Work Summary is opened', async () => {
     const user = userEvent.setup()
     await showMainWindow({
       captured: [MONDAY, { at: '2026-03-11T10:00:00', body: 'Wednesday' }],
@@ -290,16 +290,16 @@ describe('switching sections', () => {
     const narrowed = days().textContent
 
     await user.click(
-      within(sidebar()).getByRole('button', { name: 'Standup Post' }),
+      within(sidebar()).getByRole('button', { name: 'Work Summary' }),
     )
-    await showsStandupPost()
+    await showsWorkSummary()
     await user.click(within(sidebar()).getByRole('button', { name: 'History' }))
     await showsHistory()
 
     expect(days().textContent).toBe(narrowed)
   })
 
-  it('keeps a generated Standup Post through a trip to History and back', async () => {
+  it('keeps a generated Work Summary through a trip to History and back', async () => {
     const user = userEvent.setup()
     await showMainWindow({
       // The last capture is what leaves the journal's clock on today, so
@@ -316,22 +316,22 @@ describe('switching sections', () => {
     })
 
     await user.click(
-      within(sidebar()).getByRole('button', { name: 'Standup Post' }),
+      within(sidebar()).getByRole('button', { name: 'Work Summary' }),
     )
-    await showsStandupPost()
+    await showsWorkSummary()
     await user.click(await screen.findByRole('button', { name: 'Generate' }))
-    await screen.findByText('The standup post the model wrote.')
+    await screen.findByText('The work summary the model wrote.')
 
     await user.click(within(sidebar()).getByRole('button', { name: 'History' }))
     await showsHistory()
     await user.click(
-      within(sidebar()).getByRole('button', { name: 'Standup Post' }),
+      within(sidebar()).getByRole('button', { name: 'Work Summary' }),
     )
-    await showsStandupPost()
+    await showsWorkSummary()
 
     // Nothing was persisted and nothing was lost: the post lives as long as
     // the Main Window that generated it, and the section kept it.
-    expect(screen.getByText('The standup post the model wrote.')).toBeTruthy()
+    expect(screen.getByText('The work summary the model wrote.')).toBeTruthy()
   })
 
   it('opens Settings from a missing Model Access failure', async () => {
@@ -345,9 +345,9 @@ describe('switching sections', () => {
     })
 
     await user.click(
-      within(sidebar()).getByRole('button', { name: 'Standup Post' }),
+      within(sidebar()).getByRole('button', { name: 'Work Summary' }),
     )
-    await showsStandupPost()
+    await showsWorkSummary()
     await user.click(await screen.findByRole('button', { name: 'Generate' }))
 
     // Model Access is not configured: the line points at Settings, and the
@@ -362,7 +362,7 @@ describe('switching sections', () => {
 
     // The refusal happened before anything was asked: the Model Access line
     // is the view's own, and the call never had a chance to spend.
-    expect(desktop.standupRequests).toEqual([])
+    expect(desktop.workSummaryRequests).toEqual([])
   })
 
   it('leaves a Nudge waiting on History, with nothing on the sidebar', async () => {
@@ -379,7 +379,7 @@ describe('switching sections', () => {
     // Nothing on screen says so while Tasks View is showing: the sidebar is a
     // list of places, not a set of counters.
     expect(nudge()).toBeUndefined()
-    expect(sidebar().textContent).toBe('HistoryTasksStandup PostSettings')
+    expect(sidebar().textContent).toBe('HistoryTasksWork SummarySettings')
 
     await user.click(within(sidebar()).getByRole('button', { name: 'History' }))
     await expect.poll(() => nudge()?.textContent).toContain('A new Note on')
@@ -1033,7 +1033,7 @@ describe('Meeting Import during Onboarding', () => {
   ) {
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     await screen.findByRole('heading', {
-      name: 'Write Standup Posts with a model?',
+      name: 'Summarize your work with a model?',
     })
     await user.click(screen.getByRole('button', { name: 'Open History' }))
   }
@@ -1183,7 +1183,7 @@ describe('Meeting Import during Onboarding', () => {
     // the Model Access step opens and the saves stand.
     await user.click(screen.getByRole('button', { name: 'Skip this step' }))
     await screen.findByRole('heading', {
-      name: 'Write Standup Posts with a model?',
+      name: 'Summarize your work with a model?',
     })
     expect(desktop.stored.importMeetings).toBe(true)
     expect(desktop.stored.importCalendars).toEqual(['work'])
@@ -1335,7 +1335,7 @@ describe('Model Access during Onboarding', () => {
       await screen.findByRole('button', { name: 'Continue' }),
     )
     await screen.findByRole('heading', {
-      name: 'Write Standup Posts with a model?',
+      name: 'Summarize your work with a model?',
     })
     return user
   }
@@ -1438,15 +1438,15 @@ describe('Model Access during Onboarding', () => {
     await expect.poll(() => desktop.apiKey).toBe('sk-a-real-key')
     await user.click(screen.getByRole('button', { name: 'Open History' }))
     await showsHistory()
-    expect(desktop.standupRequests).toEqual([])
+    expect(desktop.workSummaryRequests).toEqual([])
 
-    // The only request is the explicitly asked-for Standup Post.
+    // The only request is the explicitly asked-for Work Summary.
     await user.click(
-      within(sidebar()).getByRole('button', { name: 'Standup Post' }),
+      within(sidebar()).getByRole('button', { name: 'Work Summary' }),
     )
-    await showsStandupPost()
+    await showsWorkSummary()
     await user.click(await screen.findByRole('button', { name: 'Generate' }))
-    await expect.poll(() => desktop.standupRequests).toHaveLength(1)
+    await expect.poll(() => desktop.workSummaryRequests).toHaveLength(1)
   })
 
   it('says partial configuration stays needs-attention and still finishes', async () => {
@@ -1461,7 +1461,7 @@ describe('Model Access during Onboarding', () => {
     // claiming Model Access is configured or the endpoint works.
     fireEvent.change(modelField(), { target: { value: 'llama3.1' } })
     expect(await screen.findByText(/add an API Key/)).toBeTruthy()
-    expect(desktop.standupRequests).toEqual([])
+    expect(desktop.workSummaryRequests).toEqual([])
 
     // Partial configuration never blocks the way on: the step finishes.
     await user.click(screen.getByRole('button', { name: 'Open History' }))
@@ -1572,7 +1572,7 @@ describe('Model Access during Onboarding', () => {
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     await screen.findByRole('heading', {
-      name: 'Write Standup Posts with a model?',
+      name: 'Summarize your work with a model?',
     })
 
     // The step reads the saved answers back — never the secret itself — and
@@ -1587,7 +1587,7 @@ describe('Model Access during Onboarding', () => {
     expect(await screen.findByRole('button', { name: 'Clear' })).toBeTruthy()
     expect(document.body.textContent).not.toContain('sk-from-an-earlier-run')
     expect(desktop.prompted).toBe(false)
-    expect(desktop.standupRequests).toEqual([])
+    expect(desktop.workSummaryRequests).toEqual([])
   })
 
   it('reaches History with every optional setup step skipped', async () => {
@@ -1611,7 +1611,7 @@ describe('Model Access during Onboarding', () => {
     expect(desktop.stored.importMeetings ?? false).toBe(false)
     expect(desktop.stored.model ?? '').toBe('')
     expect(desktop.apiKey).toBe(null)
-    expect(desktop.standupRequests).toEqual([])
+    expect(desktop.workSummaryRequests).toEqual([])
   })
 })
 
@@ -2207,8 +2207,8 @@ async function showMainWindow({
     await screen.findByRole('navigation', { name: 'Sections' })
   } else if (section === 'settings') {
     await screen.findByText('Note Hotkey')
-  } else if (section === 'standup-post') {
-    await screen.findByRole('heading', { name: 'Standup Post' })
+  } else if (section === 'work-summary') {
+    await screen.findByRole('heading', { name: 'Work Summary' })
   } else if (onboarding === 'unfinished') {
     // A fresh installation opens on the introduction, not on a section.
     await screen.findByRole('heading', { name: 'Welcome to Work Journal' })
@@ -2254,10 +2254,10 @@ async function showsSettings(): Promise<void> {
   await expect.poll(sectionOnScreen).toBe('settings')
 }
 
-/** Standup Post is ready once its date header is on screen. */
-async function showsStandupPost(): Promise<void> {
-  await screen.findByRole('heading', { name: 'Standup Post' })
-  await expect.poll(sectionOnScreen).toBe('standup-post')
+/** Work Summary is ready once its date header is on screen. */
+async function showsWorkSummary(): Promise<void> {
+  await screen.findByRole('heading', { name: 'Work Summary' })
+  await expect.poll(sectionOnScreen).toBe('work-summary')
 }
 
 /**

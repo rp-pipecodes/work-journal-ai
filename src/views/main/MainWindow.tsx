@@ -5,7 +5,7 @@ import OnScreenContext from '@/components/on-screen-context'
 import type { AppSettings } from '@/settings/app-settings'
 import HistoryView from '@/views/history/HistoryView'
 import SettingsView from '@/views/settings/SettingsView'
-import StandupPostView from '@/views/standup-post/StandupPostView'
+import WorkSummaryView from '@/views/work-summary/WorkSummaryView'
 import TasksView from '@/views/tasks/TasksView'
 import OnboardingView from '@/views/onboarding/OnboardingView'
 import SectionSidebar from './SectionSidebar'
@@ -255,11 +255,11 @@ export default function MainWindow({
         />
       </Section>
       <Section
-        section="standup-post"
-        on={!sectionsOffScreen && section === 'standup-post'}
+        section="work-summary"
+        on={!sectionsOffScreen && section === 'work-summary'}
         onScreen={showing}
       >
-        <StandupPostView
+        <WorkSummaryView
           desktop={desktop}
           settings={settings}
           journal={journal}

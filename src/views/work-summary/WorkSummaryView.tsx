@@ -12,32 +12,40 @@ import {
   MenuTrigger,
 } from '@/components/ui/menu'
 import { Toaster } from '@/components/ui/sonner'
-import { formatJournalDay, type Clock, type Journal } from '@/journal/journal'
 import {
-  createStandupPostSession,
-  type StandupPostState,
-} from '@/journal/standup-post-session'
+  formatDayRange,
+  journalDayFor,
+  rangeForPreset,
+  type Clock,
+  type DayRange,
+  type Journal,
+} from '@/journal/journal'
 import {
-  buildStandupMaterial,
-  standupPostRefuses,
-  type StandupPostSelection,
-} from '@/journal/standup-post'
-import type { Desktop, StandupFailure } from '@/platform/desktop'
+  createWorkSummarySession,
+  type WorkSummaryState,
+} from '@/journal/work-summary-session'
+import {
+  buildWorkSummaryMaterial,
+  workSummaryRefuses,
+  type WorkSummarySelection,
+} from '@/journal/work-summary'
+import type { Desktop, WorkSummaryFailure } from '@/platform/desktop'
 import type { AppSettings } from '@/settings/app-settings'
 
 /**
- * The prose a model writes from yesterday's Notes and the Tasks that still
- * stand, read before it is copied — and, beside Generate, the Standup
- * Material itself, copyable with no key, no network and no waiting (see
- * docs/adr/0031-standup-material-is-a-second-lossless-rendering.md). The
- * material is read by the session; the post itself is this view's — it lives
- * as long as the Main Window that showed it, Generate again replaces it, and
- * nothing of it is ever persisted.
+ * The prose a model writes from this week's accomplishments and the current
+ * commitments, read before it is copied — and, beside Generate, the Work
+ * Summary Material itself, copyable with no key, no network and no waiting
+ * (see
+ * docs/adr/0041-work-summary-combines-a-selected-period-with-current-commitments.md).
+ * The material is read by the session; the summary itself is this view's — it
+ * lives as long as the Main Window that showed it, Generate again replaces
+ * it, and nothing of it is ever persisted.
  *
  * The model call is made from Rust so the API Key never enters this window —
  * see docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md.
  */
-export default function StandupPostView({
+export default function WorkSummaryView({
   desktop,
   settings,
   journal,
@@ -54,28 +62,46 @@ export default function StandupPostView({
    */
   onOpenSettings: () => void
 }) {
-  const [state, setState] = useState<StandupPostState>({ state: 'loading' })
-  const [session] = useState(() =>
-    createStandupPostSession({ journal, desktop, clock, onChange: setState }),
+  const [state, setState] = useState<WorkSummaryState>({ state: 'loading' })
+  // The settled range this section is about: the This-week preset — Monday
+  // through today — fixed once when the Main Window opens. View-owned state,
+  // since a surface holding only its own controls keeps them in React: it
+  // survives navigating to another section and back, and a closed window
+  // discards it with everything else. Later refreshes re-read the data, never
+  // the range.
+  const [range] = useState<DayRange>(() =>
+    rangeForPreset('this-week', journalDayFor(clock.now())),
   )
-  // The post on screen: what the model wrote, and which model wrote it — the
-  // latter so a replacement post can say so. Nothing else about a call is
-  // kept, and nothing here is persisted.
-  const [post, setPost] = useState<{ markdown: string; model: string } | null>(null)
+  const [session] = useState(() =>
+    createWorkSummarySession({
+      journal,
+      desktop,
+      clock,
+      range,
+      onChange: setState,
+    }),
+  )
+  // The summary on screen: what the model wrote, and which model wrote it —
+  // the latter so a replacement summary can say so. Nothing else about a call
+  // is kept, and nothing here is persisted.
+  const [summary, setSummary] = useState<{
+    markdown: string
+    model: string
+  } | null>(null)
   // The last copy's claim, said twice — a toast for whoever is looking, and
   // a live region for whoever is not — and naming its subject in the button's
   // own words. One claim, not one per copy: each landed copy replaces the
   // last, so there is never an older claim waiting behind it to be
-  // re-announced. A yesterday claim is held as the selection it was made
+  // re-announced. A material claim is held as the selection it was made
   // for, so it retires itself the moment the session pushes another: focus,
   // wake, a journal or Task change, and the midnight rollover all re-read
-  // the selection, and a claim about yesterday that re-read may have
-  // replaced is not true anymore. A post claim has no selection behind it —
-  // the prose lives here — so this view is its only retire path besides a
-  // failed copy: Generate replacing the prose.
+  // the selection, and a claim about material that re-read may have
+  // replaced is not true anymore. A summary claim has no selection behind
+  // it — the prose lives here — so this view is its only retire path besides
+  // a failed copy: Generate replacing the prose.
   const [copyClaim, setCopyClaim] = useState<{
     subject: Subject
-    selection: StandupPostSelection | null
+    selection: WorkSummarySelection | null
     count: number
   } | null>(null)
   // What the one live region says, derived, never held: '' until a copy lands
@@ -83,7 +109,7 @@ export default function StandupPostView({
   // a re-read has made untrue — there is no state to forget to clear.
   const copyLive =
     copyClaim !== null &&
-    (copyClaim.subject === 'post' ||
+    (copyClaim.subject === 'summary' ||
       (state.state === 'ready' &&
         copyClaim.selection === state.selection))
       ? copyClaim
@@ -93,9 +119,10 @@ export default function StandupPostView({
   // The model being asked, while a call is in flight. Naming it is the whole
   // point: ten silent seconds read as broken without it.
   const [pending, setPending] = useState<string | null>(null)
-  // Why there is no post, when there is not — one of the few kinds the call
-  // answers with, rendered as one line. A previous post stays on screen.
-  const [failure, setFailure] = useState<StandupFailure | null>(null)
+  // Why there is no summary, when there is not — one of the few kinds the
+  // call answers with, rendered as one line. A previous summary stays on
+  // screen.
+  const [failure, setFailure] = useState<WorkSummaryFailure | null>(null)
   // The chevron menu is portalled out of the section, so it leaves the screen
   // with this view rather than being hidden with it. Nothing is copied by
   // closing it.
@@ -121,7 +148,7 @@ export default function StandupPostView({
   /**
    * Spends the call. The material was read when the section opened; what is
    * sent is that selection's own Digest and Tasks, so the model hears exactly
-   * what the section showed. Only a day with neither half is refused, and it
+   * what the section showed. Only a week with neither half is refused, and it
    * is refused here, before anything could be spent.
    */
   async function generate(): Promise<void> {
@@ -141,28 +168,28 @@ export default function StandupPostView({
         return
       }
 
-      if (standupPostRefuses(state.selection)) return
+      if (workSummaryRefuses(state.selection)) return
 
       setPending(stored.model)
-      const response = await desktop.generateStandupPost({
+      const response = await desktop.generateWorkSummary({
         baseUrl: stored.modelBaseUrl,
         model: stored.model,
         // The user's prompt, or the shipped one whenever nothing of theirs is
         // stored — `readSettings` resolves a cleared field to the default, so
         // a model is never asked under an empty system prompt.
-        systemPrompt: stored.standupPrompt,
-        userContent: await buildStandupMaterial({
+        systemPrompt: stored.workSummaryPrompt,
+        userContent: await buildWorkSummaryMaterial({
           journal: await journal,
           selection: state.selection,
         }),
       })
 
       if (response.state === 'generated') {
-        setPost({ markdown: response.markdown, model: stored.model })
-        // A new post retires the copy claim with the prose it was about —
-        // and only that one: a yesterday claim outlives the prose.
+        setSummary({ markdown: response.markdown, model: stored.model })
+        // A new summary retires the copy claim with the prose it was about —
+        // and only that one: a material claim outlives the prose.
         setCopyClaim((claim) =>
-          claim !== null && claim.subject === 'post' ? null : claim,
+          claim !== null && claim.subject === 'summary' ? null : claim,
         )
       } else {
         setFailure(response.failure)
@@ -172,7 +199,7 @@ export default function StandupPostView({
       // this window's side only — a settings file that would not open, a
       // journal read that failed — so it says so rather than blaming the
       // network.
-      console.error('could not ask for a Standup Post', error)
+      console.error('could not ask for a Work Summary', error)
       setFailure({ kind: 'local' })
     } finally {
       inFlight.current = false
@@ -211,7 +238,7 @@ export default function StandupPostView({
    */
   function claimCopy(
     subject: Subject,
-    selection: StandupPostSelection | null,
+    selection: WorkSummarySelection | null,
     copied: boolean,
   ): void {
     setCopyClaim((claim) =>
@@ -222,7 +249,7 @@ export default function StandupPostView({
             count:
               claim !== null &&
               claim.subject === subject &&
-              (subject === 'post' || claim.selection === selection)
+              (subject === 'summary' || claim.selection === selection)
                 ? claim.count + 1
                 : 1,
           }
@@ -230,21 +257,25 @@ export default function StandupPostView({
     )
   }
 
-  /** The post onto the clipboard, and a confirmation naming it once there. */
-  async function copyPost(): Promise<void> {
-    if (post === null) return
-    const { markdown } = post
+  /** The summary onto the clipboard, and a confirmation naming it once there. */
+  async function copySummary(): Promise<void> {
+    if (summary === null) return
+    const { markdown } = summary
 
-    claimCopy('post', null, await putOnClipboard('post', async () => markdown))
+    claimCopy(
+      'summary',
+      null,
+      await putOnClipboard('summary', async () => markdown),
+    )
   }
 
   /**
-   * Yesterday as Markdown onto the clipboard, and a confirmation naming it
-   * once there. No Model Access is read and no call is made: the Markdown is
-   * built from the selection already on screen, so this works with no key,
-   * no network and no waiting — and stays exactly as live after a post
-   * exists, because the lossless rendering is there precisely when the prose
-   * turns out to be wrong.
+   * This week's material as Markdown onto the clipboard, and a confirmation
+   * naming it once there. No Model Access is read and no call is made: the
+   * Markdown is built from the selection already on screen, so this works
+   * with no key, no network and no waiting — and stays exactly as live after
+   * a summary exists, because the lossless rendering is there precisely when
+   * the prose turns out to be wrong.
    */
   async function copyMaterial(): Promise<void> {
     if (state.state !== 'ready') return
@@ -253,10 +284,10 @@ export default function StandupPostView({
     // Claimed for this very selection: any re-read retires it by
     // construction, since a new one is a new object.
     claimCopy(
-      'yesterday',
+      'material',
       selection,
-      await putOnClipboard('yesterday', async () =>
-        buildStandupMaterial({ journal: await journal, selection }),
+      await putOnClipboard('material', async () =>
+        buildWorkSummaryMaterial({ journal: await journal, selection }),
       ),
     )
   }
@@ -265,17 +296,18 @@ export default function StandupPostView({
     <div
       tabIndex={-1}
       onKeyDown={onKeyDown}
-      data-section="standup-post"
+      data-section="work-summary"
       className="relative flex h-screen flex-col bg-background outline-none"
     >
       <WindowTitleBar />
 
       <header className="shrink-0 px-6 py-4">
-        <h1 className="type-section">Standup Post</h1>
+        <h1 className="type-section">Work Summary</h1>
         <p className="pt-1 type-meta text-muted-foreground">
-          Prose a model writes from what you did and what you still owe, for
-          you to read and then paste — or yesterday as Markdown, with no key,
-          no network and no waiting.
+          Prose a model writes from this week&apos;s accomplishments and your
+          current commitments, for you to read and then use — or the
+          week&apos;s material as Markdown, with no key, no network and no
+          waiting.
         </p>
       </header>
 
@@ -288,7 +320,7 @@ export default function StandupPostView({
 
         {state.state === 'unreadable' && (
           <p role="alert" className="type-meta text-destructive">
-            Yesterday could not be read.
+            This week could not be read.
           </p>
         )}
 
@@ -301,7 +333,7 @@ export default function StandupPostView({
                 size="sm"
                 onClick={() => void generate()}
                 disabled={
-                  pending !== null || standupPostRefuses(state.selection)
+                  pending !== null || workSummaryRefuses(state.selection)
                 }
               >
                 <SparklesIcon data-icon="inline-start" />
@@ -309,24 +341,25 @@ export default function StandupPostView({
               </Button>
 
               {/*
-                The one copy control: yesterday's notes and tasks as Markdown
+                The one copy control: this week's notes and tasks as Markdown
                 — what the user pastes when there is no Model Access, the
                 endpoint is down, or the prose came back wrong — and, once
-                generated, the post itself in the menu. A split button rather
-                than two: copying is a default with an escape hatch rather
-                than a decision every time. The primary is always yesterday:
-                the copy that works with no key, no network and no waiting,
-                so the button never changes identity under the reader.
-                Refused under the same gate as Generate, which is a day with
-                nothing in either half, not anything about the model.
+                generated, the summary itself in the menu. A split button
+                rather than two: copying is a default with an escape hatch
+                rather than a decision every time. The primary is always the
+                material: the copy that works with no key, no network and no
+                waiting, so the button never changes identity under the
+                reader. Refused under the same gate as Generate, which is a
+                week with nothing in either half, not anything about the
+                model.
               */}
               <CopySplit
-                postExists={post !== null}
-                yesterdayRefused={standupPostRefuses(state.selection)}
+                summaryExists={summary !== null}
+                materialRefused={workSummaryRefuses(state.selection)}
                 open={copyMenuOpen}
                 onOpenChange={setCopyMenuOpen}
-                onCopyYesterday={() => void copyMaterial()}
-                onCopyPost={() => void copyPost()}
+                onCopyMaterial={() => void copyMaterial()}
+                onCopySummary={() => void copySummary()}
               />
 
               {/*
@@ -354,11 +387,11 @@ export default function StandupPostView({
               <FailureLine failure={failure} onOpenSettings={onOpenSettings} />
             )}
 
-            {post !== null && (
+            {summary !== null && (
               <section className="flex flex-col gap-2">
-                <h2 className="type-section">Written by {post.model}</h2>
+                <h2 className="type-section">Written by {summary.model}</h2>
                 <div className="rounded-md border border-border bg-card px-4 py-3 whitespace-pre-wrap type-body">
-                  {post.markdown}
+                  {summary.markdown}
                 </div>
               </section>
             )}
@@ -372,26 +405,30 @@ export default function StandupPostView({
 }
 
 /**
- * What the section is about to send: yesterday's date and the counts for both
- * halves. Always on screen, so the user sees what a call would spend before
- * spending it — and a day with neither half says so here, which is what makes
- * the Generate button's refusal read as an explanation rather than a mystery.
+ * What the section is about to send: this week's range and the counts for
+ * both halves. Always on screen, so the user sees what a call would spend
+ * before spending it — and a week with neither half says so here, which is
+ * what makes the Generate button's refusal read as an explanation rather than
+ * a mystery.
  *
- * Task Occurrences completed yesterday are counted on their own line rather
- * than folded into Completed Tasks: a Task Occurrence is not a Completed Task
- * and never joins them, so two record types that behave differently are two
- * counts.
+ * Task Occurrences completed in the range are counted on their own line
+ * rather than folded into Completed Tasks: a Task Occurrence is not a
+ * Completed Task and never joins them, so two record types that behave
+ * differently are two counts.
  */
-function MaterialSummary({ selection }: { selection: StandupPostSelection }) {
+function MaterialSummary({ selection }: { selection: WorkSummarySelection }) {
   return (
     <div className="flex flex-col gap-6">
       <p className="type-meta text-muted-foreground">
-        Yesterday: {formatJournalDay(selection.yesterday)}
+        {`This week: ${formatDayRange(selection.from, selection.to)}`}
       </p>
 
-      <section aria-labelledby="standup-yesterday-heading" className="flex flex-col gap-2">
-        <h2 id="standup-yesterday-heading" className="type-section">
-          Yesterday
+      <section
+        aria-labelledby="work-summary-accomplishments-heading"
+        className="flex flex-col gap-2"
+      >
+        <h2 id="work-summary-accomplishments-heading" className="type-section">
+          This week
         </h2>
         <p className="type-meta text-muted-foreground">
           {count(selection.notes.length, 'Note')}
@@ -404,16 +441,19 @@ function MaterialSummary({ selection }: { selection: StandupPostSelection }) {
         </p>
       </section>
 
-      <section aria-labelledby="standup-open-heading" className="flex flex-col gap-2">
-        <h2 id="standup-open-heading" className="type-section">
-          Still to do
+      <section
+        aria-labelledby="work-summary-open-heading"
+        className="flex flex-col gap-2"
+      >
+        <h2 id="work-summary-open-heading" className="type-section">
+          Currently open
         </h2>
         <p className="type-meta text-muted-foreground">
           {count(selection.openTasks.length, 'Open Task')}
         </p>
       </section>
 
-      {standupPostRefuses(selection) && (
+      {workSummaryRefuses(selection) && (
         <p className="type-section text-muted-foreground">Nothing to say yet.</p>
       )}
     </div>
@@ -421,7 +461,7 @@ function MaterialSummary({ selection }: { selection: StandupPostSelection }) {
 }
 
 /**
- * Why there is no post, as one line — the few kinds the call answers with,
+ * Why there is no summary, as one line — the few kinds the call answers with,
  * each with its own words. The two whose fix lives in Settings carry the
  * way there — a missing half of Model Access, and a Base URL the API Key
  * must not travel over; the rest name what happened and leave the retry to
@@ -431,7 +471,7 @@ function FailureLine({
   failure,
   onOpenSettings,
 }: {
-  failure: StandupFailure
+  failure: WorkSummaryFailure
   onOpenSettings: () => void
 }) {
   return (
@@ -454,10 +494,10 @@ function FailureLine({
  * here says the app will try again; the user deciding to click Generate is
  * the retry, and the one who may spend the call.
  */
-function describeFailure(failure: StandupFailure): string {
+function describeFailure(failure: WorkSummaryFailure): string {
   switch (failure.kind) {
     case 'local':
-      return 'Could not ask for a Standup Post. Try again.'
+      return 'Could not ask for a Work Summary. Try again.'
     case 'model-access':
       return 'Model Access is not configured. Open Settings to add a Base URL, a Model and an API Key.'
     case 'https-required':
@@ -485,43 +525,43 @@ function count(value: number, noun: string): string {
 
 /**
  * The section's one copy control: a split button whose primary is always
- * yesterday's notes and tasks — the copy that works with no key, no network
- * and no waiting — and whose chevron menu holds the post once one exists.
+ * this week's material — the copy that works with no key, no network
+ * and no waiting — and whose chevron menu holds the summary once one exists.
  * One visible button rather than two copy buttons on one screen, and one
  * whose identity never changes under the reader.
  */
 function CopySplit({
-  postExists,
-  yesterdayRefused,
+  summaryExists,
+  materialRefused,
   open,
   onOpenChange,
-  onCopyYesterday,
-  onCopyPost,
+  onCopyMaterial,
+  onCopySummary,
 }: {
-  postExists: boolean
-  yesterdayRefused: boolean
+  summaryExists: boolean
+  materialRefused: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
-  onCopyYesterday: () => void
-  onCopyPost: () => void
+  onCopyMaterial: () => void
+  onCopySummary: () => void
 }) {
-  const postRuleId = useId()
+  const summaryRuleId = useId()
   return (
     <div className="flex shrink-0 items-center">
       <Button
         variant="outline"
         size="sm"
         className="rounded-r-none border-r-0"
-        onClick={onCopyYesterday}
-        disabled={yesterdayRefused}
+        onClick={onCopyMaterial}
+        disabled={materialRefused}
       >
         <ClipboardCopyIcon data-icon="inline-start" />
-        Copy yesterday
+        Copy material
       </Button>
       {/*
         A real menu rather than a popover with buttons: arrow keys,
-        typeahead and focus management come with it. The post row carries
-        its reason as a group hint beneath the item while there is no post
+        typeahead and focus management come with it. The summary row carries
+        its reason as a group hint beneath the item while there is no summary
         to copy, so the item's own name stays exactly what it does.
       */}
       <Menu open={open} onOpenChange={onOpenChange}>
@@ -540,19 +580,19 @@ function CopySplit({
         <MenuContent align="end" className="w-64">
           <MenuGroup className="flex flex-col gap-1">
             <MenuItem
-              onClick={() => onCopyPost()}
-              disabled={!postExists}
-              aria-describedby={!postExists ? postRuleId : undefined}
+              onClick={() => onCopySummary()}
+              disabled={!summaryExists}
+              aria-describedby={!summaryExists ? summaryRuleId : undefined}
             >
               <ClipboardCopyIcon data-icon="inline-start" />
-              Copy post
+              Copy summary
             </MenuItem>
-            {!postExists && (
+            {!summaryExists && (
               <p
-                id={postRuleId}
+                id={summaryRuleId}
                 className="px-2 pb-1 type-micro text-muted-foreground"
               >
-                Generate a post first.
+                Generate a summary first.
               </p>
             )}
           </MenuGroup>
@@ -568,27 +608,27 @@ function CopySplit({
  * from this one subject, so the toast and the live region beside the button
  * cannot drift apart.
  */
-type Subject = 'post' | 'yesterday'
+type Subject = 'summary' | 'material'
 
 /**
- * What yesterday's copy is: the button says "yesterday" for brevity, but the
- * confirmation says what that word covers — "yesterday" alone reads as when
- * the copy happened rather than what landed.
+ * What the material copy is: the button says "material" for brevity, but the
+ * confirmation says what that word covers — "material" alone reads as
+ * nothing the user would recognize.
  */
-const YESTERDAY = "yesterday's notes and tasks" as const
+const MATERIAL = "this week's notes and tasks" as const
 
 /** The one sentence a landed copy says, wherever it says it. */
 function landed(subject: Subject): string {
-  return subject === 'post'
-    ? 'Copied post to the clipboard.'
-    : `Copied ${YESTERDAY} to the clipboard.`
+  return subject === 'summary'
+    ? 'Copied summary to the clipboard.'
+    : `Copied ${MATERIAL} to the clipboard.`
 }
 
 /** The one sentence a failed copy says, wherever it says it. */
 function failed(subject: Subject): string {
-  return subject === 'post'
-    ? 'Could not copy post.'
-    : `Could not copy ${YESTERDAY}.`
+  return subject === 'summary'
+    ? 'Could not copy summary.'
+    : `Could not copy ${MATERIAL}.`
 }
 
 /**

@@ -15,7 +15,7 @@ import {
   writeImportMeetings,
   writeModel,
   writeModelBaseUrl,
-  writeStandupPrompt,
+  writeWorkSummaryPrompt,
   writeStartAtLogin,
   type Settings,
   type SettingsStore,
@@ -120,11 +120,11 @@ export interface AppSettings {
   /** Takes the API Key out of the Keychain. Announced the same way. */
   clearApiKey(): Promise<void>
   /**
-   * The prompt a Standup Post is written under. Stored the same way, and for
-   * the same reason: nothing but the window it was typed in is looking at it,
-   * and whatever reads it next reads it when it needs it.
+   * The preferences a Work Summary is written under. Stored the same way, and
+   * for the same reason: nothing but the window it was typed in is looking at
+   * it, and whatever reads it next reads it when it needs it.
    */
-  saveStandupPrompt(standupPrompt: string): Promise<void>
+  saveWorkSummaryPrompt(workSummaryPrompt: string): Promise<void>
 }
 
 /**
@@ -348,8 +348,8 @@ export function createAppSettings(desktop: Desktop): AppSettings {
       announceModelAccess(save === apiKeySaves, { keySet: false })
     },
 
-    async saveStandupPrompt(standupPrompt) {
-      await writeStandupPrompt(await store(), standupPrompt)
+    async saveWorkSummaryPrompt(workSummaryPrompt) {
+      await writeWorkSummaryPrompt(await store(), workSummaryPrompt)
     },
   }
 }

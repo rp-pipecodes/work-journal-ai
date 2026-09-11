@@ -64,37 +64,42 @@ export interface Settings {
    */
   model: string
   /**
-   * The system prompt a Standup Post is written under, as the user's.
-   * Plain text in this store rather than a secret in the Keychain: a prompt
-   * is voice, not a credential — and a consequence of the model call, not
-   * something only Rust may touch. A cleared field reads back as the shipped
-   * prompt, not as an empty one — see `readSettings`.
+   * The user's preferences for the voice and structure of a Work Summary, as
+   * their own. Plain text in this store rather than a secret in the Keychain:
+   * a prompt is voice, not a credential — and a consequence of the model call,
+   * not something only Rust may touch. A cleared field reads back as the
+   * shipped prompt, not as an empty one — see `readSettings`. It never
+   * redefines which records a summary describes: that is the section's
+   * selection, not this setting.
    */
-  standupPrompt: string
+  workSummaryPrompt: string
 }
 
 /** Where Model Access points before the user points it anywhere else. */
 export const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 
 /**
- * The system prompt a Standup Post is written under, as shipped — the value
- * `readSettings` falls back to while the Standup Prompt setting holds nothing
- * of the user's, and the one Restore Default puts back: see issue #133.
- * Written blind of the actual chat group, so it states the four assumptions
- * #56 settled on: two labelled sections, `#project` names kept, first person,
- * nothing stated that is absent from the input, and the input's language.
+ * The preferences a Work Summary is written under, as shipped — the value
+ * `readSettings` falls back to while the Work Summary Prompt setting holds
+ * nothing of the user's, and the one Restore Default puts back. It asks for a
+ * personal assessment of the selected period's accomplishments and the current
+ * commitments, with inferred connections qualified as interpretations and no
+ * unsolicited priorities or next steps — while saying only what the input
+ * supports, so the prose stays grounded however the voice is customized.
  */
-export const DEFAULT_STANDUP_PROMPT = `You are writing a standup post for the user to paste into a chat group.
+export const DEFAULT_WORK_SUMMARY_PROMPT = `You are writing a personal work summary for the user, from the work records given.
 
-Write in the first person, as the user would, in the same language as the input.
+Summarize what was accomplished in the selected period, and connect related work across Notes and completed Tasks.
 
-Structure the post in two labelled sections: what was done yesterday, and what is planned or still to do today.
+Present currently open commitments separately from what was accomplished in the selected period: they are open now, not a record of what was open then.
 
-Keep #project names exactly as they appear in the input.
+If either half of the input is empty — no accomplishments in the period, or no current commitments — say so explicitly rather than inventing work.
 
-Say only what the input supports: state nothing that is not in it.
+Say only what the input supports, and mark anything inferred or connected across records as an interpretation rather than a recorded fact.
 
-Keep it brief and natural, ready to paste.`
+Offer no priorities, no next steps, and no assessment of importance or urgency.
+
+Write in the first person, in the same language as the input. Keep it brief and natural, ready to read back.`
 
 export const DEFAULT_SETTINGS: Settings = {
   startAtLogin: false,
@@ -102,7 +107,7 @@ export const DEFAULT_SETTINGS: Settings = {
   importCalendars: [],
   modelBaseUrl: OPENAI_BASE_URL,
   model: '',
-  standupPrompt: DEFAULT_STANDUP_PROMPT,
+  workSummaryPrompt: DEFAULT_WORK_SUMMARY_PROMPT,
 }
 
 /**
@@ -119,8 +124,13 @@ const IMPORT_CALENDARS_KEY = 'importCalendars'
  */
 const MODEL_BASE_URL_KEY = 'modelBaseUrl'
 const MODEL_KEY = 'model'
-/** The prompt a Standup Post is written under. A plain setting, like the rest. */
-const STANDUP_PROMPT_KEY = 'standupPrompt'
+/**
+ * The preferences a Work Summary is written under. A plain setting, like the
+ * rest. A leftover `standupPrompt` from before Work Summary replaced the
+ * Standup Post is ignored: the old purpose is gone, so old instructions are
+ * never carried forward — see issue #238.
+ */
+const WORK_SUMMARY_PROMPT_KEY = 'workSummaryPrompt'
 
 /**
  * Every setting at once, with a default wherever the store is silent or holds
@@ -134,14 +144,14 @@ export async function readSettings(store: SettingsStore): Promise<Settings> {
     importCalendars,
     modelBaseUrl,
     model,
-    standupPrompt,
+    workSummaryPrompt,
   ] = await Promise.all([
     store.get<unknown>(START_AT_LOGIN_KEY),
     store.get<unknown>(IMPORT_MEETINGS_KEY),
     store.get<unknown>(IMPORT_CALENDARS_KEY),
     store.get<unknown>(MODEL_BASE_URL_KEY),
     store.get<unknown>(MODEL_KEY),
-    store.get<unknown>(STANDUP_PROMPT_KEY),
+    store.get<unknown>(WORK_SUMMARY_PROMPT_KEY),
   ])
 
   return {
@@ -165,13 +175,13 @@ export async function readSettings(store: SettingsStore): Promise<Settings> {
         : DEFAULT_SETTINGS.modelBaseUrl,
     model: typeof model === 'string' ? model : DEFAULT_SETTINGS.model,
     // Empty means the default, not silence: a model asked nothing does not
-    // write a standup post, and a cleared field must read as the shipped
+    // write a work summary, and a cleared field must read as the shipped
     // prompt — the same fallback a store that says nothing gets. A prompt
     // that is all whitespace is a cleared one.
-    standupPrompt:
-      typeof standupPrompt === 'string' && standupPrompt.trim() !== ''
-        ? standupPrompt
-        : DEFAULT_SETTINGS.standupPrompt,
+    workSummaryPrompt:
+      typeof workSummaryPrompt === 'string' && workSummaryPrompt.trim() !== ''
+        ? workSummaryPrompt
+        : DEFAULT_SETTINGS.workSummaryPrompt,
   }
 }
 
@@ -192,16 +202,16 @@ export async function writeModel(
 }
 
 /**
- * The prompt a Standup Post is written under, kept as typed. A cleared field
- * is written too — the default into which it is read is the store's answer
- * to "nothing was entered" — and Restore Default writes the shipped prompt
- * back whole.
+ * The preferences a Work Summary is written under, kept as typed. A cleared
+ * field is written too — the default into which it is read is the store's
+ * answer to "nothing was entered" — and Restore Default writes the shipped
+ * prompt back whole.
  */
-export async function writeStandupPrompt(
+export async function writeWorkSummaryPrompt(
   store: SettingsStore,
-  standupPrompt: string,
+  workSummaryPrompt: string,
 ): Promise<void> {
-  await store.set(STANDUP_PROMPT_KEY, standupPrompt)
+  await store.set(WORK_SUMMARY_PROMPT_KEY, workSummaryPrompt)
 }
 
 /** Whether meetings are swept at all. Both answers are the user's. */

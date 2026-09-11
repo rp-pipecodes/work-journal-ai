@@ -7,7 +7,7 @@ mod frontmost;
 mod hotkey;
 mod keychain;
 mod onboarding;
-mod standup;
+mod work_summary;
 
 use alerts::{Permission, TaskAlert, TaskAlertCompletion};
 use calendar::{Access, CalendarEvent, CalendarInfo};
@@ -37,7 +37,7 @@ const NEW_TASK_MENU_ITEM: &str = "new-task";
 
 const VIEW_NOTES_MENU_ITEM: &str = "view-notes";
 const VIEW_TASKS_MENU_ITEM: &str = "view-tasks";
-const VIEW_STANDUP_POST_MENU_ITEM: &str = "view-standup-post";
+const VIEW_WORK_SUMMARY_MENU_ITEM: &str = "view-work-summary";
 const COPY_YESTERDAY_DIGEST_MENU_ITEM: &str = "copy-yesterday-digest";
 const SETTINGS_MENU_ITEM: &str = "settings";
 const MAIN_SETTINGS_MENU_ITEM: &str = "main-settings";
@@ -63,11 +63,11 @@ const MAIN_WINDOW: &str = "main";
 
 /// The sections of the Main Window an Entry Point here can name. Must match
 /// the members of `MainSection` in `src/platform/desktop.ts` — `HISTORY_SECTION`,
-/// `TASKS_SECTION`, `STANDUP_POST_SECTION` and `SETTINGS_SECTION` — as
+/// `TASKS_SECTION`, `WORK_SUMMARY_SECTION` and `SETTINGS_SECTION` — as
 /// `src/platform/desktop-rust.test.ts` checks.
 const HISTORY_SECTION: &str = "history";
 const TASKS_SECTION: &str = "tasks";
-const STANDUP_POST_SECTION: &str = "standup-post";
+const WORK_SUMMARY_SECTION: &str = "work-summary";
 const SETTINGS_SECTION: &str = "settings";
 
 /// Where the settings live. Must match `SETTINGS_FILE` in
@@ -361,7 +361,7 @@ pub fn run() {
             api_key_set,
             save_api_key,
             clear_api_key,
-            generate_standup_post,
+            generate_work_summary,
             automatic_backups,
             backup_journal,
             reveal_backups,
@@ -977,7 +977,7 @@ fn show_presence(app: &tauri::AppHandle, presence: Option<Presence>) {
 }
 
 /// Opens the Main Window on Settings, building it if it is not already open.
-/// The Tray Menu reaches it here; a Standup Post showing a Model Access
+/// The Tray Menu reaches it here; a Work Summary showing a Model Access
 /// failure links there from inside the window, where the section switch is its
 /// own host's — no command crosses the boundary for a trip the sidebar already
 /// makes.
@@ -1657,44 +1657,44 @@ fn clear_api_key() -> Result<(), String> {
     keychain::clear()
 }
 
-/// Asks the model to write a Standup Post. The webview sent only where the
+/// Asks the model to write a Work Summary. The webview sent only where the
 /// model is, which one, and what it should hear; the Key is read here, from
-/// the Keychain, and never travels back — see `standup.rs` and
+/// the Keychain, and never travels back — see `work_summary.rs` and
 /// docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md.
 ///
 /// Only the Keychain is this side's business: whether the Base URL and the
 /// Model are there at all is settings validation, which lives in TypeScript
 /// — see ADR 0026 — with one deliberate exception: the transport the Key is
-/// allowed to travel on is refused here, in `standup::generate`, because a
+/// allowed to travel on is refused here, in `work_summary::generate`, because a
 /// settings file edited by hand bypasses a view-layer check. Off the main
 /// thread twice over: the Keychain can put an
 /// authorization prompt in front of the read, and the call itself is allowed
 /// 60 seconds. A failure is an answer like any other — one of the few kinds
-/// `StandupFailure` names — so the section can say it back as a line. No
+/// `WorkSummaryFailure` names — so the section can say it back as a line. No
 /// retry is attempted: a model call is billable, and a silent retry spends
 /// the user's money twice for one click.
 #[tauri::command(async)]
-async fn generate_standup_post(
-    request: standup::StandupPostRequest,
-) -> standup::StandupPostResponse {
+async fn generate_work_summary(
+    request: work_summary::WorkSummaryRequest,
+) -> work_summary::WorkSummaryResponse {
     let api_key = match keychain::get() {
         Ok(key) if !key.trim().is_empty() => key,
         // No key is the same refusal as a missing half of Model Access: the
         // call is refused before it can spend anything.
         Ok(_) => {
-            return standup::StandupPostResponse::Failed {
-                failure: standup::StandupFailure::ModelAccess,
+            return work_summary::WorkSummaryResponse::Failed {
+                failure: work_summary::WorkSummaryFailure::ModelAccess,
             };
         }
         // The Keychain itself refused — locked, or a prompt denied.
         Err(_) => {
-            return standup::StandupPostResponse::Failed {
-                failure: standup::StandupFailure::Keychain,
+            return work_summary::WorkSummaryResponse::Failed {
+                failure: work_summary::WorkSummaryFailure::Keychain,
             };
         }
     };
 
-    standup::generate(request, &api_key).await
+    work_summary::generate(request, &api_key).await
 }
 
 /// Puts today's Captured Note count beside the menu bar glyph. What it says is
@@ -2194,10 +2194,10 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         MenuItem::with_id(app, VIEW_NOTES_MENU_ITEM, "View Notes", true, None::<&str>)?;
     let view_tasks =
         MenuItem::with_id(app, VIEW_TASKS_MENU_ITEM, "View Tasks", true, None::<&str>)?;
-    let view_standup_post = MenuItem::with_id(
+    let view_work_summary = MenuItem::with_id(
         app,
-        VIEW_STANDUP_POST_MENU_ITEM,
-        "View Standup Post",
+        VIEW_WORK_SUMMARY_MENU_ITEM,
+        "Work Summary",
         true,
         None::<&str>,
     )?;
@@ -2224,7 +2224,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             &new_task,
             &view_notes,
             &view_tasks,
-            &view_standup_post,
+            &view_work_summary,
             &settings,
             &readback_separator,
             &copy_yesterday,
@@ -2259,7 +2259,7 @@ fn build_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             NEW_TASK_MENU_ITEM => start_task_creation_window(app),
             VIEW_NOTES_MENU_ITEM => open_main_window(app, Some(HISTORY_SECTION)),
             VIEW_TASKS_MENU_ITEM => open_main_window(app, Some(TASKS_SECTION)),
-            VIEW_STANDUP_POST_MENU_ITEM => open_main_window(app, Some(STANDUP_POST_SECTION)),
+            VIEW_WORK_SUMMARY_MENU_ITEM => open_main_window(app, Some(WORK_SUMMARY_SECTION)),
             COPY_YESTERDAY_DIGEST_MENU_ITEM => copy_yesterday_digest(app),
             SETTINGS_MENU_ITEM => open_settings(app),
             QUIT_MENU_ITEM => app.exit(0),

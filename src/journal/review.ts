@@ -1,13 +1,13 @@
 /**
  * Review Material: the Filter's Notes and the work completed in the Filter's
  * days as one lossless Markdown document — the third lossless rendering,
- * beside the Digest and Standup Material. It embeds the Filter's Digest
+ * beside the Digest and Work Summary Material. It embeds the Filter's Digest
  * verbatim and adds a Completed section, so the two can never disagree about
  * the Filter's Notes. See `CONTEXT.md` and
  * docs/adr/0034-review-material-is-a-third-lossless-rendering.md.
  *
  * Retrospective only: completed Tasks and completed Task Occurrences, never
- * Open Tasks — that axis belongs to Standup Material. No model call, no
+ * Open Tasks — that axis belongs to Work Summary Material. No model call, no
  * network, no waiting; the prose written from this document is #162's Review
  * Brief.
  *
@@ -17,8 +17,8 @@
  */
 
 import {
+  dayInRange,
   formatDayRange,
-  formatDigestDay,
   journalDayFor,
   plural,
   type CompletedOccurrence,
@@ -27,7 +27,7 @@ import {
   type Journal,
   type Task,
 } from './journal'
-import { groupCompletionsByDay, mergeCompletions } from './completions'
+import { mergeCompletions, renderCompletedSection } from './completions'
 
 /** Everything Review Material is built from, read from the journal at once. */
 export interface ReviewSelection {
@@ -101,12 +101,17 @@ export async function selectReviewCompletions({
   return {
     completedTasks: completedTasks.filter(
       (task) =>
-        task.completedAt !== null && inRange(task.completedAt, filter),
+        task.completedAt !== null &&
+        dayInRange(journalDayFor(new Date(task.completedAt)), filter.from, filter.to),
     ),
     completedOccurrences: completedOccurrences.filter(
       (completed) =>
         completed.occurrence.completedAt !== null &&
-        inRange(completed.occurrence.completedAt, filter),
+        dayInRange(
+          journalDayFor(new Date(completed.occurrence.completedAt)),
+          filter.from,
+          filter.to,
+        ),
     ),
   }
 }
@@ -187,7 +192,7 @@ export function buildReviewMaterial(
   const parts: string[] = [heading]
   if (digest.markdown !== '') parts.push(digest.markdown)
   if (completions.length > 0) {
-    parts.push(renderCompleted(completions, filter.from !== filter.to))
+    parts.push(renderCompletedSection(completions, filter.from !== filter.to))
   }
 
   return {
@@ -195,37 +200,4 @@ export function buildReviewMaterial(
     noteCount: digest.noteCount,
     completionCount: completions.length,
   }
-}
-
-/** Whether a completion instant falls in the Filter's days, inclusively. */
-function inRange(
-  completedAt: string,
-  filter: Filter,
-): boolean {
-  const day = journalDayFor(new Date(completedAt))
-  return day >= filter.from && day <= filter.to
-}
-
-/**
- * The Completed section: oldest-first bullets, day-grouped when the Filter
- * spans more than one day. Single-day ranges read plainly — the heading
- * already says which day — while wider ones name each day under the same
- * headings the Digest uses.
- */
-function renderCompleted(
-  completions: ReturnType<typeof mergeCompletions>,
-  dayGrouped: boolean,
-): string {
-  if (!dayGrouped) {
-    return `## Completed\n${completions.map((one) => one.bullet).join('\n')}`
-  }
-
-  const groups = groupCompletionsByDay(completions)
-  const grouped = groups
-    .map(
-      (group) =>
-        `### ${formatDigestDay(group.journalDay)}\n${group.bullets.join('\n')}`,
-    )
-    .join('\n')
-  return `## Completed\n${grouped}`
 }

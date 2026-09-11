@@ -2677,6 +2677,14 @@ export function rangeForDays(oneEnd: string, otherEnd: string): DayRange {
 }
 
 /**
+ * Whether one Journal Day falls in an inclusive day range. Day labels compare
+ * as strings, so both ends are included and no instant is built.
+ */
+export function dayInRange(day: string, from: string, to: string): boolean {
+  return day >= from && day <= to
+}
+
+/**
  * A named civil-time range relative to today. One-shot: the clock is read when
  * the Preset is chosen, and the result is an ordinary day range — nothing
  * sticky, nothing rolling, and nothing about the Project axis, which a Preset

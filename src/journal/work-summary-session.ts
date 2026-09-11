@@ -1,44 +1,49 @@
 /**
- * Sequencing for the Standup Post section: one read on open, refreshes when
- * Notes or Tasks change, and a rollover when the previous calendar day moves.
- * The view renders what this session delivers; it does not own the
- * coordination.
+ * Sequencing for the Work Summary section: one read on open, refreshes when
+ * Notes or Tasks change, and a rollover when the calendar day moves. The
+ * range is settled by the view when the Main Window opens and stays put for
+ * every read; the view renders what this session delivers, and does not own
+ * the coordination.
  */
 
 import type { Desktop, Unlisten } from '@/platform/desktop'
 import {
   msUntilNextJournalDay,
   type Clock,
+  type DayRange,
   type Journal,
 } from './journal'
 import {
-  selectStandupPost,
-  type StandupPostSelection,
-} from './standup-post'
+  selectWorkSummary,
+  type WorkSummarySelection,
+} from './work-summary'
 
-export type StandupPostState =
+export type WorkSummaryState =
   | { state: 'loading' }
-  | { state: 'ready'; selection: StandupPostSelection }
+  | { state: 'ready'; selection: WorkSummarySelection }
   | { state: 'unreadable' }
 
-export interface StandupPostSession {
+export interface WorkSummarySession {
   /** Starts listening and reads the material for the first time. */
   start(): Promise<void>
   /** Gives up all listeners and the calendar rollover. */
   stop(): void
 }
 
-export function createStandupPostSession({
+export function createWorkSummarySession({
   journal,
   desktop,
   clock,
+  range,
   onChange,
 }: {
   journal: Promise<Journal>
   desktop: Desktop
   clock: Clock
-  onChange: (state: StandupPostState) => void
-}): StandupPostSession {
+  /** The settled range every read selects within — owned by the view. */
+  range: DayRange
+  onChange: (state: WorkSummaryState) => void
+}): WorkSummarySession {
   let running = false
   let rollover: ReturnType<typeof setTimeout> | null = null
   let unlisten: Unlisten[] = []
@@ -54,14 +59,14 @@ export function createStandupPostSession({
 
     try {
       const resolvedJournal = await journal
-      const selection = await selectStandupPost({
+      const selection = await selectWorkSummary({
         journal: resolvedJournal,
-        clock,
+        range,
       })
       if (!running || latestRead !== readTicket) return
       onChange({ state: 'ready', selection })
     } catch (error) {
-      console.error('could not read the Standup Post material', error)
+      console.error('could not read the Work Summary material', error)
       if (running && latestRead === readTicket) onChange({ state: 'unreadable' })
     }
   }

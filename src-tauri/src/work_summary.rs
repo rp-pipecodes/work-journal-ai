@@ -1,4 +1,4 @@
-//! The model call behind a Standup Post: one HTTP request to an
+//! The model call behind a Work Summary: one HTTP request to an
 //! OpenAI-compatible endpoint, and every way it can come back as one of the
 //! few lines the section can say. The API Key never enters the webview — the
 //! command that calls this reads it from the Keychain and hands it straight
@@ -8,7 +8,7 @@
 //! https, or plaintext to this machine's own loopback — see
 //! `transport_allows`.
 //!
-//! Waiting, not streaming: a post cannot be acted on until it is complete, so
+//! Waiting, not streaming: a summary cannot be acted on until it is complete, so
 //! there is one response shape and one 60-second timeout, and nothing else.
 //! No retry is attempted here or anywhere else — a model call is billable,
 //! and a silent retry would spend the user's money twice for one click.
@@ -22,11 +22,11 @@ use serde::Serialize;
 
 /// What the webview asks for. The API Key is deliberately not among these
 /// fields: it is supplied by the command, from the Keychain. Must match
-/// `StandupPostRequest` in `src/platform/desktop.ts`, as
+/// `WorkSummaryRequest` in `src/platform/desktop.ts`, as
 /// `src/platform/desktop-rust.test.ts` checks.
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StandupPostRequest {
+pub struct WorkSummaryRequest {
     /// Any OpenAI-compatible endpoint, exactly as the user typed it.
     pub base_url: String,
     /// Which model to ask, in the endpoint's own words.
@@ -38,12 +38,12 @@ pub struct StandupPostRequest {
 }
 
 /// Why there is no post, as one of the few lines the section can say. Must
-/// match `StandupFailure` in `src/platform/desktop.ts`, as
+/// match `WorkSummaryFailure` in `src/platform/desktop.ts`, as
 /// `src/platform/desktop-rust.test.ts` checks — the tags are deliberately
 /// kebab-case on both sides.
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum StandupFailure {
+pub enum WorkSummaryFailure {
     /// No Base URL, no Model, or no API Key — or a Base URL that is not a
     /// URL at all: the call was refused before it could spend anything, and
     /// the section links to Settings.
@@ -77,22 +77,22 @@ pub enum StandupFailure {
 
 /// The command's answer, as the webview reads it: one shape, success or
 /// failure, so a failure is an answer like any other. Must match
-/// `StandupPostResponse` in `src/platform/desktop.ts`, as
+/// `WorkSummaryResponse` in `src/platform/desktop.ts`, as
 /// `src/platform/desktop-rust.test.ts` checks.
 #[derive(Clone, Serialize)]
 #[serde(tag = "state", rename_all = "kebab-case")]
-pub enum StandupPostResponse {
+pub enum WorkSummaryResponse {
     Generated {
         markdown: String,
     },
     Failed {
-        failure: StandupFailure,
+        failure: WorkSummaryFailure,
     },
 }
 
 /// Asks one OpenAI-compatible endpoint for a post, and answers with the one
 /// shape the webview reads.
-pub async fn generate(request: StandupPostRequest, api_key: &str) -> StandupPostResponse {
+pub async fn generate(request: WorkSummaryRequest, api_key: &str) -> WorkSummaryResponse {
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         // A redirect is another request, so the transport rule holds at every
@@ -114,7 +114,7 @@ pub async fn generate(request: StandupPostRequest, api_key: &str) -> StandupPost
     {
         Ok(client) => client,
         // A client that cannot be built cannot reach anything.
-        Err(_) => return failed(StandupFailure::Offline),
+        Err(_) => return failed(WorkSummaryFailure::Offline),
     };
 
     let url = match chat_url(&request.base_url) {
@@ -141,13 +141,13 @@ pub async fn generate(request: StandupPostRequest, api_key: &str) -> StandupPost
     let status = response.status();
     // The two statuses the app has its own words for, before the catch-all.
     if status == StatusCode::UNAUTHORIZED {
-        return failed(StandupFailure::Unauthorized);
+        return failed(WorkSummaryFailure::Unauthorized);
     }
     if status == StatusCode::TOO_MANY_REQUESTS {
-        return failed(StandupFailure::RateLimited);
+        return failed(WorkSummaryFailure::RateLimited);
     }
     if !status.is_success() {
-        return failed(StandupFailure::Other {
+        return failed(WorkSummaryFailure::Other {
             status: status.as_u16(),
         });
     }
@@ -156,17 +156,17 @@ pub async fn generate(request: StandupPostRequest, api_key: &str) -> StandupPost
     // model, which is the closest thing there is to an empty answer.
     let value = match response.json::<serde_json::Value>().await {
         Ok(value) => value,
-        Err(_) => return failed(StandupFailure::EmptyResponse),
+        Err(_) => return failed(WorkSummaryFailure::EmptyResponse),
     };
 
     let content = value["choices"][0]["message"]["content"]
         .as_str()
         .unwrap_or("");
     if content.trim().is_empty() {
-        return failed(StandupFailure::EmptyResponse);
+        return failed(WorkSummaryFailure::EmptyResponse);
     }
 
-    StandupPostResponse::Generated {
+    WorkSummaryResponse::Generated {
         markdown: content.to_string(),
     }
 }
@@ -180,19 +180,19 @@ pub async fn generate(request: StandupPostRequest, api_key: &str) -> StandupPost
 /// string on the Base URL (an Azure-style `api-version`, a routing token)
 /// rides through to the request and a fragment stays where it belongs
 /// instead of swallowing the appended path.
-fn chat_url(base_url: &str) -> Result<reqwest::Url, StandupFailure> {
+fn chat_url(base_url: &str) -> Result<reqwest::Url, WorkSummaryFailure> {
     let mut url = match reqwest::Url::parse(base_url) {
         Ok(url) => url,
-        Err(_) => return Err(StandupFailure::ModelAccess),
+        Err(_) => return Err(WorkSummaryFailure::ModelAccess),
     };
     if !transport_allows(&url) {
-        return Err(StandupFailure::HttpsRequired);
+        return Err(WorkSummaryFailure::HttpsRequired);
     }
     match url.path_segments_mut() {
         Ok(mut segments) => {
             segments.pop_if_empty().push("chat").push("completions");
         }
-        Err(_) => return Err(StandupFailure::ModelAccess),
+        Err(_) => return Err(WorkSummaryFailure::ModelAccess),
     }
     Ok(url)
 }
@@ -226,11 +226,11 @@ fn transport_allows(url: &reqwest::Url) -> bool {
     }
 }
 
-/// The one request shape sent to the model. A Standup Post is a bounded
+/// The one request shape sent to the model. A Work Summary is a bounded
 /// rewrite of already-structured material, so low reasoning keeps enough
 /// room to reconcile Notes and Tasks without paying the latency and token
 /// cost of GPT-5.6's medium default.
-fn completion_body(request: &StandupPostRequest) -> serde_json::Value {
+fn completion_body(request: &WorkSummaryRequest) -> serde_json::Value {
     serde_json::json!({
         "model": request.model,
         "messages": [
@@ -244,25 +244,25 @@ fn completion_body(request: &StandupPostRequest) -> serde_json::Value {
     })
 }
 
-fn failed(failure: StandupFailure) -> StandupPostResponse {
-    StandupPostResponse::Failed { failure }
+fn failed(failure: WorkSummaryFailure) -> WorkSummaryResponse {
+    WorkSummaryResponse::Failed { failure }
 }
 
 /// A request that never became a response, told apart by what went wrong.
-fn classify(error: reqwest::Error) -> StandupFailure {
+fn classify(error: reqwest::Error) -> WorkSummaryFailure {
     if error.is_timeout() {
-        StandupFailure::Timeout
+        WorkSummaryFailure::Timeout
     } else if error.is_connect() {
-        StandupFailure::Offline
+        WorkSummaryFailure::Offline
     } else if error.is_builder() {
         // A Base URL that is not a URL at all is a configuration problem, and
         // Settings is where it is fixed.
-        StandupFailure::ModelAccess
+        WorkSummaryFailure::ModelAccess
     } else {
         // TLS, redirects, a body that could not be sent: anything else a
         // reachable network can still refuse. Offline is the closest of the
         // few lines there is.
-        StandupFailure::Offline
+        WorkSummaryFailure::Offline
     }
 }
 
@@ -272,10 +272,10 @@ mod tests {
 
     #[test]
     fn the_model_is_asked_with_low_reasoning_effort() {
-        let body = completion_body(&StandupPostRequest {
+        let body = completion_body(&WorkSummaryRequest {
             base_url: "https://api.openai.com/v1".to_string(),
             model: "gpt-5.6-luna".to_string(),
-            system_prompt: "Write a standup post.".to_string(),
+            system_prompt: "Write a work summary.".to_string(),
             user_content: "## Still to do\n- [ ] Ship it".to_string(),
         });
 
@@ -290,30 +290,30 @@ mod tests {
     fn every_failure_kind_serializes_as_the_webview_declares_it() {
         let pairs = [
             (
-                StandupFailure::ModelAccess,
+                WorkSummaryFailure::ModelAccess,
                 r#"{"kind":"model-access"}"#,
             ),
             (
-                StandupFailure::HttpsRequired,
+                WorkSummaryFailure::HttpsRequired,
                 r#"{"kind":"https-required"}"#,
             ),
-            (StandupFailure::Keychain, r#"{"kind":"keychain"}"#),
-            (StandupFailure::Offline, r#"{"kind":"offline"}"#),
+            (WorkSummaryFailure::Keychain, r#"{"kind":"keychain"}"#),
+            (WorkSummaryFailure::Offline, r#"{"kind":"offline"}"#),
             (
-                StandupFailure::Unauthorized,
+                WorkSummaryFailure::Unauthorized,
                 r#"{"kind":"unauthorized"}"#,
             ),
             (
-                StandupFailure::RateLimited,
+                WorkSummaryFailure::RateLimited,
                 r#"{"kind":"rate-limited"}"#,
             ),
-            (StandupFailure::Timeout, r#"{"kind":"timeout"}"#),
+            (WorkSummaryFailure::Timeout, r#"{"kind":"timeout"}"#),
             (
-                StandupFailure::Other { status: 502 },
+                WorkSummaryFailure::Other { status: 502 },
                 r#"{"kind":"other","status":502}"#,
             ),
             (
-                StandupFailure::EmptyResponse,
+                WorkSummaryFailure::EmptyResponse,
                 r#"{"kind":"empty-response"}"#,
             ),
         ];
@@ -341,7 +341,7 @@ mod tests {
         ] {
             assert!(matches!(
                 chat_url(refused),
-                Err(StandupFailure::HttpsRequired)
+                Err(WorkSummaryFailure::HttpsRequired)
             ), "{refused} should be refused");
         }
     }
@@ -371,7 +371,7 @@ mod tests {
         for not_a_url in ["", "api.openai.com/v1"] {
             assert!(matches!(
                 chat_url(not_a_url),
-                Err(StandupFailure::ModelAccess)
+                Err(WorkSummaryFailure::ModelAccess)
             ), "{not_a_url:?} should be ModelAccess");
         }
     }
@@ -409,15 +409,15 @@ mod tests {
     #[test]
     fn the_response_serializes_the_way_the_webview_reads_it() {
         assert_eq!(
-            serde_json::to_string(&StandupPostResponse::Generated {
+            serde_json::to_string(&WorkSummaryResponse::Generated {
                 markdown: "hi".to_string(),
             })
             .unwrap(),
             r#"{"state":"generated","markdown":"hi"}"#
         );
         assert_eq!(
-            serde_json::to_string(&StandupPostResponse::Failed {
-                failure: StandupFailure::Timeout,
+            serde_json::to_string(&WorkSummaryResponse::Failed {
+                failure: WorkSummaryFailure::Timeout,
             })
             .unwrap(),
             r#"{"state":"failed","failure":{"kind":"timeout"}}"#

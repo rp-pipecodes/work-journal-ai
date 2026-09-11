@@ -355,7 +355,7 @@ function Introduction({
         <h2 className="type-section">Read everything back in History</h2>
         <p className="type-body text-muted-foreground">
           History is the notebook in the sidebar: every Note sits under the
-          day it was written, ready to copy into a standup or find again
+          day it was written, ready to copy into a work log or find again
           later.
         </p>
       </section>
@@ -1099,7 +1099,7 @@ function MeetingImportStep({
  * the Base URL and the Model on every keystroke, the Key when Save is pressed.
  * Nothing here sends a model request, and nothing claims the endpoint was
  * tried: saving configuration is not a connection test, the step says the
- * configuration is unverified, and the first explicitly requested Standup Post
+ * configuration is unverified, and the first explicitly requested Work Summary
  * is what exercises it — and a Base URL the Key may not travel to is
  * needs-attention, never configured. A refusal is said plainly with a retry,
  * and never blocks the way on. This is the last setup step, so continuing
@@ -1194,7 +1194,7 @@ function ModelAccessStep({
   // or waiting on a missing part — but never a promise the endpoint can keep.
   // Saving configuration is not a connection test, so a configured line says
   // the endpoint has not been tried — and a Base URL the Key may not travel
-  // to (the rule `src-tauri/src/standup.rs` enforces where the Key would be
+  // to (the rule `src-tauri/src/work_summary.rs` enforces where the Key would be
   // attached) is needs-attention, never configured. The alerts above announce
   // themselves, so while one of them is up this stays quiet — and while the
   // Keychain has not answered, there is nothing truthful to say about a key
@@ -1214,7 +1214,7 @@ function ModelAccessStep({
     if (hasBaseUrl && !modelAccessTransportAllows(modelBaseUrl.trim())) {
       statusText = `The API Key cannot travel to ${modelBaseUrl.trim()} — the Base URL must be https, unless the host is this Mac itself (localhost, 127.0.0.0/8, or ::1). Nothing has been sent.`
     } else if (hasBaseUrl && hasModel && keySet) {
-      statusText = `Standup Post is set to ask ${model.trim()}. Nothing has been sent yet, so this endpoint has not been tried.`
+      statusText = `Work Summary is set to ask ${model.trim()}. Nothing has been sent yet, so this endpoint has not been tried.`
     } else if (!hasModel && !keySet) {
       statusText = 'Model Access is off — everything else in the journal works without it.'
     } else {
@@ -1222,17 +1222,17 @@ function ModelAccessStep({
       if (!hasBaseUrl) missing.push('a Base URL')
       if (!hasModel) missing.push('a Model')
       if (!keySet) missing.push('an API Key')
-      statusText = `A Standup Post needs all three together — add ${listMissing(missing)}.`
+      statusText = `A Work Summary needs all three together — add ${listMissing(missing)}.`
     }
   }
 
   return (
     <>
       <header className="flex flex-col gap-1">
-        <h1 className="type-title">Write Standup Posts with a model?</h1>
+        <h1 className="type-title">Summarize your work with a model?</h1>
         <p className="type-body text-muted-foreground">
-          Optional — a model can write your Standup Post for you to read and
-          paste. Any OpenAI-compatible endpoint works, and you can change it
+          Optional — a model can write your Work Summary for you to read and
+          use. Any OpenAI-compatible endpoint works, and you can change it
           any time in Settings. Notes and Tasks work without it.
         </p>
       </header>
