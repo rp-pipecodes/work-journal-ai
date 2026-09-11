@@ -9,17 +9,15 @@
  */
 
 import {
-  dayInRange,
   formatDayRange,
-  journalDayFor,
   type CompletedOccurrence,
   type DayRange,
   type Digest,
   type Journal,
-  type Note,
   type Task,
 } from './journal'
 import {
+  completionsInRange,
   mergeCompletions,
   renderCompletedSection,
   taskBullet,
@@ -30,8 +28,6 @@ export interface WorkSummarySelection {
   from: string
   /** The last Journal Day of the selected range, inclusive. */
   to: string
-  /** Every Note filed in the range, including Imported Notes. */
-  notes: Note[]
   /**
    * The range's canonical Digest — the Notes half of the material, read with
    * the selection and carried in it. Counts, refusal, generation, and copy
@@ -74,9 +70,8 @@ export async function selectWorkSummary({
   journal: Journal
   range: DayRange
 }): Promise<WorkSummarySelection> {
-  const [notes, digest, completedTasks, completedOccurrences, openTasks] =
+  const [digest, completedTasks, completedOccurrences, openTasks] =
     await Promise.all([
-      journal.notesForFilter({ from, to }),
       journal.digest({ from, to }),
       journal.completedTasks(),
       journal.occurrencesKeptIn({ from, to }),
@@ -86,22 +81,8 @@ export async function selectWorkSummary({
   return {
     from,
     to,
-    notes,
     digest,
-    completedTasks: completedTasks.filter(
-      (task) =>
-        task.completedAt !== null &&
-        dayInRange(journalDayFor(new Date(task.completedAt)), from, to),
-    ),
-    completedOccurrences: completedOccurrences.filter(
-      (completed) =>
-        completed.occurrence.completedAt !== null &&
-        dayInRange(
-          journalDayFor(new Date(completed.occurrence.completedAt)),
-          from,
-          to,
-        ),
-    ),
+    ...completionsInRange({ completedTasks, completedOccurrences, from, to }),
     openTasks,
   }
 }

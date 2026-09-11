@@ -17,9 +17,7 @@
  */
 
 import {
-  dayInRange,
   formatDayRange,
-  journalDayFor,
   plural,
   type CompletedOccurrence,
   type Digest,
@@ -27,7 +25,11 @@ import {
   type Journal,
   type Task,
 } from './journal'
-import { mergeCompletions, renderCompletedSection } from './completions'
+import {
+  completionsInRange,
+  mergeCompletions,
+  renderCompletedSection,
+} from './completions'
 
 /** Everything Review Material is built from, read from the journal at once. */
 export interface ReviewSelection {
@@ -98,22 +100,12 @@ export async function selectReviewCompletions({
     journal.occurrencesKeptIn({ from: filter.from, to: filter.to }),
   ])
 
-  return {
-    completedTasks: completedTasks.filter(
-      (task) =>
-        task.completedAt !== null &&
-        dayInRange(journalDayFor(new Date(task.completedAt)), filter.from, filter.to),
-    ),
-    completedOccurrences: completedOccurrences.filter(
-      (completed) =>
-        completed.occurrence.completedAt !== null &&
-        dayInRange(
-          journalDayFor(new Date(completed.occurrence.completedAt)),
-          filter.from,
-          filter.to,
-        ),
-    ),
-  }
+  return completionsInRange({
+    completedTasks,
+    completedOccurrences,
+    from: filter.from,
+    to: filter.to,
+  })
 }
 
 /** Whether there is nothing to copy: neither Notes nor completions. */

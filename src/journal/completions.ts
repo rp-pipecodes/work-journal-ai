@@ -11,6 +11,7 @@
  */
 
 import {
+  dayInRange,
   formatDigestDay,
   formatSlot,
   journalDayFor,
@@ -132,6 +133,45 @@ export function renderCompletedSection(
     )
     .join('\n')
   return `## Completed\n${grouped}`
+}
+
+/**
+ * Both record types kept within one inclusive day range, by Task Completed
+ * At on the local calendar — Scheduled For and Task Created At are never
+ * substitutes for completion time. Shared by the selections that name kept
+ * work, so Review and Work Summary can never disagree about which completions
+ * fall in a range.
+ */
+export function completionsInRange({
+  completedTasks,
+  completedOccurrences,
+  from,
+  to,
+}: {
+  completedTasks: Task[]
+  completedOccurrences: CompletedOccurrence[]
+  from: string
+  to: string
+}): {
+  completedTasks: Task[]
+  completedOccurrences: CompletedOccurrence[]
+} {
+  return {
+    completedTasks: completedTasks.filter(
+      (task) =>
+        task.completedAt !== null &&
+        dayInRange(journalDayFor(new Date(task.completedAt)), from, to),
+    ),
+    completedOccurrences: completedOccurrences.filter(
+      (completed) =>
+        completed.occurrence.completedAt !== null &&
+        dayInRange(
+          journalDayFor(new Date(completed.occurrence.completedAt)),
+          from,
+          to,
+        ),
+    ),
+  }
 }
 
 /**

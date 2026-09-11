@@ -80,11 +80,10 @@ describe('selectWorkSummary', () => {
 
     expect(selected.from).toBe('2026-03-09')
     expect(selected.to).toBe('2026-03-12')
-    // Newest first, like the History list the same read draws.
-    expect(selected.notes.map((note) => note.body)).toEqual([
-      'today’s note',
-      'monday’s note',
-    ])
+    expect(selected.digest.noteCount).toBe(2)
+    expect(selected.digest.markdown).toContain('monday’s note')
+    expect(selected.digest.markdown).toContain('today’s note')
+    expect(selected.digest.markdown).not.toContain('last week’s note')
   })
 
   it('selects a Monday alone as a single-day range', async () => {
@@ -96,7 +95,8 @@ describe('selectWorkSummary', () => {
 
     expect(selected.from).toBe('2026-03-09')
     expect(selected.to).toBe('2026-03-09')
-    expect(selected.notes.map((note) => note.body)).toEqual(['monday’s note'])
+    expect(selected.digest.noteCount).toBe(1)
+    expect(selected.digest.markdown).toContain('monday’s note')
   })
 
   it('includes Imported Notes filed in the range', async () => {
@@ -115,10 +115,9 @@ describe('selectWorkSummary', () => {
 
     const selected = await selectWorkSummary({ journal, range: WEEK })
 
-    expect(selected.notes.map((note) => note.body)).toEqual([
-      'a captured note',
-      'Weekly sync',
-    ])
+    expect(selected.digest.noteCount).toBe(2)
+    expect(selected.digest.markdown).toContain('a captured note')
+    expect(selected.digest.markdown).toContain('Weekly sync')
   })
 
   it('leaves out a Note refiled out of the range', async () => {
@@ -131,7 +130,8 @@ describe('selectWorkSummary', () => {
 
     const selected = await selectWorkSummary({ journal, range: WEEK })
 
-    expect(selected.notes).toEqual([])
+    expect(selected.digest.noteCount).toBe(0)
+    expect(selected.digest.markdown).toBe('')
   })
 
   it('selects ordinary Tasks by Task Completed At, not Scheduled For or Task Created At', async () => {
@@ -236,7 +236,6 @@ describe('selectWorkSummary', () => {
     expect(selected).toEqual({
       from: '2026-03-09',
       to: '2026-03-12',
-      notes: [],
       digest: { markdown: '', noteCount: 0 },
       completedTasks: [],
       completedOccurrences: [],
@@ -286,7 +285,7 @@ describe('selectWorkSummary', () => {
 
     const selected = await selectWorkSummary({ journal, range: WEEK })
 
-    expect(selected.notes).toEqual([])
+    expect(selected.digest.noteCount).toBe(0)
     expect(selected.completedTasks.map((task) => task.description)).toEqual([
       'kept tuesday',
     ])

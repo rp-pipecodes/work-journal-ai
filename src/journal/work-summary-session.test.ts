@@ -23,7 +23,6 @@ describe('Work Summary session startup', () => {
 
     const session = createWorkSummarySession({
       journal: Promise.resolve({
-        notesForFilter: async () => [],
         digest: async () => ({ markdown: '', noteCount: 0 }),
         completedTasks: async () => [],
         occurrencesKeptIn: async () => [],
