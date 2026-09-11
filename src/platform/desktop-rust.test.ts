@@ -24,7 +24,7 @@ import {
   ONBOARDING_KEY,
   PRACTICE_ENDED_EVENT,
   SECTION_REQUESTED_EVENT,
-  STANDUP_POST_SECTION,
+  WORK_SUMMARY_SECTION,
   SETTINGS_FILE,
   SETTINGS_SECTION,
   SYSTEM_WOKE_EVENT,
@@ -75,7 +75,7 @@ const shared: Record<string, string> = {
   MAIN_WINDOW,
   HISTORY_SECTION,
   TASKS_SECTION,
-  STANDUP_POST_SECTION,
+  WORK_SUMMARY_SECTION,
   SETTINGS_SECTION,
   CAPTURE_SHOWN_EVENT,
   TASK_CREATION_SHOWN_EVENT,
@@ -418,7 +418,7 @@ describe('the commands that can block on a person', () => {
     'clear_api_key',
     // The model call reads the Key — which can sit behind the same prompt —
     // and is then allowed 60 seconds of network.
-    'generate_standup_post',
+    'generate_work_summary',
     // The two that already carry the rule, here so it reads as a rule.
     'request_calendar_access',
     'request_task_alert_permission',
@@ -747,20 +747,20 @@ describe('the restore from a backup', () => {
 })
 
 /**
- * The Standup Post call's wire contract, checked the way the rest of the
+ * The Work Summary call's wire contract, checked the way the rest of the
  * shared names are — by reading both sides' sources, because a drift between
  * them is silent: no error, no failed build, and no symptom except a failure
- * that renders as a blank line. `src-tauri/src/standup.rs` also pins the
+ * that renders as a blank line. `src-tauri/src/work_summary.rs` also pins the
  * exact serialized shapes from its own side; these tests hold the TypeScript
  * half of the same pairs.
  */
-describe('the Standup Post call contract', () => {
-  const standupSource = read('src-tauri/src/standup.rs')
+describe('the Work Summary call contract', () => {
+  const workSummarySource = read('src-tauri/src/work_summary.rs')
   const desktopSource = read(DESKTOP_FILE)
 
   it('spells the failure kinds the same on both sides', () => {
-    const rustKinds = rustVariants(standupSource, 'StandupFailure').map(kebab)
-    const tsKinds = tsUnionKinds(desktopSource, 'StandupFailure')
+    const rustKinds = rustVariants(workSummarySource, 'WorkSummaryFailure').map(kebab)
+    const tsKinds = tsUnionKinds(desktopSource, 'WorkSummaryFailure')
 
     expect(rustKinds).toEqual([
       'model-access',
@@ -780,16 +780,16 @@ describe('the Standup Post call contract', () => {
   })
 
   it('spells the response states the same on both sides', () => {
-    const rustStates = rustVariants(standupSource, 'StandupPostResponse').map(kebab)
-    const tsStates = tsUnionKinds(desktopSource, 'StandupPostResponse')
+    const rustStates = rustVariants(workSummarySource, 'WorkSummaryResponse').map(kebab)
+    const tsStates = tsUnionKinds(desktopSource, 'WorkSummaryResponse')
 
     expect(rustStates).toEqual(['generated', 'failed'])
     expect(tsStates).toEqual(rustStates)
   })
 
   it('names the request fields the same on both sides', () => {
-    const rustFields = rustFieldNames(standupSource, 'StandupPostRequest').map(camel)
-    const tsFields = tsFieldNames(desktopSource, 'StandupPostRequest')
+    const rustFields = rustFieldNames(workSummarySource, 'WorkSummaryRequest').map(camel)
+    const tsFields = tsFieldNames(desktopSource, 'WorkSummaryRequest')
 
     expect(rustFields).toEqual([
       'baseUrl',

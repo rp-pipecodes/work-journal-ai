@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { START_AT_LOGIN_KEY } from '../platform/desktop'
 import { fakeDesktop } from '../platform/testing/desktop'
-import { DEFAULT_STANDUP_PROMPT } from './settings'
+import { DEFAULT_WORK_SUMMARY_PROMPT } from './settings'
 import { createAppSettings, type ModelAccessChange } from './app-settings'
 
 // The settings as a running window has them: the core's rules over the
@@ -343,19 +343,19 @@ describe('Model Access', () => {
   })
 })
 
-describe('the Standup Prompt', () => {
+describe('the Work Summary Prompt', () => {
   it('opens at the shipped prompt until the user has written their own', async () => {
     const stored = await createAppSettings(fakeDesktop()).load()
 
-    expect(stored.standupPrompt).toBe(DEFAULT_STANDUP_PROMPT)
+    expect(stored.workSummaryPrompt).toBe(DEFAULT_WORK_SUMMARY_PROMPT)
   })
 
   it('reads back what was saved', async () => {
     const desktop = fakeDesktop()
     const settings = createAppSettings(desktop)
 
-    await settings.saveStandupPrompt('Write it in pirate speak.')
+    await settings.saveWorkSummaryPrompt('Write it in pirate speak.')
 
-    expect((await settings.load()).standupPrompt).toBe('Write it in pirate speak.')
+    expect((await settings.load()).workSummaryPrompt).toBe('Write it in pirate speak.')
   })
 })

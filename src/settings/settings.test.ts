@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_SETTINGS,
-  DEFAULT_STANDUP_PROMPT,
+  DEFAULT_WORK_SUMMARY_PROMPT,
   OPENAI_BASE_URL,
+  WORK_SUMMARY_GROUNDING,
   readSettings,
   writeImportCalendars,
   writeImportMeetings,
   writeModel,
   writeModelBaseUrl,
-  writeStandupPrompt,
+  writeWorkSummaryPrompt,
   writeStartAtLogin,
+  workSummarySystemPrompt,
   type SettingsStore,
 } from './settings'
 
@@ -44,7 +46,7 @@ describe('readSettings', () => {
       importCalendars: [],
       modelBaseUrl: OPENAI_BASE_URL,
       model: '',
-      standupPrompt: DEFAULT_STANDUP_PROMPT,
+      workSummaryPrompt: DEFAULT_WORK_SUMMARY_PROMPT,
     })
   })
 
@@ -55,7 +57,7 @@ describe('readSettings', () => {
     await writeImportCalendars(store, ['work', 'personal'])
     await writeModelBaseUrl(store, 'http://localhost:11434/v1')
     await writeModel(store, 'llama3.1')
-    await writeStandupPrompt(store, 'Write it in pirate speak.')
+    await writeWorkSummaryPrompt(store, 'Write it in pirate speak.')
 
     expect(await readSettings(store)).toEqual({
       startAtLogin: true,
@@ -63,7 +65,7 @@ describe('readSettings', () => {
       importCalendars: ['work', 'personal'],
       modelBaseUrl: 'http://localhost:11434/v1',
       model: 'llama3.1',
-      standupPrompt: 'Write it in pirate speak.',
+      workSummaryPrompt: 'Write it in pirate speak.',
     })
   })
 
@@ -109,41 +111,116 @@ describe('readSettings', () => {
   })
 })
 
-describe('the Standup Prompt', () => {
-  it('ships with the prompt the previous ticket shipped', async () => {
-    expect(DEFAULT_SETTINGS.standupPrompt).toBe(DEFAULT_STANDUP_PROMPT)
+describe('the Work Summary Prompt', () => {
+  it('ships with the new Work Summary default', async () => {
+    expect(DEFAULT_SETTINGS.workSummaryPrompt).toBe(
+      DEFAULT_WORK_SUMMARY_PROMPT,
+    )
+    // Voice only: a personal summary in the user's language, brief and
+    // natural.
+    expect(DEFAULT_WORK_SUMMARY_PROMPT).toContain('work summary')
+  })
+
+  it('keeps mandatory grounding outside the editable voice', async () => {
+    // Factual/source rules ship separately and compose with any voice, so a
+    // tone-only customization cannot remove them: accomplishments and current
+    // commitments distinguished, empty halves identified rather than invented,
+    // inference qualified, no invented priorities — grounded throughout.
+    expect(WORK_SUMMARY_GROUNDING).toContain('currently open commitments')
+    expect(WORK_SUMMARY_GROUNDING).toContain('empty')
+    expect(WORK_SUMMARY_GROUNDING).toContain(
+      'Say only what the input supports',
+    )
+    expect(
+      workSummarySystemPrompt('Write it in pirate speak.'),
+    ).toContain('Write it in pirate speak.')
+    expect(
+      workSummarySystemPrompt('Write it in pirate speak.'),
+    ).toContain('Say only what the input supports')
   })
 
   it('starts everyone at the shipped prompt rather than at silence', async () => {
     const settings = await readSettings(emptyStore())
 
-    expect(settings.standupPrompt).toBe(DEFAULT_STANDUP_PROMPT)
+    expect(settings.workSummaryPrompt).toBe(DEFAULT_WORK_SUMMARY_PROMPT)
   })
 
   it('treats a cleared field as the shipped prompt, not as an empty one', async () => {
-    // The user can clear the field, and a model asked nothing does not write a
-    // standup post: an empty stored prompt must become the shipped one, not
+    // The user can clear the field, and a model asked nothing does not write
+    // a work summary: an empty stored prompt must become the shipped one, not
     // silence. (A whitespace-only prompt is a cleared one.)
-    const store = emptyStore({ standupPrompt: '' })
+    const store = emptyStore({ workSummaryPrompt: '' })
 
-    expect((await readSettings(store)).standupPrompt).toBe(DEFAULT_STANDUP_PROMPT)
+    expect((await readSettings(store)).workSummaryPrompt).toBe(
+      DEFAULT_WORK_SUMMARY_PROMPT,
+    )
 
-    const blank = emptyStore({ standupPrompt: '   ' })
-    expect((await readSettings(blank)).standupPrompt).toBe(DEFAULT_STANDUP_PROMPT)
+    const blank = emptyStore({ workSummaryPrompt: '   ' })
+    expect((await readSettings(blank)).workSummaryPrompt).toBe(
+      DEFAULT_WORK_SUMMARY_PROMPT,
+    )
   })
 
   it('reads back what was written, verbatim', async () => {
     const store = emptyStore()
     const prompt = 'Write it in pirate speak.'
-    await writeStandupPrompt(store, prompt)
+    await writeWorkSummaryPrompt(store, prompt)
 
-    expect((await readSettings(store)).standupPrompt).toBe(prompt)
+    expect((await readSettings(store)).workSummaryPrompt).toBe(prompt)
   })
 
   it('falls back to the shipped prompt rather than trusting a non-string', async () => {
-    const store = emptyStore({ standupPrompt: { text: 'write a post' } })
+    const store = emptyStore({ workSummaryPrompt: { text: 'write a summary' } })
 
-    expect((await readSettings(store)).standupPrompt).toBe(DEFAULT_STANDUP_PROMPT)
+    expect((await readSettings(store)).workSummaryPrompt).toBe(
+      DEFAULT_WORK_SUMMARY_PROMPT,
+    )
+  })
+
+  it.each([
+    ['the old shipped default', 'You are writing a standup post'],
+    ['a customized old prompt', 'Write it in pirate speak.'],
+    ['a cleared old field', ''],
+    ['a whitespace old field', '   '],
+  ])(
+    'discards a leftover Standup Prompt holding %s, reading the new default',
+    async (_name, standupPrompt) => {
+      // Work Summary replaced the Standup Post, so its old instructions are
+      // never carried forward: whatever the legacy key holds, the new prompt
+      // reads as the shipped one. See issue #238.
+      const store = emptyStore({ standupPrompt })
+
+      expect((await readSettings(store)).workSummaryPrompt).toBe(
+        DEFAULT_WORK_SUMMARY_PROMPT,
+      )
+    },
+  )
+
+  it('keeps a Work Summary customization beside a leftover Standup Prompt', async () => {
+    const store = emptyStore({
+      standupPrompt: 'Write it in pirate speak.',
+      workSummaryPrompt: 'Summarize tersely.',
+    })
+
+    expect((await readSettings(store)).workSummaryPrompt).toBe(
+      'Summarize tersely.',
+    )
+  })
+
+  it('leaves Notes, Tasks, Model Access and unrelated settings intact', async () => {
+    const store = emptyStore({
+      standupPrompt: 'Write it in pirate speak.',
+      model: 'gpt-test',
+      modelBaseUrl: 'https://api.openai.com/v1',
+      startAtLogin: true,
+    })
+
+    const settings = await readSettings(store)
+
+    expect(settings.workSummaryPrompt).toBe(DEFAULT_WORK_SUMMARY_PROMPT)
+    expect(settings.model).toBe('gpt-test')
+    expect(settings.modelBaseUrl).toBe('https://api.openai.com/v1')
+    expect(settings.startAtLogin).toBe(true)
   })
 })
 

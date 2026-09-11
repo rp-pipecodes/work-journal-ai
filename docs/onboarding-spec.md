@@ -29,7 +29,7 @@ Existing installations keep their normal startup experience. Everyone can replay
 17. As a new user, I want one Start at Login invitation within Onboarding, so that a separate first-run question does not compete with the flow.
 18. As a user, I want optional Meeting Import setup to explain permission and calendar selection, so that I choose which calendars contribute Notes.
 19. As a user who refuses calendar permission or selects no calendars, I want to understand why Import is unavailable, so that I can decide whether to retry or continue.
-20. As a user, I want optional Model Access setup, so that I can configure the endpoint, model, and API Key used for a Standup Post.
+20. As a user, I want optional Model Access setup, so that I can configure the endpoint, model, and API Key used for a Work Summary.
 21. As a user saving Model Access, I want no automatic model request, so that setup does not unexpectedly send content or incur a charge.
 22. As a user saving Model Access, I want to know that connectivity remains unverified, so that saved configuration is not mistaken for a working endpoint.
 23. As a user, I want optional features clearly distinguished as configured, skipped, or needing attention, so that I understand what is available.
@@ -61,7 +61,7 @@ Existing installations keep their normal startup experience. Everyone can replay
 - A submitted practice Note is an ordinary Captured Note. Cancellation creates no record. After saving, offer View your note and Continue setup. Viewing opens History on that Note's Journal Day with Project = Any and dismisses Onboarding as navigation away.
 - Explain optional setup failures, allow retry and continuation, and preserve successful changes. Distinguish configured, skipped, and needs-attention states without claiming that saved Model Access proves connectivity.
 - Calendar access is requested through the existing explicit enablement path; selected calendars are still required for Import. Task Alert permission remains tied to the first timed Task save. The API Key remains in the operating system's Keychain.
-- Save Model Access without an automatic request. Explain that it has not been connectivity-tested; the first explicitly requested Standup Post exercises it.
+- Save Model Access without an automatic request. Explain that it has not been connectivity-tested; the first explicitly requested Work Summary exercises it.
 - Display current shortcuts without requiring remapping. Theme customization remains in Settings. No changes to Note or Task record schemas are required by this design; Onboarding persistence belongs with application settings.
 
 ## Testing Decisions
@@ -80,7 +80,7 @@ Use the following testing seams, confirmed for publication with this specificati
 - Mandatory practice, generated sample Notes, or required integrations.
 - Automatic Onboarding for existing installations, recurring prompts after dismissal, or replay that resets settings.
 - A separate Onboarding window, a new Capture implementation, or an additional completion screen.
-- Automatic model requests, a dedicated connection-test feature, or automatic Standup Post generation.
+- Automatic model requests, a dedicated connection-test feature, or automatic Work Summary generation.
 - Upfront Task Alert permission requests, required shortcut customization, or a theme setup step.
 - Remembering the exact interrupted step, transactional rollback of previously saved settings, or changes to existing Note and Task domain behavior.
 

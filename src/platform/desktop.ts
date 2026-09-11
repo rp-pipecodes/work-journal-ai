@@ -34,21 +34,21 @@ export const MAIN_WINDOW = 'main'
  * Menu and a clicked Task Alert both say which they mean. Constants rather than
  * four bare members of the union below, so that a section has a name of its
  * own on this side too and a drift is reported against it — must match
- * `HISTORY_SECTION`, `TASKS_SECTION`, `STANDUP_POST_SECTION` and
+ * `HISTORY_SECTION`, `TASKS_SECTION`, `WORK_SUMMARY_SECTION` and
  * `SETTINGS_SECTION` in
  * `src-tauri/src/lib.rs`, as `src/platform/desktop-rust.test.ts` checks, and
  * the sidebar's own list in `src/views/main/sections.ts`.
  */
 export const HISTORY_SECTION = 'history'
 export const TASKS_SECTION = 'tasks'
-export const STANDUP_POST_SECTION = 'standup-post'
+export const WORK_SUMMARY_SECTION = 'work-summary'
 export const SETTINGS_SECTION = 'settings'
 
 /** A section of the Main Window: one of the four above and nothing else. */
 export type MainSection =
   | typeof HISTORY_SECTION
   | typeof TASKS_SECTION
-  | typeof STANDUP_POST_SECTION
+  | typeof WORK_SUMMARY_SECTION
   | typeof SETTINGS_SECTION
 
 /**
@@ -406,13 +406,13 @@ export interface AutomaticBackups {
 }
 
 /**
- * What a Standup Post call asks for: where the model is, which one, and the
+ * What a Work Summary call asks for: where the model is, which one, and the
  * two turns. The API Key is deliberately not among them — the Rust side
  * supplies it, so it never crosses into the webview. Must match
- * `StandupPostRequest` in `src-tauri/src/standup.rs`, as
+ * `WorkSummaryRequest` in `src-tauri/src/work_summary.rs`, as
  * `src/platform/desktop-rust.test.ts` checks.
  */
-export interface StandupPostRequest {
+export interface WorkSummaryRequest {
   baseUrl: string
   model: string
   systemPrompt: string
@@ -422,20 +422,20 @@ export interface StandupPostRequest {
 /**
  * The model's answer, or why there is none — one shape, so a failure is an
  * answer like any other rather than a rejection the caller has to guess at.
- * Must match `StandupPostResponse` in `src-tauri/src/standup.rs`, as
+ * Must match `WorkSummaryResponse` in `src-tauri/src/work_summary.rs`, as
  * `src/platform/desktop-rust.test.ts` checks.
  */
-export type StandupPostResponse =
+export type WorkSummaryResponse =
   | { state: 'generated'; markdown: string }
-  | { state: 'failed'; failure: StandupFailure }
+  | { state: 'failed'; failure: WorkSummaryFailure }
 
 /**
  * Why there is no post, as one of the few lines the section can say. The
  * first is this side's own — a call that could not even be prepared is not
- * the model's answer; the rest must match `StandupFailure` in
- * `src-tauri/src/standup.rs`, as `src/platform/desktop-rust.test.ts` checks.
+ * the model's answer; the rest must match `WorkSummaryFailure` in
+ * `src-tauri/src/work_summary.rs`, as `src/platform/desktop-rust.test.ts` checks.
  */
-export type StandupFailure =
+export type WorkSummaryFailure =
   | { kind: 'local' }
   | { kind: 'model-access' }
   | { kind: 'https-required' }
@@ -854,7 +854,7 @@ export interface Desktop {
   restart(): Promise<void>
 
   /**
-   * Asks the model to write a Standup Post. The command takes only what the
+   * Asks the model to write a Work Summary. The command takes only what the
    * model needs to hear — the API Key is read from the Keychain by the Rust
    * side and never enters this window; see
    * docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md.
@@ -862,7 +862,7 @@ export interface Desktop {
    * the few lines the section can say rather than as a rejection the caller
    * has to guess at.
    */
-  generateStandupPost(request: StandupPostRequest): Promise<StandupPostResponse>
+  generateWorkSummary(request: WorkSummaryRequest): Promise<WorkSummaryResponse>
 
   /**
    * Puts a short piece of text beside the menu bar glyph. Rendered by the

@@ -41,12 +41,12 @@ Everything else is checked against the release build.
 - [ ] The app launches and stays running with no Dock icon.
 - [ ] `Cmd+Tab` does not list the app.
 - [ ] A tray icon appears in the menu bar.
-- [ ] Clicking the tray icon opens a menu holding **New Note**, **New Task**, **View Notes**, **View Tasks**, **View Standup Post**, **Settings**, a separator, **Copy Yesterday's Notes**, a separator and **Quit** — in that order, and nothing else.
+- [ ] Clicking the tray icon opens a menu holding **New Note**, **New Task**, **View Notes**, **View Tasks**, **Work Summary**, **Settings**, a separator, **Copy Yesterday's Notes**, a separator and **Quit** — in that order, and nothing else.
 - [ ] **New Note** opens a capture window, with the Note Hotkey spelled out beside the item.
 - [ ] **New Task** opens the Task Creation window, with the Task Hotkey spelled out beside the item.
 - [ ] **View Notes** opens the Main Window, showing History.
 - [ ] **View Tasks** opens the Main Window, showing Tasks View; it does not open a second reading window.
-- [ ] **View Standup Post** opens the Main Window on the Standup Post section without spending a model call — no post appears until **Generate** is clicked.
+- [ ] **Work Summary** opens the Main Window on the Work Summary section without spending a model call — no summary appears until **Generate** is clicked.
 - [ ] **Copy Yesterday's Notes** puts yesterday's Notes on the clipboard without opening any window, and with the Main Window already open it leaves History's range exactly where it was.
 - [ ] On a morning with no Notes filed under yesterday, **Copy Yesterday's Notes** leaves the clipboard as it was — paste to confirm the previous contents are still there.
 - [ ] **Settings** opens the Main Window, showing Settings.
@@ -66,7 +66,7 @@ The palette is the point of this section, and the moment to watch is the one the
 ## The Main Window
 
 - [ ] **View Notes** opens one window with a sidebar down the left, History beside it, and the traffic lights over the sidebar's top row rather than over History.
-- [ ] The sidebar names **History**, **Tasks** and **Settings**, and marks History as the section on screen.
+- [ ] The sidebar names **History**, **Tasks**, **Work Summary** and **Settings**, and marks History as the section on screen.
 - [ ] Tabbing into the window reaches **History** in the sidebar, which shows a focus ring; `Space` and `Enter` on it leave History showing, and tabbing on reaches the Filter's own controls.
 - [ ] **View Notes** again, with the window already open, raises that window rather than opening a second one.
 - [ ] Closing the window and opening it again shows History on the most recent day holding Notes, with **Project = Any** — whatever the Filter was left on.
@@ -194,18 +194,18 @@ Run these on a first run — with no `settings.json` — so the defaults are the
 - [ ] Under a named Project or **Unfiled**, that row is disabled with its reason readable beneath it, and clicking it copies nothing and says nothing.
 - [ ] The copy button and its chevron are both gone while a Search is showing, and back once the Search is cleared.
 
-## The Standup Post copy control
+## The Work Summary copy control
 
-The copy control only — what the model writes is Settings' **Standup Prompt** items.
+The copy control only — what the model writes is Settings' **Work Summary Prompt** items.
 
-- [ ] The section shows yesterday's date and a count for each half, one copy button reading **Copy yesterday**, and a chevron beside it.
-- [ ] **Copy yesterday** puts yesterday's Notes, the work completed yesterday and today's Open Tasks on the clipboard, with no model call and no waiting.
-- [ ] Its confirmation names yesterday's notes and tasks — not the bare word "yesterday", which would read as when the copy happened.
-- [ ] Before anything is generated, the chevron menu holds **Copy post**, disabled, with **Generate a post first.** readable beneath it.
-- [ ] After a post is generated, the button still reads **Copy yesterday** — it does not relabel itself — and **Copy post** in the menu is now enabled.
-- [ ] **Copy post** puts the prose on the clipboard, and its confirmation names the post rather than yesterday.
-- [ ] Copy the post, then copy yesterday, then switch to another application and back: the confirmation goes empty and the earlier post confirmation does not reappear.
-- [ ] On a day with nothing in either half, **Copy yesterday** and **Generate** are both disabled.
+- [ ] The section shows this week's range and a count for each half, one copy button reading **Copy material**, and a chevron beside it.
+- [ ] **Copy material** puts this week's Notes, the work completed this week and the current commitments on the clipboard, with no model call and no waiting.
+- [ ] Its confirmation names this week's notes and tasks — not the bare word "material", which would read as nothing the user recognizes.
+- [ ] Before anything is generated, the chevron menu holds **Copy summary**, disabled, with **Generate a summary first.** readable beneath it.
+- [ ] After a summary is generated, the button still reads **Copy material** — it does not relabel itself — and **Copy summary** in the menu is now enabled.
+- [ ] **Copy summary** puts the prose on the clipboard, and its confirmation names the summary rather than the material.
+- [ ] Copy the summary, then copy material, then switch to another application and back: the confirmation goes empty and the earlier summary confirmation does not reappear.
+- [ ] On a week with nothing in either half, **Copy material** and **Generate** are both disabled.
 
 ## Settings
 
@@ -217,7 +217,7 @@ The copy control only — what the model writes is Settings' **Standup Prompt** 
 - [ ] The checkbox afterwards adds and removes the login item, and matches what System Settings shows when the Settings section is re-opened.
 - [ ] Settings shows the exact configured Tauri application version centered at the bottom.
 - [ ] A development build shows a **Dev** label beside that version; a release build shows the version without it.
-- [ ] **Standup Prompt** in Settings opens holding the shipped prompt, with the whole of it reachable: on this machine's WebKit the box is tall enough for the prompt, or the prompt scrolls inside a fixed box — nothing is cut off either way.
+- [ ] **Work Summary Prompt** in Settings opens holding the shipped prompt, with the whole of it reachable: on this machine's WebKit the box is tall enough for the prompt, or the prompt scrolls inside a fixed box — nothing is cut off either way.
 - [ ] Pasting the prompt over itself until it is several times as long never grows the field past its cap: the box stops growing and scrolls inside itself, and **Restore Default** stays put.
 
 ## Capture after midnight

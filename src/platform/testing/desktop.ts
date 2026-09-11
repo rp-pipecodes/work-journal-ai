@@ -15,8 +15,8 @@ import type {
   MainSection,
   OnboardingState,
   PracticeEnded,
-  StandupPostRequest,
-  StandupPostResponse,
+  WorkSummaryRequest,
+  WorkSummaryResponse,
   TaskAlertCompletion,
   TaskAlertPermission,
   Unlisten,
@@ -184,13 +184,13 @@ export interface FakeDesktop extends Desktop {
   updateCheckFails: boolean
   /** Whether installing fails, as it does when the bundle cannot be written. */
   updateInstallFails: boolean
-  /** Every Standup Post call asked for, most recent last. */
-  standupRequests: StandupPostRequest[]
+  /** Every Work Summary call asked for, most recent last. */
+  workSummaryRequests: WorkSummaryRequest[]
   /**
-   * How a Standup Post call answers. Writable, so a test can script a failure
+   * How a Work Summary call answers. Writable, so a test can script a failure
    * or a second generation answering differently.
    */
-  standupPostResponse: StandupPostResponse
+  workSummaryResponse: WorkSummaryResponse
 }
 
 export function fakeDesktop({
@@ -296,8 +296,8 @@ export function fakeDesktop({
     restarts: 0,
     updateCheckFails: false,
     updateInstallFails: false,
-    standupRequests: [],
-    standupPostResponse: { state: 'generated', markdown: GENERATED_POST },
+    workSummaryRequests: [],
+    workSummaryResponse: { state: 'generated', markdown: GENERATED_SUMMARY },
 
     beginCapture: () => captureShown.announce(false),
     showTaskCreation: () => taskCreationShown.announce(undefined),
@@ -574,9 +574,9 @@ export function fakeDesktop({
       desktop.stagedRestores.push(path)
     },
 
-    generateStandupPost: async (request): Promise<StandupPostResponse> => {
-      desktop.standupRequests.push(request)
-      return desktop.standupPostResponse
+    generateWorkSummary: async (request): Promise<WorkSummaryResponse> => {
+      desktop.workSummaryRequests.push(request)
+      return desktop.workSummaryResponse
     },
 
     checkForUpdate: async (): Promise<AvailableUpdate | null> => {
@@ -620,7 +620,7 @@ export function fakeDesktop({
 const UPDATE_SIZE = 20_000_000
 
 /** What the fake model says, distinguishable from anything the user wrote. */
-const GENERATED_POST = 'The standup post the model wrote.'
+const GENERATED_SUMMARY = 'The work summary the model wrote.'
 
 /**
  * A settings store that does not open until the test says so — the fixture

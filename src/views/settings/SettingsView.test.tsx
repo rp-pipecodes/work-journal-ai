@@ -11,7 +11,7 @@ import {
 import ThemeProvider from '@/components/ThemeProvider'
 import { createAppSettings } from '@/settings/app-settings'
 import type { Journal, JournalExport } from '@/journal/journal'
-import { DEFAULT_STANDUP_PROMPT } from '@/settings/settings'
+import { DEFAULT_WORK_SUMMARY_PROMPT } from '@/settings/settings'
 import SettingsView from './SettingsView'
 import { holdFrames } from './testing/frames'
 
@@ -1787,18 +1787,18 @@ describe('save confirmations', () => {
     await expect.poll(() => toasts().join(' | ')).toBe('Calendars saved.')
   })
 
-  it('confirms a Standup Prompt keystroke', async () => {
+  it('confirms a Work Summary Prompt keystroke', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
 
     showSettings(desktop)
 
-    fireEvent.change(await screen.findByLabelText('Standup Prompt'), {
+    fireEvent.change(await screen.findByLabelText('Work Summary Prompt'), {
       target: { value: 'Write it in pirate speak.' },
     })
 
     await expect
       .poll(() => toasts().join(' | '))
-      .toBe('Standup Prompt saved.')
+      .toBe('Work Summary Prompt saved.')
   })
 })
 
@@ -2293,26 +2293,46 @@ describe('Model Access', () => {
   })
 })
 
-describe('the Standup Prompt', () => {
+describe('the Work Summary Prompt', () => {
   it('opens on the shipped prompt, and remembers what is typed', async () => {
     const desktop = fakeDesktop({ stored: { startAtLogin: false } })
 
     showSettings(desktop)
 
-    const prompt = await screen.findByLabelText('Standup Prompt')
+    const prompt = await screen.findByLabelText('Work Summary Prompt')
     // The user starts from the shipped prompt rather than from a blank box.
-    expect((prompt as HTMLTextAreaElement).value).toBe(DEFAULT_STANDUP_PROMPT)
+    expect((prompt as HTMLTextAreaElement).value).toBe(DEFAULT_WORK_SUMMARY_PROMPT)
 
     fireEvent.change(prompt, {
       target: { value: 'Write it in pirate speak.' },
     })
 
-    await expect.poll(() => desktop.stored.standupPrompt).toBe(
+    await expect.poll(() => desktop.stored.workSummaryPrompt).toBe(
       'Write it in pirate speak.',
     )
   })
 
   it('opens on what an earlier run stored', async () => {
+    const desktop = fakeDesktop({
+      stored: {
+        startAtLogin: false,
+        workSummaryPrompt: 'Write it in pirate speak.',
+      },
+    })
+
+    showSettings(desktop)
+
+    const prompt = (await screen.findByLabelText(
+      'Work Summary Prompt',
+    )) as HTMLTextAreaElement
+    // The same value survives a restart: the field opens already holding it.
+    await expect.poll(() => prompt.value).toBe('Write it in pirate speak.')
+  })
+
+  it('opens on the shipped prompt when only a leftover Standup Prompt is stored', async () => {
+    // Work Summary replaced the Standup Post, so old instructions are never
+    // carried forward: a store holding the legacy key opens on the new
+    // shipped default. See issue #238.
     const desktop = fakeDesktop({
       stored: {
         startAtLogin: false,
@@ -2323,37 +2343,36 @@ describe('the Standup Prompt', () => {
     showSettings(desktop)
 
     const prompt = (await screen.findByLabelText(
-      'Standup Prompt',
+      'Work Summary Prompt',
     )) as HTMLTextAreaElement
-    // The same value survives a restart: the field opens already holding it.
-    await expect.poll(() => prompt.value).toBe('Write it in pirate speak.')
+    await expect.poll(() => prompt.value).toBe(DEFAULT_WORK_SUMMARY_PROMPT)
   })
 
   it('puts the shipped prompt back when Restore Default is pressed', async () => {
     const desktop = fakeDesktop({
       stored: {
         startAtLogin: false,
-        standupPrompt: 'Write it in pirate speak.',
+        workSummaryPrompt: 'Write it in pirate speak.',
       },
     })
 
     showSettings(desktop)
 
-    fireEvent.change(await screen.findByLabelText('Standup Prompt'), {
+    fireEvent.change(await screen.findByLabelText('Work Summary Prompt'), {
       target: { value: 'Write it in pirate speak.' },
     })
-    await expect.poll(() => desktop.stored.standupPrompt).toBe(
+    await expect.poll(() => desktop.stored.workSummaryPrompt).toBe(
       'Write it in pirate speak.',
     )
 
     screen.getByRole('button', { name: 'Restore Default' }).click()
 
-    await expect.poll(() => desktop.stored.standupPrompt).toBe(
-      DEFAULT_STANDUP_PROMPT,
+    await expect.poll(() => desktop.stored.workSummaryPrompt).toBe(
+      DEFAULT_WORK_SUMMARY_PROMPT,
     )
     expect(
-      (screen.getByLabelText('Standup Prompt') as HTMLTextAreaElement).value,
-    ).toBe(DEFAULT_STANDUP_PROMPT)
+      (screen.getByLabelText('Work Summary Prompt') as HTMLTextAreaElement).value,
+    ).toBe(DEFAULT_WORK_SUMMARY_PROMPT)
   })
 
   it('treats a cleared field as the shipped prompt, not as silence', async () => {
@@ -2364,11 +2383,11 @@ describe('the Standup Prompt', () => {
 
     showSettings(desktop)
 
-    fireEvent.change(await screen.findByLabelText('Standup Prompt'), {
+    fireEvent.change(await screen.findByLabelText('Work Summary Prompt'), {
       target: { value: '' },
     })
 
-    await expect.poll(() => desktop.stored.standupPrompt).toBe('')
+    await expect.poll(() => desktop.stored.workSummaryPrompt).toBe('')
   })
 
   it('does not put the stored value back over what the user has typed', async () => {
@@ -2380,7 +2399,7 @@ describe('the Standup Prompt', () => {
     const stored: Record<string, unknown> = {
       startAtLogin: false,
       model: 'gpt-stored',
-      standupPrompt: 'Write it in pirate speak.',
+      workSummaryPrompt: 'Write it in pirate speak.',
     }
     let openTheStore = () => {}
     const opened = new Promise<void>((resolve) => {
@@ -2408,7 +2427,7 @@ describe('the Standup Prompt', () => {
     showSettings(desktop)
 
     // The field is on screen at its default while the file is still opening.
-    const prompt = screen.getByLabelText('Standup Prompt') as HTMLTextAreaElement
+    const prompt = screen.getByLabelText('Work Summary Prompt') as HTMLTextAreaElement
     fireEvent.change(prompt, {
       target: { value: 'typed before the file answered' },
     })
@@ -2422,7 +2441,7 @@ describe('the Standup Prompt', () => {
       .toBe('gpt-stored')
 
     expect(prompt.value).toBe('typed before the file answered')
-    expect(stored.standupPrompt).toBe('typed before the file answered')
+    expect(stored.workSummaryPrompt).toBe('typed before the file answered')
   })
 
   it('says when the prompt could not be saved', async () => {
@@ -2440,7 +2459,7 @@ describe('the Standup Prompt', () => {
           return key in stored
         },
         async set(key: string, value: unknown) {
-          if (key === 'standupPrompt' && refusingPrompt) {
+          if (key === 'workSummaryPrompt' && refusingPrompt) {
             throw new Error('the file is read-only')
           }
           stored[key] = value
@@ -2450,20 +2469,20 @@ describe('the Standup Prompt', () => {
 
     showSettings(desktop)
 
-    fireEvent.change(await screen.findByLabelText('Standup Prompt'), {
+    fireEvent.change(await screen.findByLabelText('Work Summary Prompt'), {
       target: { value: 'Write it in pirate speak.' },
     })
     await screen.findByText(/could not be saved/)
 
     // Trying again is what takes the line away.
     refusingPrompt = false
-    fireEvent.change(screen.getByLabelText('Standup Prompt'), {
+    fireEvent.change(screen.getByLabelText('Work Summary Prompt'), {
       target: { value: 'Write it anyway.' },
     })
 
     await expect
       .poll(() => screen.queryAllByRole('alert').length)
       .toBe(0)
-    expect(stored.standupPrompt).toBe('Write it anyway.')
+    expect(stored.workSummaryPrompt).toBe('Write it anyway.')
   })
 })

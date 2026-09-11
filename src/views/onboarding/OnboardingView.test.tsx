@@ -80,7 +80,7 @@ async function atTheModelAccessStep() {
   const user = await atTheMeetingImportStep()
   await user.click(screen.getByRole('button', { name: 'Continue' }))
   await screen.findByRole('heading', {
-    name: 'Write Standup Posts with a model?',
+    name: 'Summarize your work with a model?',
   })
   return user
 }
@@ -231,7 +231,7 @@ describe('the Meeting Import step', () => {
     // Meeting Import is a step of the walk, not the finish: Continue walks
     // on to the Model Access step.
     await user.click(screen.getByRole('button', { name: 'Continue' }))
-    await screen.findByRole('heading', { name: 'Write Standup Posts with a model?' })
+    await screen.findByRole('heading', { name: 'Summarize your work with a model?' })
   })
 
   it('asks macOS for nothing on entering or replaying the step', async () => {
@@ -306,7 +306,7 @@ describe('the Meeting Import step', () => {
     // A refusal never blocks the journal: continuation walks on to Model
     // Access, the last setup step, and finishing there closes the flow.
     await user.click(screen.getByRole('button', { name: 'Continue' }))
-    await screen.findByRole('heading', { name: 'Write Standup Posts with a model?' })
+    await screen.findByRole('heading', { name: 'Summarize your work with a model?' })
     await user.click(screen.getByRole('button', { name: 'Open History' }))
     expect(done).toHaveBeenCalledTimes(1)
   })
@@ -331,7 +331,7 @@ describe('the Meeting Import step', () => {
     expect(desktop.stored.importCalendars ?? []).toEqual([])
 
     await user.click(screen.getByRole('button', { name: 'Continue' }))
-    await screen.findByRole('heading', { name: 'Write Standup Posts with a model?' })
+    await screen.findByRole('heading', { name: 'Summarize your work with a model?' })
     await user.click(screen.getByRole('button', { name: 'Open History' }))
     expect(done).toHaveBeenCalledTimes(1)
   })
@@ -514,7 +514,7 @@ describe('the Meeting Import step', () => {
     // Skip this step is the walk advancing, not the flow dismissed early:
     // the Model Access step opens and the saves stand.
     await user.click(screen.getByRole('button', { name: 'Skip this step' }))
-    await screen.findByRole('heading', { name: 'Write Standup Posts with a model?' })
+    await screen.findByRole('heading', { name: 'Summarize your work with a model?' })
     expect(done).not.toHaveBeenCalled()
     expect(desktop.stored.importMeetings).toBe(true)
     expect(desktop.stored.importCalendars).toEqual(['work'])
@@ -793,17 +793,17 @@ describe('the Model Access step', () => {
 
   it('asks macOS for nothing and sends nothing on entering or finishing', async () => {
     // Entering and finishing make no calendar prompt and no model request:
-    // nothing is sent until a Standup Post is explicitly asked for.
+    // nothing is sent until a Work Summary is explicitly asked for.
     const desktop = fakeDesktop({ stored: {} })
     const { done } = showFlow(desktop)
     const user = await atTheModelAccessStep()
 
     expect(desktop.prompted).toBe(false)
-    expect(desktop.standupRequests).toEqual([])
+    expect(desktop.workSummaryRequests).toEqual([])
 
     await user.click(screen.getByRole('button', { name: 'Open History' }))
     expect(done).toHaveBeenCalledTimes(1)
-    expect(desktop.standupRequests).toEqual([])
+    expect(desktop.workSummaryRequests).toEqual([])
   })
 
   it('saves the Base URL, the Model and the API Key through the existing settings', async () => {
@@ -886,7 +886,7 @@ describe('the Model Access step', () => {
       name: "Add today's meetings to the journal?",
     })
     await user.click(screen.getByRole('button', { name: 'Continue' }))
-    await screen.findByRole('heading', { name: 'Write Standup Posts with a model?' })
+    await screen.findByRole('heading', { name: 'Summarize your work with a model?' })
 
     await expect.poll(() => baseUrlField().value).toBe(
       'http://localhost:11434/v1',
@@ -1046,7 +1046,7 @@ describe('the Model Access step', () => {
       name: "Add today's meetings to the journal?",
     })
     await user.click(screen.getByRole('button', { name: 'Continue' }))
-    await screen.findByRole('heading', { name: 'Write Standup Posts with a model?' })
+    await screen.findByRole('heading', { name: 'Summarize your work with a model?' })
 
     expect(
       await screen.findByText(/the keychain could not be reached/),
@@ -1085,7 +1085,7 @@ describe('the Model Access step', () => {
       name: "Add today's meetings to the journal?",
     })
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    await screen.findByRole('heading', { name: 'Write Standup Posts with a model?' })
+    await screen.findByRole('heading', { name: 'Summarize your work with a model?' })
 
     // The returning mount re-reads, so the saved answers arrive — they are
     // not skipped as if this mount had already read them.
@@ -1138,6 +1138,6 @@ describe('the Model Access step', () => {
 
     await user.click(screen.getByRole('button', { name: 'Skip onboarding' }))
     expect(done).toHaveBeenCalledTimes(1)
-    expect(desktop.standupRequests).toEqual([])
+    expect(desktop.workSummaryRequests).toEqual([])
   })
 })

@@ -8,8 +8,8 @@
 //!
 //! Three questions and no others: is there a key, take this one, and remove
 //! the one that is there. The key itself is never handed back to the webview
-//! — the one place it is ever read is the model call behind a Standup Post,
-//! which runs here in Rust; see `standup.rs` and
+//! — the one place it is ever read is the model call behind a Work Summary,
+//! which runs here in Rust; see `work_summary.rs` and
 //! docs/adr/0026-the-api-key-lives-in-the-keychain-and-rust-makes-the-call.md.
 //!
 //! The keychain can refuse. A locked login keychain, or a prompt the user
@@ -46,7 +46,7 @@ pub fn is_set() -> Result<bool, String> {
 }
 
 /// The key itself, for the one place it is ever read: the model call behind a
-/// Standup Post. It travels no further than the HTTP request it is sent in —
+/// Work Summary. It travels no further than the HTTP request it is sent in —
 /// the webview has no way to ask for it, and this side never hands it back.
 pub fn get() -> Result<String, String> {
     entry()?.get_password().map_err(describe)

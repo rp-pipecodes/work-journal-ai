@@ -57,8 +57,8 @@ import {
   type MainSection,
   type OnboardingState,
   type PracticeEnded,
-  type StandupPostRequest,
-  type StandupPostResponse,
+  type WorkSummaryRequest,
+  type WorkSummaryResponse,
   type TaskAlertCompletion,
   type TaskAlertPermission,
 } from './desktop'
@@ -328,8 +328,8 @@ export function createTauriDesktop(): Desktop {
 
     // The Key stays in the Keychain: only what the model needs to hear crosses
     // to Rust, and the answer comes back as one shape, success or failure.
-    generateStandupPost: (request: StandupPostRequest) =>
-      invoke<StandupPostResponse>('generate_standup_post', { request }),
+    generateWorkSummary: (request: WorkSummaryRequest) =>
+      invoke<WorkSummaryResponse>('generate_work_summary', { request }),
 
     async checkForUpdate(): Promise<AvailableUpdate | null> {
       found = await check()
