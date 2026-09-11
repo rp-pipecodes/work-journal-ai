@@ -1416,10 +1416,13 @@ describe('Work Summary section', () => {
       (screen.getByRole('button', { name: 'Copy material' }) as HTMLButtonElement)
         .disabled,
     ).toBe(true)
+    // And the greyed buttons say why: a read for the new range is in flight.
+    expect(screen.getByText('Reading the journal…')).toBeTruthy()
     expect(desktop.workSummaryRequests).toEqual([])
 
     releaseHeld()
     expect(await screen.findByText('0 Notes')).toBeTruthy()
+    expect(screen.queryByText('Reading the journal…')).toBeNull()
     expect(
       (screen.getByRole('button', { name: 'Generate' }) as HTMLButtonElement)
         .disabled,
@@ -1490,5 +1493,38 @@ describe('Work Summary section', () => {
       await screen.findByText('The selected period could not be read.'),
     ).toBeTruthy()
     expect(desktop.workSummaryRequests).toEqual([])
+  })
+
+  it('keeps paid-for prose on screen when a range move would not read', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await workSummaryAt()
+    await journalWithBothHalves(journal, clock)
+
+    let failNextDigest = false
+    const gated = {
+      ...journal,
+      digest: async (filter: { from: string; to: string }) => {
+        if (failNextDigest) throw new Error('the journal would not open')
+        return journal.digest(filter)
+      },
+    }
+
+    renderWorkSummary({ journal: gated, clock, desktop, settings })
+    await screen.findByText('2 Notes')
+    await user.click(screen.getByRole('button', { name: 'Generate' }))
+    await screen.findByText('The work summary the model wrote.')
+
+    // The move's read throws: the alert says so, but the prose stays — a
+    // range that would not read must not take it with it.
+    failNextDigest = true
+    await user.click(screen.getByRole('button', { name: /^Days / }))
+    await user.click(await screen.findByRole('button', { name: 'Last week' }))
+    expect(
+      await screen.findByText('The selected period could not be read.'),
+    ).toBeTruthy()
+    expect(
+      screen.getByText('The work summary the model wrote.'),
+    ).toBeTruthy()
+    expect(desktop.workSummaryRequests).toHaveLength(1)
   })
 })

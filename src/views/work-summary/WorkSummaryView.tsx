@@ -375,6 +375,16 @@ export default function WorkSummaryView({
 
           {state.state === 'ready' && (
             <>
+              {/*
+                Said while a moved range's read is still catching up: the
+                counts below are still the previous range's, and the greyed
+                Generate beside them waits for the same read.
+              */}
+              {stale && (
+                <p role="status" className="type-meta text-muted-foreground">
+                  Reading the journal…
+                </p>
+              )}
               <MaterialSummary selection={state.selection} />
 
               <div className="flex items-center gap-3">
@@ -433,20 +443,27 @@ export default function WorkSummaryView({
                 </p>
               )}
             </div>
-
-            {failure !== null && (
-              <FailureLine failure={failure} onOpenSettings={onOpenSettings} />
-            )}
-
-            {summary !== null && (
-              <section className="flex flex-col gap-2">
-                <h2 className="type-section">Written by {summary.model}</h2>
-                <div className="rounded-md border border-border bg-card px-4 py-3 whitespace-pre-wrap type-body">
-                  {summary.markdown}
-                </div>
-              </section>
-            )}
             </>
+          )}
+
+          {/*
+            Outside the read state, exactly as the date control is: paid-for
+            prose and the reason a call failed outlive whatever the current
+            read says — a range that would not read must not take them with
+            it. (Whether the prose still matches the range on screen is #240's
+            outdated marking to say; never silent loss.)
+          */}
+          {failure !== null && (
+            <FailureLine failure={failure} onOpenSettings={onOpenSettings} />
+          )}
+
+          {summary !== null && (
+            <section className="flex flex-col gap-2">
+              <h2 className="type-section">Written by {summary.model}</h2>
+              <div className="rounded-md border border-border bg-card px-4 py-3 whitespace-pre-wrap type-body">
+                {summary.markdown}
+              </div>
+            </section>
           )}
         </div>
       </main>
