@@ -1,9 +1,20 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { ChevronDownIcon, ClipboardCopyIcon, SparklesIcon } from 'lucide-react'
+import {
+  CalendarRangeIcon,
+  ChevronDownIcon,
+  ClipboardCopyIcon,
+  SparklesIcon,
+} from 'lucide-react'
 import WindowTitleBar from '@/components/WindowTitleBar'
 import { useOffScreen } from '@/components/on-screen-context'
 import { useOnScreenToast } from '@/components/on-screen-toast'
 import { Button } from '@/components/ui/button'
+import { Calendar } from '@/components/ui/calendar'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import {
   Menu,
   MenuContent,
@@ -15,9 +26,11 @@ import { Toaster } from '@/components/ui/sonner'
 import {
   formatDayRange,
   journalDayFor,
+  rangeForDays,
   rangeForPreset,
   type Clock,
   type DayRange,
+  type FilterPreset,
   type Journal,
 } from '@/journal/journal'
 import {
@@ -34,10 +47,10 @@ import type { AppSettings } from '@/settings/app-settings'
 import { workSummarySystemPrompt } from '@/settings/settings'
 
 /**
- * The prose a model writes from this week's accomplishments and the current
- * commitments, read before it is copied — and, beside Generate, the Work
- * Summary Material itself, copyable with no key, no network and no waiting
- * (see
+ * The prose a model writes from the selected period's accomplishments and the
+ * current commitments, read before it is copied — and, beside Generate, the
+ * Work Summary Material itself, copyable with no key, no network and no
+ * waiting (see
  * docs/adr/0041-work-summary-combines-a-selected-period-with-current-commitments.md).
  * The material is read by the session; the summary itself is this view's — it
  * lives as long as the Main Window that showed it, Generate again replaces
@@ -64,13 +77,15 @@ export default function WorkSummaryView({
   onOpenSettings: () => void
 }) {
   const [state, setState] = useState<WorkSummaryState>({ state: 'loading' })
-  // The settled range this section is about: the This-week preset — Monday
-  // through today — fixed once when the Main Window opens. View-owned state,
-  // since a surface holding only its own controls keeps them in React: it
-  // survives navigating to another section and back, and a closed window
-  // discards it with everything else. Later refreshes re-read the data, never
-  // the range.
-  const [range] = useState<DayRange>(() =>
+  // The range this section is about, held as the view's own control state: it
+  // opens on the This-week preset — Monday through today — and every preset
+  // or calendar pick replaces it with a concrete inclusive range that never
+  // rolls forward on its own. Owned here rather than in the session, since a
+  // surface holding only its own controls keeps them in React: it survives
+  // navigating to another section and back, and a closed window discards it
+  // with everything else. It never touches History's Filter, and History never
+  // touches it. The session only sequences the reads each choice asks for.
+  const [range, setRangeState] = useState<DayRange>(() =>
     rangeForPreset('this-week', journalDayFor(clock.now())),
   )
   const [session] = useState(() =>
@@ -142,15 +157,40 @@ export default function WorkSummaryView({
     }
   }, [session])
 
+  /**
+   * The one move that sets both ends of the date axis: the control shows the
+   * new range at once, and the session re-reads within it. Reading is not
+   * generating — no model call follows a move, an opened calendar, or a
+   * return from another section.
+   */
+  function chooseRange(next: DayRange): void {
+    setRangeState(next)
+    session.setRange(next)
+  }
+
+  /** Both ends of the date axis, in the one move that sets them. */
+  function pick(from: string, to: string): void {
+    chooseRange(rangeForDays(from, to))
+  }
+
+  /**
+   * A one-shot named range. The clock is read here and only here; nothing
+   * holds the Preset afterwards, so the picked range stays the source of
+   * truth for what is on screen.
+   */
+  function applyPreset(preset: FilterPreset): void {
+    chooseRange(rangeForPreset(preset, journalDayFor(clock.now())))
+  }
+
   function onKeyDown(event: React.KeyboardEvent<HTMLElement>): void {
     if (event.key === 'Escape') void desktop.closeWindow()
   }
 
   /**
-   * Spends the call. The material was read when the section opened; what is
-   * sent is that selection's own Digest and Tasks, so the model hears exactly
-   * what the section showed. Only a week with neither half is refused, and it
-   * is refused here, before anything could be spent.
+   * Spends the call. What is sent is the selection on screen's own Digest
+   * and Tasks, so the model hears exactly what the section showed. Only a
+   * period with neither half is refused, and it is refused here, before
+   * anything could be spent.
    */
   async function generate(): Promise<void> {
     if (state.state !== 'ready' || inFlight.current) return
@@ -269,12 +309,12 @@ export default function WorkSummaryView({
   }
 
   /**
-   * This week's material as Markdown onto the clipboard, and a confirmation
-   * naming it once there. No Model Access is read and no call is made: the
-   * Markdown is built from the selection already on screen, so this works
-   * with no key, no network and no waiting — and stays exactly as live after
-   * a summary exists, because the lossless rendering is there precisely when
-   * the prose turns out to be wrong.
+   * The selected period's material as Markdown onto the clipboard, and a
+   * confirmation naming it once there. No Model Access is read and no call is
+   * made: the Markdown is built from the selection already on screen, so this
+   * works with no key, no network and no waiting — and stays exactly as live
+   * after a summary exists, because the lossless rendering is there precisely
+   * when the prose turns out to be wrong.
    */
   async function copyMaterial(): Promise<void> {
     if (state.state !== 'ready') return
@@ -303,9 +343,9 @@ export default function WorkSummaryView({
       <header className="shrink-0 px-6 py-4">
         <h1 className="type-section">Work Summary</h1>
         <p className="pt-1 type-meta text-muted-foreground">
-          Prose a model writes from this week&apos;s accomplishments and your
-          current commitments, for you to read and then use — or the
-          week&apos;s material as Markdown, with no key, no network and no
+          Prose a model writes from the selected period&apos;s accomplishments
+          and your current commitments, for you to read and then use — or the
+          period&apos;s material as Markdown, with no key, no network and no
           waiting.
         </p>
       </header>
@@ -319,12 +359,17 @@ export default function WorkSummaryView({
 
         {state.state === 'unreadable' && (
           <p role="alert" className="type-meta text-destructive">
-            This week could not be read.
+            The selected period could not be read.
           </p>
         )}
 
         {state.state === 'ready' && (
           <div className="flex max-w-xl flex-col gap-6">
+            <DayRangeField
+              range={range}
+              onPick={pick}
+              onChoosePreset={applyPreset}
+            />
             <MaterialSummary selection={state.selection} />
 
             <div className="flex items-center gap-3">
@@ -340,16 +385,16 @@ export default function WorkSummaryView({
               </Button>
 
               {/*
-                The one copy control: this week's notes and tasks as Markdown
-                — what the user pastes when there is no Model Access, the
-                endpoint is down, or the prose came back wrong — and, once
+                The one copy control: the selected period's notes and tasks as
+                Markdown — what the user pastes when there is no Model Access,
+                the endpoint is down, or the prose came back wrong — and, once
                 generated, the summary itself in the menu. A split button
                 rather than two: copying is a default with an escape hatch
                 rather than a decision every time. The primary is always the
                 material: the copy that works with no key, no network and no
                 waiting, so the button never changes identity under the
                 reader. Refused under the same gate as Generate, which is a
-                week with nothing in either half, not anything about the
+                period with nothing in either half, not anything about the
                 model.
               */}
               <CopySplit
@@ -404,11 +449,11 @@ export default function WorkSummaryView({
 }
 
 /**
- * What the section is about to send: this week's range and the counts for
- * both halves. Always on screen, so the user sees what a call would spend
- * before spending it — and a week with neither half says so here, which is
- * what makes the Generate button's refusal read as an explanation rather than
- * a mystery.
+ * What the section is about to send: the counts for both halves — the range
+ * itself reads on the date control above, so it is not repeated here. Always
+ * on screen, so the user sees what a call would spend before spending it —
+ * and a period with neither half says so here, which is what makes the
+ * Generate button's refusal read as an explanation rather than a mystery.
  *
  * Task Occurrences completed in the range are counted on their own line
  * rather than folded into Completed Tasks: a Task Occurrence is not a
@@ -418,16 +463,12 @@ export default function WorkSummaryView({
 function MaterialSummary({ selection }: { selection: WorkSummarySelection }) {
   return (
     <div className="flex flex-col gap-6">
-      <p className="type-meta text-muted-foreground">
-        {`This week: ${formatDayRange(selection.from, selection.to)}`}
-      </p>
-
       <section
         aria-labelledby="work-summary-accomplishments-heading"
         className="flex flex-col gap-2"
       >
         <h2 id="work-summary-accomplishments-heading" className="type-section">
-          This week
+          Selected period
         </h2>
         <p className="type-meta text-muted-foreground">
           {count(selection.digest.noteCount, 'Note')}
@@ -457,6 +498,118 @@ function MaterialSummary({ selection }: { selection: WorkSummarySelection }) {
       )}
     </div>
   )
+}
+
+const PRESET_OPTIONS: ReadonlyArray<{ value: FilterPreset; label: string }> = [
+  { value: 'today', label: 'Today' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: 'this-week', label: 'This week' },
+  { value: 'last-week', label: 'Last week' },
+  { value: 'this-month', label: 'This month' },
+  { value: 'last-month', label: 'Last month' },
+]
+
+/**
+ * The section's date axis, whole: a button that reads the range in words, and
+ * one popup holding both ways to change it — a named range, or two ends on a
+ * calendar. One concept, one control, and the same presets and calendar
+ * behavior as History's — but no Project filter, and its own range that
+ * History never sees.
+ *
+ * A day is picked in one click and is a whole day when it lands, which is why
+ * nothing here holds a half-typed value.
+ */
+function DayRangeField({
+  range,
+  onPick,
+  onChoosePreset,
+}: {
+  range: DayRange
+  onPick: (from: string, to: string) => void
+  onChoosePreset: (preset: FilterPreset) => void
+}) {
+  const [open, setOpen] = useState(false)
+  // The first end of a range being picked, while the second is still to come.
+  // Null whenever the calendar is showing the range rather than a new one.
+  const [started, setStarted] = useState<Date | null>(null)
+
+  function show(next: boolean) {
+    setOpen(next)
+    if (!next) setStarted(null)
+  }
+
+  // The popup is portalled out of the section, so it has to be closed rather
+  // than hidden when this view leaves the screen. The range it would have
+  // moved is untouched; only a half-picked range goes with it.
+  useOffScreen(() => show(false))
+
+  function pickDay(day: Date) {
+    if (started === null) {
+      setStarted(day)
+      return
+    }
+
+    // Whichever end was clicked first: the core orders the range.
+    onPick(journalDayFor(started), journalDayFor(day))
+    show(false)
+  }
+
+  return (
+    <Popover open={open} onOpenChange={show}>
+      <PopoverTrigger render={<Button variant="outline" size="sm" />}>
+        <CalendarRangeIcon data-icon="inline-start" />
+        {/*
+          Named and read at once: a label that replaced the button's text
+          would announce "Days" and keep the range — the whole point of the
+          control — to itself.
+        */}
+        <span className="sr-only">Days</span>{' '}
+        {formatDayRange(range.from, range.to)}
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-auto gap-2 p-2">
+        <div className="grid grid-cols-3 gap-1">
+          {PRESET_OPTIONS.map((option) => (
+            <Button
+              key={option.value}
+              variant="ghost"
+              size="sm"
+              className="justify-start"
+              onClick={() => {
+                onChoosePreset(option.value)
+                show(false)
+              }}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+        <Calendar
+          mode="range"
+          autoFocus
+          // Monday, as every Preset's week is — see ADR-0006.
+          weekStartsOn={1}
+          defaultMonth={dayAsDate(range.to)}
+          selected={
+            started === null
+              ? { from: dayAsDate(range.from), to: dayAsDate(range.to) }
+              : { from: started, to: undefined }
+          }
+          onSelect={(_range, day) => pickDay(day)}
+          className="p-0"
+        />
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+/**
+ * A Journal Day as the calendar's own kind of value. A `YYYY-MM-DD` label is a
+ * civil day rather than an instant, and `journalDayFor` reads a local one back
+ * out, so it is built as the local midnight of the day it names.
+ */
+function dayAsDate(journalDay: string): Date {
+  const [year, month, day] = journalDay.split('-').map(Number)
+  return new Date(year, month - 1, day)
 }
 
 /**
@@ -523,8 +676,8 @@ function count(value: number, noun: string): string {
 }
 
 /**
- * The section's one copy control: a split button whose primary is always
- * this week's material — the copy that works with no key, no network
+ * The section's one copy control: a split button whose primary is always the
+ * selected period's material — the copy that works with no key, no network
  * and no waiting — and whose chevron menu holds the summary once one exists.
  * One visible button rather than two copy buttons on one screen, and one
  * whose identity never changes under the reader.
@@ -614,7 +767,7 @@ type Subject = 'summary' | 'material'
  * confirmation says what that word covers — "material" alone reads as
  * nothing the user would recognize.
  */
-const MATERIAL = "this week's notes and tasks" as const
+const MATERIAL = 'the selected notes and tasks' as const
 
 /** The one sentence a landed copy says, wherever it says it. */
 function landed(subject: Subject): string {
