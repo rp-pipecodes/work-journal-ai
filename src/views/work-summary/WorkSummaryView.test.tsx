@@ -1320,8 +1320,7 @@ describe('Work Summary section', () => {
     expect(desktop.workSummaryRequests).toEqual([])
   })
 
-  it('refuses an empty selected period without spending a call', async () => {
-    const user = userEvent.setup()
+  it('refuses an empty selected period without spending a call', async () => {    const user = userEvent.setup()
     const { journal, clock, desktop, settings } = await workSummaryAt()
 
     renderWorkSummary({ journal, clock, desktop, settings })
@@ -1349,7 +1348,8 @@ describe('Work Summary section', () => {
     expect(desktop.clipboard).toBeNull()
   })
 
-  it('opens a fresh This week when the window is recreated', async () => {    const user = userEvent.setup()
+  it('opens a fresh This week when the window is recreated', async () => {
+    const user = userEvent.setup()
     const { journal, clock, desktop, settings } = await workSummaryAt()
     await journalWithBothHalves(journal, clock)
 
@@ -1367,5 +1367,128 @@ describe('Work Summary section', () => {
       (await screen.findByRole('button', { name: /^Days / })).textContent,
     ).toContain(formatDayRange('2026-03-09', '2026-03-12'))
     expect(await screen.findByText('2 Notes')).toBeTruthy()
+  })
+
+  it('disables Generate and Copy material between a range move and its read landing', async () => {
+    const user = userEvent.setup()
+    const { journal, clock, desktop, settings } = await workSummaryAt()
+    await journalWithBothHalves(journal, clock)
+
+    // Holds whichever digest read is asked for next, so the move's read can
+    // be kept in flight while the control already reads the new range.
+    let releaseHeld!: () => void
+    const held = new Promise<void>((resolve) => {
+      releaseHeld = resolve
+    })
+    let holdNextDigest = false
+    const gated = {
+      ...journal,
+      digest: async (filter: { from: string; to: string }) => {
+        if (holdNextDigest) {
+          holdNextDigest = false
+          await held
+        }
+        return journal.digest(filter)
+      },
+    }
+
+    renderWorkSummary({ journal: gated, clock, desktop, settings })
+    expect(await screen.findByText('2 Notes')).toBeTruthy()
+
+    holdNextDigest = true
+    await user.click(screen.getByRole('button', { name: /^Days / }))
+    await user.click(await screen.findByRole('button', { name: 'Last week' }))
+
+    // The control moved at once while the selection is still the old one —
+    // and while it is, neither spending nor copying may go through on the
+    // previous period.
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /^Days / }).textContent,
+      ).toContain(formatDayRange('2026-03-02', '2026-03-08'))
+    })
+    expect(screen.getByText('2 Notes')).toBeTruthy()
+    expect(
+      (screen.getByRole('button', { name: 'Generate' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true)
+    expect(
+      (screen.getByRole('button', { name: 'Copy material' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true)
+    expect(desktop.workSummaryRequests).toEqual([])
+
+    releaseHeld()
+    expect(await screen.findByText('0 Notes')).toBeTruthy()
+    expect(
+      (screen.getByRole('button', { name: 'Generate' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false)
+  })
+
+  it('keeps the date control on screen while the journal is still reading', async () => {
+    const user = userEvent.setup()
+    const { clock, desktop, settings } = await workSummaryAt()
+
+    render(
+      <WorkSummaryView
+        desktop={desktop}
+        settings={settings}
+        journal={new Promise<Journal>(() => {})}
+        clock={clock}
+        onOpenSettings={() => undefined}
+      />,
+    )
+
+    // No read has landed, but the days can already be moved: the control is
+    // not behind the read.
+    expect(
+      (await screen.findByRole('button', { name: /^Days / })).textContent,
+    ).toContain(formatDayRange('2026-03-09', '2026-03-12'))
+    expect(await screen.findByText('Reading the journal…')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: /^Days / }))
+    await user.click(await screen.findByRole('button', { name: 'Yesterday' }))
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /^Days / }).textContent,
+      ).toContain(formatDayRange('2026-03-11', '2026-03-11'))
+    })
+  })
+
+  it('keeps the date control on screen when the range would not read', async () => {
+    const user = userEvent.setup()
+    const { clock, desktop, settings } = await workSummaryAt()
+    const unreadable = {
+      digest: async () => {
+        throw new Error('the journal would not open')
+      },
+      completedTasks: async () => [],
+      occurrencesKeptIn: async () => [],
+      openTasks: async () => [],
+    } as unknown as Journal
+
+    renderWorkSummary({ journal: unreadable, clock, desktop, settings })
+    expect(
+      await screen.findByText('The selected period could not be read.'),
+    ).toBeTruthy()
+
+    // The failed range can be left: the control stays, and moving it reads
+    // again rather than stranding the section.
+    const days = await screen.findByRole('button', { name: /^Days / })
+    expect(days.textContent).toContain(
+      formatDayRange('2026-03-09', '2026-03-12'),
+    )
+    await user.click(days)
+    await user.click(await screen.findByRole('button', { name: 'Yesterday' }))
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /^Days / }).textContent,
+      ).toContain(formatDayRange('2026-03-11', '2026-03-11'))
+    })
+    expect(
+      await screen.findByText('The selected period could not be read.'),
+    ).toBeTruthy()
+    expect(desktop.workSummaryRequests).toEqual([])
   })
 })

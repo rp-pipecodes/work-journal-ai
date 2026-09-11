@@ -1,20 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import {
-  CalendarRangeIcon,
-  ChevronDownIcon,
-  ClipboardCopyIcon,
-  SparklesIcon,
-} from 'lucide-react'
+import { ChevronDownIcon, ClipboardCopyIcon, SparklesIcon } from 'lucide-react'
 import WindowTitleBar from '@/components/WindowTitleBar'
+import DayRangeField from '@/components/DayRangeField'
 import { useOffScreen } from '@/components/on-screen-context'
 import { useOnScreenToast } from '@/components/on-screen-toast'
 import { Button } from '@/components/ui/button'
-import { Calendar } from '@/components/ui/calendar'
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
 import {
   Menu,
   MenuContent,
@@ -24,7 +14,6 @@ import {
 } from '@/components/ui/menu'
 import { Toaster } from '@/components/ui/sonner'
 import {
-  formatDayRange,
   journalDayFor,
   rangeForDays,
   rangeForPreset,
@@ -132,6 +121,13 @@ export default function WorkSummaryView({
       : null
   const copySaid =
     copyLive !== null ? said(copyLive.subject, copyLive.count) : ''
+  // Between a range move and its read landing, the control already reads the
+  // new range while the selection on screen is still the old one. Spending or
+  // copying then would spend the previous period, so both wait for the read:
+  // the selection carries its own ends, which is what catches the move up.
+  const stale =
+    state.state === 'ready' &&
+    (state.selection.from !== range.from || state.selection.to !== range.to)
   // The model being asked, while a call is in flight. Naming it is the whole
   // point: ten silent seconds read as broken without it.
   const [pending, setPending] = useState<string | null>(null)
@@ -351,38 +347,49 @@ export default function WorkSummaryView({
       </header>
 
       <main className="flex-1 overflow-y-auto px-6 pb-5">
-        {state.state === 'loading' && (
-          <p role="status" className="type-meta text-muted-foreground">
-            Reading the journal…
-          </p>
-        )}
-
-        {state.state === 'unreadable' && (
-          <p role="alert" className="type-meta text-destructive">
-            The selected period could not be read.
-          </p>
-        )}
-
-        {state.state === 'ready' && (
-          <div className="flex max-w-xl flex-col gap-6">
+        <div className="flex max-w-xl flex-col gap-6">
+          {/*
+            Above the read state, not inside it: a range that would not read
+            is still a range the reader can leave, and a window still reading
+            is still one whose days can be moved.
+          */}
+          <div>
             <DayRangeField
               range={range}
               onPick={pick}
               onChoosePreset={applyPreset}
             />
-            <MaterialSummary selection={state.selection} />
+          </div>
 
-            <div className="flex items-center gap-3">
-              <Button
-                size="sm"
-                onClick={() => void generate()}
-                disabled={
-                  pending !== null || workSummaryRefuses(state.selection)
-                }
-              >
-                <SparklesIcon data-icon="inline-start" />
-                Generate
-              </Button>
+          {state.state === 'loading' && (
+            <p role="status" className="type-meta text-muted-foreground">
+              Reading the journal…
+            </p>
+          )}
+
+          {state.state === 'unreadable' && (
+            <p role="alert" className="type-meta text-destructive">
+              The selected period could not be read.
+            </p>
+          )}
+
+          {state.state === 'ready' && (
+            <>
+              <MaterialSummary selection={state.selection} />
+
+              <div className="flex items-center gap-3">
+                <Button
+                  size="sm"
+                  onClick={() => void generate()}
+                  disabled={
+                    pending !== null ||
+                    stale ||
+                    workSummaryRefuses(state.selection)
+                  }
+                >
+                  <SparklesIcon data-icon="inline-start" />
+                  Generate
+                </Button>
 
               {/*
                 The one copy control: the selected period's notes and tasks as
@@ -399,7 +406,7 @@ export default function WorkSummaryView({
               */}
               <CopySplit
                 summaryExists={summary !== null}
-                materialRefused={workSummaryRefuses(state.selection)}
+                materialRefused={stale || workSummaryRefuses(state.selection)}
                 open={copyMenuOpen}
                 onOpenChange={setCopyMenuOpen}
                 onCopyMaterial={() => void copyMaterial()}
@@ -439,8 +446,9 @@ export default function WorkSummaryView({
                 </div>
               </section>
             )}
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </main>
 
       <Toaster />
@@ -498,118 +506,6 @@ function MaterialSummary({ selection }: { selection: WorkSummarySelection }) {
       )}
     </div>
   )
-}
-
-const PRESET_OPTIONS: ReadonlyArray<{ value: FilterPreset; label: string }> = [
-  { value: 'today', label: 'Today' },
-  { value: 'yesterday', label: 'Yesterday' },
-  { value: 'this-week', label: 'This week' },
-  { value: 'last-week', label: 'Last week' },
-  { value: 'this-month', label: 'This month' },
-  { value: 'last-month', label: 'Last month' },
-]
-
-/**
- * The section's date axis, whole: a button that reads the range in words, and
- * one popup holding both ways to change it — a named range, or two ends on a
- * calendar. One concept, one control, and the same presets and calendar
- * behavior as History's — but no Project filter, and its own range that
- * History never sees.
- *
- * A day is picked in one click and is a whole day when it lands, which is why
- * nothing here holds a half-typed value.
- */
-function DayRangeField({
-  range,
-  onPick,
-  onChoosePreset,
-}: {
-  range: DayRange
-  onPick: (from: string, to: string) => void
-  onChoosePreset: (preset: FilterPreset) => void
-}) {
-  const [open, setOpen] = useState(false)
-  // The first end of a range being picked, while the second is still to come.
-  // Null whenever the calendar is showing the range rather than a new one.
-  const [started, setStarted] = useState<Date | null>(null)
-
-  function show(next: boolean) {
-    setOpen(next)
-    if (!next) setStarted(null)
-  }
-
-  // The popup is portalled out of the section, so it has to be closed rather
-  // than hidden when this view leaves the screen. The range it would have
-  // moved is untouched; only a half-picked range goes with it.
-  useOffScreen(() => show(false))
-
-  function pickDay(day: Date) {
-    if (started === null) {
-      setStarted(day)
-      return
-    }
-
-    // Whichever end was clicked first: the core orders the range.
-    onPick(journalDayFor(started), journalDayFor(day))
-    show(false)
-  }
-
-  return (
-    <Popover open={open} onOpenChange={show}>
-      <PopoverTrigger render={<Button variant="outline" size="sm" />}>
-        <CalendarRangeIcon data-icon="inline-start" />
-        {/*
-          Named and read at once: a label that replaced the button's text
-          would announce "Days" and keep the range — the whole point of the
-          control — to itself.
-        */}
-        <span className="sr-only">Days</span>{' '}
-        {formatDayRange(range.from, range.to)}
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-auto gap-2 p-2">
-        <div className="grid grid-cols-3 gap-1">
-          {PRESET_OPTIONS.map((option) => (
-            <Button
-              key={option.value}
-              variant="ghost"
-              size="sm"
-              className="justify-start"
-              onClick={() => {
-                onChoosePreset(option.value)
-                show(false)
-              }}
-            >
-              {option.label}
-            </Button>
-          ))}
-        </div>
-        <Calendar
-          mode="range"
-          autoFocus
-          // Monday, as every Preset's week is — see ADR-0006.
-          weekStartsOn={1}
-          defaultMonth={dayAsDate(range.to)}
-          selected={
-            started === null
-              ? { from: dayAsDate(range.from), to: dayAsDate(range.to) }
-              : { from: started, to: undefined }
-          }
-          onSelect={(_range, day) => pickDay(day)}
-          className="p-0"
-        />
-      </PopoverContent>
-    </Popover>
-  )
-}
-
-/**
- * A Journal Day as the calendar's own kind of value. A `YYYY-MM-DD` label is a
- * civil day rather than an instant, and `journalDayFor` reads a local one back
- * out, so it is built as the local midnight of the day it names.
- */
-function dayAsDate(journalDay: string): Date {
-  const [year, month, day] = journalDay.split('-').map(Number)
-  return new Date(year, month - 1, day)
 }
 
 /**
